@@ -1,0 +1,863 @@
+/**
+ * Dispositivos: localStorage por usuario + opcional sincronización Supabase (ESP → Edge Function → DB).
+ * El token del dispositivo se genera al crear; el técnico lo copia a WiFiManager del ESP.
+ */
+
+import { Injectable, NgZone } from '@angular/core';
+import { BehaviorSubject } from 'rxjs';
+import { environment } from '../../environments/environment';
+import { AuthService } from './auth.service';
+import { ingestFunctionUrl, isSupabaseConfigured } from './supabase-config';
+import { DashboardDevice, TemperatureReading } from './models/dashboard.models';
+
+const STORAGE_KEY_PREFIX = 'sg-monitor-devices-v2';
+const READINGS_KEY_PREFIX = 'sg-monitor-readings-v2';
+const TOKEN_MAP_PREFIX = 'sg-monitor-device-tokens-v2';
+const MAX_READINGS = 1500;
+const DEFAULT_SENSOR_1_LABEL = 'Sensor 1';
+const DEFAULT_SENSOR_2_LABEL = 'Sensor 2';
+
+export const DASHBOARD_SAMPLE_DEVICES: DashboardDevice[] = [
+  {
+    id: 'XYZ1234',
+    name: 'Refrigerador #1',
+    location: 'Bodega Frigorífica',
+    temperatureC: 3.4,
+    temperature2C: 3.1,
+    online: true,
+    updatedAtLabel: 'Hace 5 min',
+    batteryPct: 88,
+    sensor1Label: 'Evaporador',
+    sensor2Label: 'Condensador',
+  },
+  {
+    id: 'ABC9876',
+    name: 'Cámara Frigorífica',
+    location: 'Laboratorio Central',
+    temperatureC: 2.1,
+    temperature2C: 2.4,
+    online: true,
+    updatedAtLabel: 'Hace 12 min',
+    batteryPct: 72,
+    sensor1Label: 'Sensor A',
+    sensor2Label: 'Sensor B',
+  },
+  {
+    id: 'LMN5555',
+    name: 'Espacio Bodega',
+    location: 'Depósito Sur',
+    temperatureC: 4.2,
+    online: true,
+    updatedAtLabel: 'Hace 1 h',
+    batteryPct: 65,
+    sensor1Label: 'Sensor 1',
+    sensor2Label: 'Sensor 2',
+  },
+];
+
+export interface NewDeviceInput {
+  name: string;
+  location: string;
+  moduleId: string;
+  espLocalIp: string;
+}
+
+export interface DeviceNotificationConfigInput {
+  alertsEnabled: boolean;
+  tempLowC: number | null;
+  tempHighC: number | null;
+}
+
+export interface TelemetryInput {
+  deviceId: string;
+  temp1C: number;
+  temp2C?: number | null;
+  temp3C?: number | null;
+  powerW?: number | null;
+  press1Bar?: number | null;
+  press2Bar?: number | null;
+  at?: string;
+}
+
+export type AddDeviceResult =
+  | {
+      ok: true;
+      id: string;
+      credentials?: { moduleId: string; deviceToken: string; ingestUrl: string };
+    }
+  | { ok: false; error: string };
+
+@Injectable({
+  providedIn: 'root',
+})
+export class DeviceStoreService {
+  private userScopeKey = 'anon';
+  private readonly subject = new BehaviorSubject<DashboardDevice[]>([]);
+  private readonly readingsSubject = new BehaviorSubject<TemperatureReading[]>([]);
+  private pollHandle: ReturnType<typeof setInterval> | null = null;
+
+  readonly devices$ = this.subject.asObservable();
+  readonly readings$ = this.readingsSubject.asObservable();
+
+  constructor(
+    private readonly auth: AuthService,
+    private readonly ngZone: NgZone
+  ) {
+    void this.bootstrapScope();
+    this.auth.client.auth.onAuthStateChange((_event, session) => {
+      const nextScope = session?.user.id ?? 'anon';
+      this.setScope(nextScope);
+    });
+  }
+
+  get snapshot(): DashboardDevice[] {
+    return this.subject.value;
+  }
+
+  get readingsSnapshot(): TemperatureReading[] {
+    return this.readingsSubject.value;
+  }
+
+  /** True si hay sesión y está activa la sync con Supabase. */
+  isUsingCloudSync(): boolean {
+    return this.isCloudSyncEnabled();
+  }
+
+  /** Revalida el scope usando la sesión actual (útil al abrir una pestaña nueva). */
+  refreshScopeFromSession(): void {
+    void this.bootstrapScope();
+  }
+
+  /** Fuerza una actualización inmediata de lecturas desde la nube. */
+  forceRefreshCloudReadings(): void {
+    if (!this.isCloudSyncEnabled()) return;
+    void this.refreshReadingsFromCloud();
+  }
+
+  /** URL del endpoint que debe usar el ESP en WiFiManager (`api_url`). */
+  getIngestUrl(): string {
+    return ingestFunctionUrl();
+  }
+
+  async addDeviceFromFormAsync(input: NewDeviceInput): Promise<AddDeviceResult> {
+    const name = input.name.trim();
+    const location = input.location.trim() || 'Sin ubicación';
+    let moduleId = input.moduleId.trim();
+    const espLocalIp = input.espLocalIp.trim();
+
+    const session = await this.auth.getSession();
+    if (this.isCloudSyncEnabled() && session?.user.id) {
+      if (!moduleId) {
+        moduleId = this.randomModuleId();
+        let tries = 0;
+        while ((await this.moduleExistsInSupabase(moduleId)) && tries < 8) {
+          moduleId = this.randomModuleId();
+          tries += 1;
+        }
+        if (await this.moduleExistsInSupabase(moduleId)) {
+          return { ok: false, error: 'No se pudo generar un ID módulo único. Intentá de nuevo.' };
+        }
+      }
+
+      const deviceToken = await this.randomDeviceTokenAsync();
+      const { data, error } = await this.auth.client
+        .from('devices')
+        .insert({
+          owner_user_id: session.user.id,
+          module_id: moduleId,
+          name,
+          location,
+          device_token_hash: deviceToken,
+          active: true,
+          sensor_1_label: DEFAULT_SENSOR_1_LABEL,
+          sensor_2_label: DEFAULT_SENSOR_2_LABEL,
+        })
+        .select('id')
+        .single();
+
+      if (error || !data) {
+        const msg = error?.message ?? 'No se pudo crear el dispositivo';
+        if (msg.includes('duplicate') || msg.includes('unique')) {
+          return { ok: false, error: 'Ese ID módulo ya existe. Elegí otro o dejalo vacío para generar uno.' };
+        }
+        return { ok: false, error: msg };
+      }
+
+      const id = data.id as string;
+      void this.auth.client.from('device_thresholds').insert({
+        device_id: id,
+        notifications_enabled: true,
+        temp1_min_c: 2,
+        temp1_max_c: 8,
+        power_max_w: 350,
+        press1_min_bar: 1.8,
+        press1_max_bar: 2.8,
+        press2_min_bar: 1.8,
+        press2_max_bar: 2.8,
+      });
+
+      this.saveDeviceToken(id, deviceToken);
+
+      const device: DashboardDevice = {
+        id,
+        name,
+        location,
+        temperatureC: null,
+        temperature2C: null,
+        online: false,
+        updatedAtLabel: 'Esperando dispositivo',
+        batteryPct: null,
+        moduleId,
+        espLocalIp: espLocalIp || undefined,
+        alertsEnabled: true,
+        tempLowC: 2,
+        tempHighC: 8,
+        cloudSynced: true,
+        deviceToken,
+        sensor1Label: DEFAULT_SENSOR_1_LABEL,
+        sensor2Label: DEFAULT_SENSOR_2_LABEL,
+      };
+
+      this.persistDevices([...this.snapshot.filter((d) => d.id !== id), device]);
+      return {
+        ok: true,
+        id,
+        credentials: {
+          moduleId,
+          deviceToken,
+          ingestUrl: ingestFunctionUrl(),
+        },
+      };
+    }
+
+    const id = this.addDeviceFromFormLocal(name, location, moduleId, espLocalIp);
+    return { ok: true, id };
+  }
+
+  private normalize(raw: unknown): DashboardDevice | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const d = raw as Record<string, unknown>;
+    const id = d['id'];
+    const name = d['name'];
+    if (typeof id !== 'string' || typeof name !== 'string') return null;
+    const t = d['temperatureC'];
+    const t2 = d['temperature2C'];
+    return {
+      id,
+      name,
+      location: typeof d['location'] === 'string' ? d['location'] : '',
+      temperatureC: typeof t === 'number' && !Number.isNaN(t) ? t : null,
+      temperature2C:
+        typeof t2 === 'number' && !Number.isNaN(t2) ? t2 : t2 === null ? null : undefined,
+      online: Boolean(d['online']),
+      updatedAtLabel:
+        typeof d['updatedAtLabel'] === 'string' ? d['updatedAtLabel'] : '—',
+      batteryPct:
+        typeof d['batteryPct'] === 'number' && !Number.isNaN(d['batteryPct'])
+          ? d['batteryPct']
+          : null,
+      moduleId: typeof d['moduleId'] === 'string' ? d['moduleId'] : undefined,
+      espLocalIp: typeof d['espLocalIp'] === 'string' ? d['espLocalIp'] : undefined,
+      alertsEnabled: typeof d['alertsEnabled'] === 'boolean' ? d['alertsEnabled'] : true,
+      tempLowC:
+        typeof d['tempLowC'] === 'number' && !Number.isNaN(d['tempLowC']) ? d['tempLowC'] : 2,
+      tempHighC:
+        typeof d['tempHighC'] === 'number' && !Number.isNaN(d['tempHighC']) ? d['tempHighC'] : 8,
+      cloudSynced: typeof d['cloudSynced'] === 'boolean' ? d['cloudSynced'] : undefined,
+      deviceToken: typeof d['deviceToken'] === 'string' ? d['deviceToken'] : undefined,
+      sensor1Label:
+        typeof d['sensor1Label'] === 'string' && d['sensor1Label'].trim()
+          ? (d['sensor1Label'] as string).trim()
+          : undefined,
+      sensor2Label:
+        typeof d['sensor2Label'] === 'string' && d['sensor2Label'].trim()
+          ? (d['sensor2Label'] as string).trim()
+          : undefined,
+    };
+  }
+
+  private readFromStorage(): DashboardDevice[] {
+    try {
+      const raw = localStorage.getItem(this.devicesStorageKey());
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as unknown[];
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((x) => this.normalize(x))
+        .filter((x): x is DashboardDevice => x != null);
+    } catch {
+      return [];
+    }
+  }
+
+  private readReadingsFromStorage(): TemperatureReading[] {
+    try {
+      const raw = localStorage.getItem(this.readingsStorageKey());
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as unknown[];
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((x) => {
+          if (!x || typeof x !== 'object') return null;
+          const r = x as Record<string, unknown>;
+          if (
+            typeof r['deviceId'] !== 'string' ||
+            typeof r['at'] !== 'string' ||
+            typeof r['temperatureC'] !== 'number'
+          ) {
+            return null;
+          }
+          return {
+            deviceId: r['deviceId'],
+            at: r['at'],
+            temperatureC: r['temperatureC'],
+            temp2C:
+              typeof r['temp2C'] === 'number' && !Number.isNaN(r['temp2C']) ? r['temp2C'] : null,
+            temp3C:
+              typeof r['temp3C'] === 'number' && !Number.isNaN(r['temp3C']) ? r['temp3C'] : null,
+            powerW:
+              typeof r['powerW'] === 'number' && !Number.isNaN(r['powerW']) ? r['powerW'] : null,
+            press1Bar:
+              typeof r['press1Bar'] === 'number' && !Number.isNaN(r['press1Bar'])
+                ? r['press1Bar']
+                : null,
+            press2Bar:
+              typeof r['press2Bar'] === 'number' && !Number.isNaN(r['press2Bar'])
+                ? r['press2Bar']
+                : null,
+          } as TemperatureReading;
+        })
+        .filter((x): x is TemperatureReading => x != null);
+    } catch {
+      return [];
+    }
+  }
+
+  private persistDevices(list: DashboardDevice[]): void {
+    localStorage.setItem(this.devicesStorageKey(), JSON.stringify(list));
+    // Supabase/fetch suele resolver fuera de la zona de Angular: sin esto la UI no refresca sola.
+    this.ngZone.run(() => this.subject.next(list));
+  }
+
+  private persistReadings(list: TemperatureReading[]): void {
+    const trimmed = list.slice(-MAX_READINGS);
+    localStorage.setItem(this.readingsStorageKey(), JSON.stringify(trimmed));
+    this.ngZone.run(() => this.readingsSubject.next(trimmed));
+  }
+
+  private devicesStorageKey(): string {
+    return `${STORAGE_KEY_PREFIX}:${this.userScopeKey}`;
+  }
+
+  private readingsStorageKey(): string {
+    return `${READINGS_KEY_PREFIX}:${this.userScopeKey}`;
+  }
+
+  private tokensStorageKey(): string {
+    return `${TOKEN_MAP_PREFIX}:${this.userScopeKey}`;
+  }
+
+  private readTokenMap(): Record<string, string> {
+    try {
+      const raw = localStorage.getItem(this.tokensStorageKey());
+      if (!raw) return {};
+      const o = JSON.parse(raw) as unknown;
+      if (!o || typeof o !== 'object') return {};
+      return o as Record<string, string>;
+    } catch {
+      return {};
+    }
+  }
+
+  private saveDeviceToken(deviceId: string, token: string): void {
+    const m = this.readTokenMap();
+    m[deviceId] = token;
+    localStorage.setItem(this.tokensStorageKey(), JSON.stringify(m));
+  }
+
+  private removeDeviceToken(deviceId: string): void {
+    const m = this.readTokenMap();
+    delete m[deviceId];
+    localStorage.setItem(this.tokensStorageKey(), JSON.stringify(m));
+  }
+
+  private async bootstrapScope(): Promise<void> {
+    let session = await this.auth.getSession();
+    if (!session) {
+      // En pestaña nueva, Supabase puede tardar en restaurar token de sesión.
+      for (let i = 0; i < 12 && !session; i++) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+        session = await this.auth.getSession();
+      }
+    }
+    this.setScope(session?.user.id ?? 'anon');
+  }
+
+  private setScope(scope: string): void {
+    this.userScopeKey = scope || 'anon';
+    this.subject.next(this.readFromStorage());
+    this.readingsSubject.next(this.readReadingsFromStorage());
+    if (this.pollHandle != null) {
+      clearInterval(this.pollHandle);
+      this.pollHandle = null;
+    }
+    if (this.isCloudSyncEnabled()) {
+      void this.hydrateFromCloud();
+      const pollMs =
+        typeof environment.readingsPollIntervalMs === 'number' &&
+        environment.readingsPollIntervalMs >= 2000
+          ? environment.readingsPollIntervalMs
+          : 4000;
+      this.pollHandle = setInterval(() => {
+        void this.refreshReadingsFromCloud();
+      }, pollMs);
+    }
+  }
+
+  private isCloudSyncEnabled(): boolean {
+    return (
+      environment.deviceCloudSync === true &&
+      isSupabaseConfigured() &&
+      this.userScopeKey !== 'anon'
+    );
+  }
+
+  private isUuid(id: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id
+    );
+  }
+
+  private randomHex(byteLen: number): string {
+    const arr = new Uint8Array(byteLen);
+    crypto.getRandomValues(arr);
+    return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  private randomModuleId(): string {
+    return `MOD-${this.randomHex(4)}`;
+  }
+
+  /** Código numérico de 6 dígitos para cargar en el ESP (WiFiManager: api_key). */
+  private randomSixDigitToken(): string {
+    const a = new Uint8Array(6);
+    crypto.getRandomValues(a);
+    let s = '';
+    for (let i = 0; i < 6; i++) s += String(a[i] % 10);
+    return s;
+  }
+
+  private async deviceTokenInUseInCloud(token: string): Promise<boolean> {
+    const { data } = await this.auth.client
+      .from('devices')
+      .select('id')
+      .eq('device_token_hash', token)
+      .maybeSingle();
+    return data != null;
+  }
+
+  private async randomDeviceTokenAsync(): Promise<string> {
+    for (let i = 0; i < 40; i++) {
+      const t = this.randomSixDigitToken();
+      if (!(await this.deviceTokenInUseInCloud(t))) return t;
+    }
+    return this.randomSixDigitToken();
+  }
+
+  private async moduleExistsInSupabase(moduleId: string): Promise<boolean> {
+    const { data } = await this.auth.client
+      .from('devices')
+      .select('id')
+      .eq('module_id', moduleId)
+      .maybeSingle();
+    return data != null;
+  }
+
+  private formatUpdatedLabel(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString('es-AR', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '—';
+    }
+  }
+
+  private async hydrateFromCloud(): Promise<void> {
+    if (!this.isCloudSyncEnabled()) return;
+    const session = await this.auth.getSession();
+    if (!session?.user.id) return;
+
+    const { data, error } = await this.auth.client
+      .from('devices')
+      .select(
+        'id, module_id, name, location, active, updated_at, sensor_1_label, sensor_2_label'
+      )
+      .eq('owner_user_id', session.user.id)
+      .order('created_at', { ascending: true });
+
+    if (error || !data) {
+      console.warn('Supabase devices:', error?.message);
+      return;
+    }
+
+    const tokens = this.readTokenMap();
+    const prevById = new Map(this.snapshot.map((d) => [d.id, d]));
+    const cloudDevices: DashboardDevice[] = data.map((row) => {
+      const rid = row.id as string;
+      const prev = prevById.get(rid);
+      const s1 = row.sensor_1_label as string | null | undefined;
+      const s2 = row.sensor_2_label as string | null | undefined;
+      return {
+        id: rid,
+        name: row.name as string,
+        location: (row.location as string)?.trim() || 'Sin ubicación',
+        moduleId: row.module_id as string,
+        temperatureC: prev?.temperatureC ?? null,
+        temperature2C: prev?.temperature2C ?? null,
+        online: prev?.online ?? false,
+        updatedAtLabel: prev?.updatedAtLabel ?? '—',
+        batteryPct: prev?.batteryPct ?? null,
+        espLocalIp: prev?.espLocalIp,
+        alertsEnabled: prev?.alertsEnabled !== false,
+        tempLowC: prev?.tempLowC ?? 2,
+        tempHighC: prev?.tempHighC ?? 8,
+        cloudSynced: true,
+        deviceToken: tokens[rid] ?? prev?.deviceToken,
+        sensor1Label:
+          typeof s1 === 'string' && s1.trim()
+            ? s1.trim()
+            : prev?.sensor1Label ?? DEFAULT_SENSOR_1_LABEL,
+        sensor2Label:
+          typeof s2 === 'string' && s2.trim()
+            ? s2.trim()
+            : prev?.sensor2Label ?? DEFAULT_SENSOR_2_LABEL,
+      };
+    });
+
+    const locals = this.snapshot.filter((d) => !this.isUuid(d.id));
+    this.persistDevices([...locals, ...cloudDevices]);
+    await this.refreshReadingsFromCloud();
+  }
+
+  private async refreshReadingsFromCloud(): Promise<void> {
+    if (!this.isCloudSyncEnabled()) return;
+    const ids = this.snapshot.filter((d) => this.isUuid(d.id)).map((d) => d.id);
+    if (!ids.length) return;
+
+    const { data, error } = await this.auth.client
+      .from('device_readings')
+      .select(
+        'device_id, created_at, temp1_c, temp2_c, temp3_c, power_w, press1_bar, press2_bar'
+      )
+      .in('device_id', ids)
+      .order('created_at', { ascending: false })
+      .limit(800);
+
+    if (error || !data) {
+      console.warn('Supabase readings:', error?.message);
+      return;
+    }
+
+    const cloudReadings: TemperatureReading[] = data.map((r) => ({
+      deviceId: r.device_id as string,
+      at: r.created_at as string,
+      temperatureC: r.temp1_c as number,
+      temp2C:
+        typeof r.temp2_c === 'number' && !Number.isNaN(r.temp2_c) ? r.temp2_c : null,
+      temp3C:
+        typeof r.temp3_c === 'number' && !Number.isNaN(r.temp3_c) ? r.temp3_c : null,
+      powerW:
+        typeof r.power_w === 'number' && !Number.isNaN(r.power_w) ? r.power_w : null,
+      press1Bar:
+        typeof r.press1_bar === 'number' && !Number.isNaN(r.press1_bar)
+          ? r.press1_bar
+          : null,
+      press2Bar:
+        typeof r.press2_bar === 'number' && !Number.isNaN(r.press2_bar)
+          ? r.press2_bar
+          : null,
+    }));
+
+    cloudReadings.sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+    );
+
+    const localReadings = this.readingsSnapshot.filter((r) => !this.isUuid(r.deviceId));
+    this.persistReadings([...localReadings, ...cloudReadings]);
+
+    const latest = new Map<string, TemperatureReading>();
+    for (let i = cloudReadings.length - 1; i >= 0; i--) {
+      const r = cloudReadings[i];
+      if (!latest.has(r.deviceId)) latest.set(r.deviceId, r);
+    }
+
+    const nowMs = Date.now();
+    const offlineAfterMs =
+      typeof environment.deviceOfflineAfterMs === 'number' && environment.deviceOfflineAfterMs > 0
+        ? environment.deviceOfflineAfterMs
+        : 90000;
+
+    const updated = this.snapshot.map((d) => {
+      const r = latest.get(d.id);
+      if (!r) {
+        if (this.isUuid(d.id)) {
+          return { ...d, online: false };
+        }
+        return d;
+      }
+      const atMs = new Date(r.at).getTime();
+      const isOnline = Number.isFinite(atMs) ? nowMs - atMs <= offlineAfterMs : false;
+      return {
+        ...d,
+        temperatureC: r.temperatureC,
+        temperature2C: r.temp2C ?? null,
+        online: isOnline,
+        updatedAtLabel: this.formatUpdatedLabel(r.at),
+      };
+    });
+    this.persistDevices(updated);
+  }
+
+  setDevices(list: DashboardDevice[]): void {
+    this.persistDevices([...list]);
+  }
+
+  loadSampleDevices(): void {
+    if (this.isCloudSyncEnabled()) {
+      return;
+    }
+    this.persistDevices(DASHBOARD_SAMPLE_DEVICES);
+    const synthetic: TemperatureReading[] = [];
+    const now = new Date();
+    for (let day = 6; day >= 0; day--) {
+      for (const dev of DASHBOARD_SAMPLE_DEVICES) {
+        const t = new Date(now);
+        t.setHours(0, 0, 0, 0);
+        t.setDate(t.getDate() - day);
+        t.setHours(10 + (day % 4), 30, 0, 0);
+        const base = dev.temperatureC ?? 3;
+        synthetic.push({
+          deviceId: dev.id,
+          at: t.toISOString(),
+          temperatureC:
+            Math.round((base + Math.sin(day * 0.7) * 0.5 + (dev.id.charCodeAt(0) % 5) * 0.1) * 10) /
+            10,
+          temp2C:
+            Math.round((base + Math.cos(day * 0.6) * 0.4 + 0.2) * 10) / 10,
+          temp3C:
+            Math.round((base + Math.sin(day * 0.5) * 0.3 - 0.3) * 10) / 10,
+          powerW:
+            Math.round((160 + (dev.id.charCodeAt(1) % 12) * 8 + Math.sin(day) * 18) * 10) / 10,
+          press1Bar:
+            Math.round((2.1 + Math.sin(day * 0.4) * 0.12) * 100) / 100,
+          press2Bar:
+            Math.round((2.2 + Math.cos(day * 0.4) * 0.09) * 100) / 100,
+        });
+      }
+    }
+    this.persistReadings(synthetic);
+  }
+
+  clearDevices(): void {
+    this.persistDevices([]);
+    this.persistReadings([]);
+  }
+
+  /**
+   * Con nube: borra en Supabase y solo entonces quita local + lecturas.
+   * Si el DELETE falla (red, RLS, etc.), la lista local no cambia.
+   */
+  async removeDeviceAsync(id: string): Promise<{ ok: boolean; error?: string }> {
+    if (this.isCloudSyncEnabled() && this.isUuid(id)) {
+      const { error } = await this.auth.client.from('devices').delete().eq('id', id);
+      if (error) {
+        return { ok: false, error: error.message };
+      }
+      this.removeDeviceToken(id);
+    }
+    this.persistDevices(this.snapshot.filter((d) => d.id !== id));
+    this.persistReadings(this.readingsSnapshot.filter((r) => r.deviceId !== id));
+    return { ok: true };
+  }
+
+  updateDeviceMeta(
+    id: string,
+    input: { name: string; location: string; moduleId: string; espLocalIp: string }
+  ): void {
+    const name = input.name.trim();
+    const location = input.location.trim() || 'Sin ubicación';
+    const moduleId = input.moduleId.trim();
+    const espLocalIp = input.espLocalIp.trim();
+    const current = this.snapshot.find((d) => d.id === id);
+    const moduleForDb = moduleId || current?.moduleId;
+
+    if (this.isCloudSyncEnabled() && this.isUuid(id) && moduleForDb) {
+      void this.auth.client
+        .from('devices')
+        .update({
+          name,
+          location,
+          module_id: moduleForDb,
+        })
+        .eq('id', id);
+    }
+
+    this.persistDevices(
+      this.snapshot.map((d) =>
+        d.id === id
+          ? {
+              ...d,
+              name,
+              location,
+              moduleId: moduleForDb || undefined,
+              espLocalIp: espLocalIp || undefined,
+            }
+          : d
+      )
+    );
+  }
+
+  /**
+   * Guarda nombres de sensores en local y, si aplica, en Supabase.
+   * Si falla la nube, igual se persiste local y el caller puede avisar.
+   */
+  async updateDeviceSensorLabels(
+    id: string,
+    sensor1Label: string,
+    sensor2Label: string
+  ): Promise<{ cloudError?: string }> {
+    const s1 = sensor1Label.trim() || DEFAULT_SENSOR_1_LABEL;
+    const s2 = sensor2Label.trim() || DEFAULT_SENSOR_2_LABEL;
+    let cloudError: string | undefined;
+    if (this.isCloudSyncEnabled() && this.isUuid(id)) {
+      const { error } = await this.auth.client
+        .from('devices')
+        .update({ sensor_1_label: s1, sensor_2_label: s2 })
+        .eq('id', id);
+      if (error) {
+        cloudError = error.message;
+      }
+    }
+    this.persistDevices(
+      this.snapshot.map((d) =>
+        d.id === id ? { ...d, sensor1Label: s1, sensor2Label: s2 } : d
+      )
+    );
+    return { cloudError };
+  }
+
+  updateDeviceNotificationConfig(id: string, input: DeviceNotificationConfigInput): void {
+    const low = input.tempLowC;
+    const high = input.tempHighC;
+    this.persistDevices(
+      this.snapshot.map((d) =>
+        d.id === id
+          ? {
+              ...d,
+              alertsEnabled: input.alertsEnabled,
+              tempLowC: low,
+              tempHighC: high,
+            }
+          : d
+      )
+    );
+  }
+
+  recordTemperatureReading(deviceId: string, temperatureC: number): void {
+    if (Number.isNaN(temperatureC)) return;
+    const device = this.snapshot.find((d) => d.id === deviceId);
+    if (!device) return;
+    const at = new Date().toISOString();
+    const label = this.formatUpdatedLabel(at);
+    this.persistDevices(
+      this.snapshot.map((d) =>
+        d.id === deviceId
+          ? {
+              ...d,
+              temperatureC,
+              temperature2C: d.temperature2C ?? null,
+              online: true,
+              updatedAtLabel: label,
+            }
+          : d
+      )
+    );
+    const reading: TemperatureReading = { deviceId, at, temperatureC };
+    this.persistReadings([...this.readingsSnapshot, reading]);
+  }
+
+  recordTelemetryReading(input: TelemetryInput): void {
+    if (Number.isNaN(input.temp1C)) return;
+    const device = this.snapshot.find((d) => d.id === input.deviceId);
+    if (!device) return;
+    const at = input.at ?? new Date().toISOString();
+    const label = this.formatUpdatedLabel(at);
+    this.persistDevices(
+      this.snapshot.map((d) =>
+        d.id === input.deviceId
+          ? {
+              ...d,
+              temperatureC: input.temp1C,
+              temperature2C: input.temp2C ?? null,
+              online: true,
+              updatedAtLabel: label,
+            }
+          : d
+      )
+    );
+    const reading: TemperatureReading = {
+      deviceId: input.deviceId,
+      at,
+      temperatureC: input.temp1C,
+      temp2C: input.temp2C ?? null,
+      temp3C: input.temp3C ?? null,
+      powerW: input.powerW ?? null,
+      press1Bar: input.press1Bar ?? null,
+      press2Bar: input.press2Bar ?? null,
+    };
+    this.persistReadings([...this.readingsSnapshot, reading]);
+  }
+
+  private addDeviceFromFormLocal(
+    name: string,
+    location: string,
+    moduleId: string,
+    espLocalIp: string
+  ): string {
+    const baseId = moduleId
+      ? moduleId.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 48)
+      : `DEV-${Date.now().toString(36).toUpperCase()}`;
+
+    let id = baseId || `DEV-${Date.now().toString(36).toUpperCase()}`;
+    let n = 0;
+    while (this.snapshot.some((d) => d.id === id)) {
+      n += 1;
+      id = `${baseId}-${n}`;
+    }
+
+    const device: DashboardDevice = {
+      id,
+      name,
+      location,
+      temperatureC: null,
+      temperature2C: null,
+      online: false,
+      updatedAtLabel: 'Esperando dispositivo',
+      batteryPct: null,
+      moduleId: moduleId || undefined,
+      espLocalIp: espLocalIp || undefined,
+      alertsEnabled: true,
+      tempLowC: 2,
+      tempHighC: 8,
+      sensor1Label: DEFAULT_SENSOR_1_LABEL,
+      sensor2Label: DEFAULT_SENSOR_2_LABEL,
+    };
+
+    this.persistDevices([...this.snapshot, device]);
+    return id;
+  }
+}

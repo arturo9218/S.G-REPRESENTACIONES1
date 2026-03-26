@@ -1,0 +1,267 @@
+<div class="page">
+  <header class="page__head">
+    <div class="page__head-left">
+      <button type="button" class="btn btn--ghost page__back" (click)="backToDashboard()">← Volver</button>
+      <h1 class="page__title">Análisis de temperatura</h1>
+    </div>
+  </header>
+
+  <button
+    type="button"
+    class="sidebar-hotspot"
+    *ngIf="sidebarCollapsed && !sidebarPeek"
+    (mouseenter)="openSidebarPeek()"
+    aria-label="Mostrar panel de filtros"
+  >
+    ≡
+  </button>
+
+  <section class="grid" [class.grid--sidebar-hidden]="sidebarCollapsed && !sidebarPeek">
+    <div class="panel panel--side" (mouseleave)="closeSidebarPeek()">
+      <div class="panel__side-actions">
+        <button type="button" class="btn btn--ghost panel__collapse" (click)="toggleSidebar()">
+          {{ sidebarCollapsed ? 'Mostrar panel' : 'Ocultar panel' }}
+        </button>
+      </div>
+      <h2 class="panel__title">Seleccionar temperatura</h2>
+
+      <div class="controls">
+        <label class="control">
+          <span>Canal</span>
+          <select [(ngModel)]="analysisChannel" class="control__select">
+            <option value="both">Ambos</option>
+            <option value="temp1">Sensor 1</option>
+            <option value="temp2">Sensor 2</option>
+          </select>
+        </label>
+
+        <label class="control" *ngIf="devices.length">
+          <span>Dispositivo</span>
+          <select
+            [(ngModel)]="selectedDeviceId"
+            class="control__select"
+            (ngModelChange)="syncSensorLabelsWithSelected()"
+          >
+            <option *ngFor="let d of devices" [value]="d.id">
+              {{ d.name }}
+            </option>
+          </select>
+        </label>
+
+        <label class="control">
+          <span>Día</span>
+          <input
+            type="date"
+            class="control__select"
+            [(ngModel)]="filterDay"
+            (ngModelChange)="onFilterDayChange()"
+          />
+        </label>
+
+        <label class="control">
+          <span>Desde</span>
+          <input
+            type="datetime-local"
+            class="control__select"
+            [(ngModel)]="filterFrom"
+            (ngModelChange)="onFilterRangeChange()"
+          />
+        </label>
+
+        <label class="control">
+          <span>Hasta</span>
+          <input
+            type="datetime-local"
+            class="control__select"
+            [(ngModel)]="filterTo"
+            (ngModelChange)="onFilterRangeChange()"
+          />
+        </label>
+        <button type="button" class="btn btn--ghost" (click)="clearDateFilters()">
+          Limpiar filtros
+        </button>
+      </div>
+
+      <div class="sensor-block">
+        <h2 class="panel__title panel__title--sm">Nombres de sensores</h2>
+        <p class="panel__hint">
+          Se guardan en este equipo y en la nube (si el dispositivo tiene ID UUID en Supabase).
+        </p>
+
+        <div class="fields">
+          <label class="field">
+            <span>Sensor 1 (temp principal)</span>
+            <input
+              type="text"
+              [(ngModel)]="sensor1LabelForm"
+              maxlength="48"
+              autocomplete="off"
+              class="field__input"
+            />
+          </label>
+
+          <label class="field">
+            <span>Sensor 2 (segundo canal)</span>
+            <input
+              type="text"
+              [(ngModel)]="sensor2LabelForm"
+              maxlength="48"
+              autocomplete="off"
+              class="field__input"
+            />
+          </label>
+
+          <p
+            class="sensor-feedback"
+            *ngIf="sensorLabelsFeedback"
+            [class.sensor-feedback--warn]="sensorLabelsFeedback.includes('No se pudo')"
+          >
+            {{ sensorLabelsFeedback }}
+          </p>
+
+          <button
+            type="button"
+            class="btn btn--primary sensor-save"
+            [disabled]="sensorLabelsSaving || !selectedDevice"
+            (click)="saveSensorLabels()"
+          >
+            {{ sensorLabelsSaving ? 'Guardando…' : 'Guardar nombres' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel panel--chart" #chartPanel>
+      <div class="chart-head">
+        <div class="chart-head__legend">
+          <span class="legend-item" *ngIf="showTemp1">
+            <i class="legend-item__swatch legend-item__swatch--s1"></i>
+            {{ sensor1Name }}
+          </span>
+          <span class="legend-item" *ngIf="showTemp2 && hasSecondSeries">
+            <i class="legend-item__swatch legend-item__swatch--s2"></i>
+            {{ sensor2Name }}
+          </span>
+        </div>
+        <div class="chart-head__actions">
+          <div class="chart-head__hint">Actualización ~{{ (environment.readingsPollIntervalMs || 5000) / 1000 }}s</div>
+          <button type="button" class="btn btn--ghost chart-full-btn" (click)="toggleChartFullscreen(chartPanel)">
+            Pantalla completa
+          </button>
+        </div>
+      </div>
+
+      <p class="chart-empty" *ngIf="!hasChartData">
+        Sin datos para este dispositivo todavía. Seleccioná otro o esperá nuevas lecturas del ESP8266.
+      </p>
+
+      <div class="chart">
+        <div class="chart__axis" aria-hidden="true">
+          <span>{{ chartYMaxLabel }}</span>
+          <span>{{ chartYMidLabel }}</span>
+          <span>{{ chartYMinLabel }}</span>
+        </div>
+
+        <div class="chart__svg-wrap" (mousemove)="onChartMouseMove($event)" (mouseleave)="onChartMouseLeave()">
+          <svg class="chart__svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="chartFillS1" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#1e40af" stop-opacity="0.18" />
+                <stop offset="100%" stop-color="#1e40af" stop-opacity="0" />
+              </linearGradient>
+              <linearGradient id="chartFillS2" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#0f766e" stop-opacity="0.16" />
+                <stop offset="100%" stop-color="#0f766e" stop-opacity="0" />
+              </linearGradient>
+              <clipPath id="chartPlotClip">
+                <rect x="0" y="0" width="100" height="100" rx="0" />
+              </clipPath>
+            </defs>
+
+            <g class="chart__grid" clip-path="url(#chartPlotClip)">
+              <line *ngFor="let gy of chartGridYStops" x1="0" [attr.y1]="gy" x2="100" [attr.y2]="gy" />
+            </g>
+            <line class="chart-axis-line" x1="4" y1="8" x2="4" y2="92" />
+            <line class="chart-axis-line" x1="4" y1="92" x2="100" y2="92" />
+
+            <g clip-path="url(#chartPlotClip)">
+              <polygon
+                *ngIf="showTemp1"
+                class="chart-area chart-area--s1"
+                [attr.points]="'0,100 ' + chartPolylinePointsS1() + ' 100,100'"
+                fill="url(#chartFillS1)"
+              />
+
+              <polygon
+                *ngIf="showTemp2 && hasSecondSeries"
+                class="chart-area chart-area--s2"
+                [attr.points]="'0,100 ' + chartPolylinePointsS2() + ' 100,100'"
+                fill="url(#chartFillS2)"
+              />
+
+              <polyline
+                *ngIf="showTemp1"
+                class="chart-line chart-line--s1"
+                fill="none"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                vector-effect="non-scaling-stroke"
+                [attr.points]="chartPolylinePointsS1()"
+              />
+
+              <polyline
+                *ngIf="showTemp2 && hasSecondSeries"
+                class="chart-line chart-line--s2"
+                fill="none"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                vector-effect="non-scaling-stroke"
+                [attr.points]="chartPolylinePointsS2()"
+              />
+            </g>
+
+            <g *ngIf="hoverX as hx">
+              <line class="chart-hover-line" [attr.x1]="hx" y1="8" [attr.x2]="hx" y2="92" />
+            </g>
+            <g *ngIf="hoverYTemp1 as hy1">
+              <line class="chart-hover-line chart-hover-line--temp1" x1="4" [attr.y1]="hy1" x2="100" [attr.y2]="hy1" />
+            </g>
+            <g *ngIf="hoverYTemp2 as hy2">
+              <line class="chart-hover-line chart-hover-line--temp2" x1="4" [attr.y1]="hy2" x2="100" [attr.y2]="hy2" />
+            </g>
+
+            <g *ngIf="chartLastPointS1() as p1">
+              <circle class="chart-dot chart-dot--ring" [attr.cx]="p1.cx" [attr.cy]="p1.cy" r="3.4" />
+              <circle class="chart-dot chart-dot--core" [attr.cx]="p1.cx" [attr.cy]="p1.cy" r="1.8" />
+            </g>
+
+            <g *ngIf="chartLastPointS2() as p2">
+              <circle class="chart-dot chart-dot--ring chart-dot--ring--s2" [attr.cx]="p2.cx" [attr.cy]="p2.cy" r="3.4" />
+              <circle class="chart-dot chart-dot--core chart-dot--core--s2" [attr.cx]="p2.cx" [attr.cy]="p2.cy" r="1.8" />
+            </g>
+          </svg>
+          <div class="chart-tooltip" *ngIf="hoverIndex != null">
+            <div class="chart-tooltip__time">{{ hoverTimeLabel }}</div>
+            <div class="chart-tooltip__row" *ngIf="showTemp1">{{ sensor1Name }}: <strong>{{ hoverTemp1Label }}</strong></div>
+            <div class="chart-tooltip__row" *ngIf="showTemp2">{{ sensor2Name }}: <strong>{{ hoverTemp2Label }}</strong></div>
+          </div>
+        </div>
+        <div class="chart__x-axis">
+          <span>{{ chartXStartLabel }}</span>
+          <span>{{ chartXMidLabel }}</span>
+          <span>{{ chartXEndLabel }}</span>
+        </div>
+      </div>
+
+      <div class="chart-stats">
+        <span class="chart-stat" *ngIf="showTemp1">
+          {{ sensor1Name }}: <strong>{{ chartCurrentLabel1 }}</strong>
+        </span>
+        <span class="chart-stat" *ngIf="showTemp2 && hasSecondSeries">
+          {{ sensor2Name }}: <strong>{{ chartCurrentLabel2 }}</strong>
+        </span>
+      </div>
+    </div>
+  </section>
+</div>
+

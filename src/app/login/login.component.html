@@ -1,0 +1,105 @@
+<div class="login-page">
+  <aside class="login-page__visual">
+    <div class="login-page__visual-inner">
+      <img
+        class="login-page__hero-img"
+        src="assets/login-hero-monitoreo.png"
+        alt="Ilustración: monitoreo en la nube con sensores, app móvil, tablet y cadena de frío."
+        width="1024"
+        height="1024"
+        loading="eager"
+        decoding="async"
+      />
+    </div>
+  </aside>
+
+  <section class="login-page__panel">
+    <div class="login-card">
+      <div class="login-card__brand">
+        <div class="login-card__logo" aria-hidden="true">
+          <span>SG</span>
+        </div>
+        <span class="login-card__name">SG Monitoreo</span>
+      </div>
+
+      <h1 class="login-card__title">Bienvenido a SG Monitoreo</h1>
+      <p class="login-card__subtitle">
+        Acceda a sus dispositivos y visualice temperaturas en tiempo real.
+      </p>
+
+      <p *ngIf="!supabaseReady" class="login-form__alert login-form__alert--warning" role="status">
+        <strong>Falta conectar Supabase.</strong> El registro y el login usan la nube de Supabase (no hace falta tu propio
+        servidor). Pegá la URL del proyecto y la clave <em>anon</em> en
+        <span class="login-form__mono">src/environments/environment.ts</span> (Supabase → Project Settings → API).
+      </p>
+
+      <form class="login-form" [formGroup]="form" (ngSubmit)="onSubmit()" novalidate>
+        <p *ngIf="errorMessage" class="login-form__alert login-form__alert--error" role="alert">
+          {{ errorMessage }}
+        </p>
+        <p *ngIf="successMessage" class="login-form__alert login-form__alert--success" role="status">
+          {{ successMessage }}
+        </p>
+
+        <label class="login-form__field">
+          <span class="login-form__label">Correo electrónico</span>
+          <span class="login-form__input-wrap">
+            <svg class="login-form__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5L4 8V6l8 5 8-5v2z"/>
+            </svg>
+            <input
+              type="email"
+              formControlName="email"
+              class="login-form__input"
+              placeholder="Correo electrónico"
+              autocomplete="email"
+            />
+          </span>
+          <span class="login-form__error" *ngIf="form.controls.email.touched && form.controls.email.invalid">
+            Ingrese un correo válido.
+          </span>
+        </label>
+
+        <label class="login-form__field">
+          <span class="login-form__label">Contraseña</span>
+          <span class="login-form__input-wrap">
+            <svg class="login-form__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+            </svg>
+            <input
+              type="password"
+              formControlName="password"
+              class="login-form__input"
+              placeholder="Contraseña"
+              autocomplete="current-password"
+            />
+          </span>
+          <span class="login-form__error" *ngIf="form.controls.password.touched && form.controls.password.invalid">
+            Mínimo 6 caracteres.
+          </span>
+        </label>
+
+        <button type="submit" class="login-form__submit" [disabled]="submitting">
+          {{ submitting ? 'Ingresando…' : 'Ingresar' }}
+        </button>
+
+        <div class="login-form__row">
+          <label class="login-form__remember">
+            <input type="checkbox" formControlName="remember" />
+            <span>Recordarme</span>
+          </label>
+          <a routerLink="/recuperar-contrasena" class="login-form__link">¿Olvidaste tu contraseña?</a>
+        </div>
+
+        <p class="login-card__switch">
+          <a routerLink="/register" class="login-form__link">¿No tenés cuenta? Registrate</a>
+        </p>
+      </form>
+
+      <footer class="login-card__footer">
+        <p>Monitoreo en tiempo real de dispositivos</p>
+        <p class="login-card__copy">©2024 SG - v1.0</p>
+      </footer>
+    </div>
+  </section>
+</div>

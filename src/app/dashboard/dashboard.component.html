@@ -1,0 +1,550 @@
+<div class="shell">
+  <aside class="shell__sidebar" aria-label="Navegación principal">
+    <div class="shell__sidebar-logo">SG</div>
+    <nav class="shell__nav">
+      <button type="button" class="shell__nav-btn shell__nav-btn--active" title="Inicio">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg>
+      </button>
+      <button type="button" class="shell__nav-btn" title="Panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+          <rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
+        </svg>
+      </button>
+      <button type="button" class="shell__nav-btn" title="Alertas">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+      </button>
+      <button type="button" class="shell__nav-btn" title="Ajustes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+        </svg>
+      </button>
+    </nav>
+    <button type="button" class="shell__nav-btn shell__nav-btn--bottom" title="Cerrar sesión" (click)="logout()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+        <polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+      </svg>
+    </button>
+  </aside>
+
+  <div class="shell__main">
+    <header class="topbar">
+      <div class="topbar__left">
+        <span class="topbar__brand-mark">SG</span>
+        <span class="topbar__brand-text">SG Monitoreo</span>
+      </div>
+      <div class="topbar__search-wrap">
+        <svg class="topbar__search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          type="search"
+          class="topbar__search"
+          placeholder="Buscar dispositivo…"
+          [(ngModel)]="searchQuery"
+          [disabled]="!hasDevices"
+        />
+      </div>
+      <div class="topbar__right">
+        <button type="button" class="btn btn--primary" (click)="openAddDeviceModal()">+ Dispositivo</button>
+        <button type="button" class="btn btn--ghost" (click)="logout()">Cerrar sesión</button>
+        <button
+          type="button"
+          class="topbar__icon-btn topbar__icon-btn--alerts"
+          aria-label="Reiniciar contador de alarmas"
+          title="Alarmas acumuladas (click para reiniciar)"
+          (click)="resetAlarmEvents()"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          <span class="topbar__badge" *ngIf="summaryAlarmEvents > 0">{{ summaryAlarmEvents }}</span>
+        </button>
+        <button type="button" class="topbar__icon-btn" aria-label="Más opciones">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+        </button>
+        <div class="topbar__avatar" [attr.title]="email ?? ''">{{ userInitial }}</div>
+      </div>
+    </header>
+
+    <div class="shell__content" *ngIf="hasDevices; else emptyState">
+      <section class="kpi-row" aria-label="Resumen">
+        <article class="kpi-card">
+          <div class="kpi-card__icon kpi-card__icon--slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-4"/></svg>
+          </div>
+          <div>
+            <p class="kpi-card__label">Total</p>
+            <p class="kpi-card__value">Total de {{ summaryTotal }}</p>
+          </div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-card__icon kpi-card__icon--blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <div>
+            <p class="kpi-card__label">Nombres</p>
+            <p class="kpi-card__value">{{ summaryNames }}</p>
+          </div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-card__icon kpi-card__icon--amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          </div>
+          <div>
+            <p class="kpi-card__label">Lecturas 24h</p>
+            <p class="kpi-card__value kpi-card__value--badge">{{ summaryNews }}</p>
+          </div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-card__icon kpi-card__icon--rose">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <div>
+            <p class="kpi-card__label">Alertas activas / acumuladas</p>
+            <p class="kpi-card__value">{{ summaryAlerts }} / {{ summaryAlarmEvents }}</p>
+          </div>
+        </article>
+      </section>
+
+      <div class="grid-main">
+        <div class="grid-main__left">
+          <article class="card card--chart" [class.card--chart-expanded]="chartExpanded">
+            <div class="card__head card__head--chart">
+              <div class="card__head-chart-text">
+                <h2 class="card__title">Temperatura en el tiempo · {{ selectedDevice?.name ?? 'Todos' }}</h2>
+                <span class="card__hint">Últimas lecturas · actualización ~{{ (environment.readingsPollIntervalMs || 5000) / 1000 }}s</span>
+              </div>
+              <button
+                type="button"
+                class="chart-expand-btn"
+                (click)="toggleChartExpanded()"
+                [attr.aria-expanded]="chartExpanded"
+                [attr.aria-label]="chartExpanded ? 'Reducir gráfico' : 'Ampliar gráfico para más detalle'"
+              >
+                <svg class="chart-expand-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <ng-container *ngIf="!chartExpanded">
+                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                  </ng-container>
+                  <ng-container *ngIf="chartExpanded">
+                    <path d="M4 14h6v6M14 4h6v6M4 10l6-6M14 20l6-6" />
+                  </ng-container>
+                </svg>
+                <span class="chart-expand-btn__label">{{ chartExpanded ? 'Reducir' : 'Ampliar' }}</span>
+              </button>
+              <button
+                type="button"
+                class="chart-open-btn"
+                [disabled]="!selectedDeviceId && !devices.length"
+                (click)="openChartInNewTab($event)"
+                aria-label="Abrir análisis en pestaña nueva"
+              >
+                Abrir análisis
+              </button>
+            </div>
+            <div class="chart-legend" *ngIf="selectedDeviceId">
+              <span class="chart-legend__item"><i class="chart-legend__swatch chart-legend__swatch--s1"></i>{{ selectedSensor1Name }}</span>
+              <span class="chart-legend__item" *ngIf="chartHasSecondSeries()"><i class="chart-legend__swatch chart-legend__swatch--s2"></i>{{ selectedSensor2Name }}</span>
+            </div>
+            <div class="chart-panel">
+              <div class="chart-y-axis" aria-hidden="true">
+                <span>{{ chartYMaxLabel }}</span>
+                <span>{{ chartYMidLabel }}</span>
+                <span>{{ chartYMinLabel }}</span>
+              </div>
+              <div class="chart-svg-wrap" (click)="openChartInNewTab($event)">
+                <svg class="chart-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="chartFillS1" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="#1e40af" stop-opacity="0.14" />
+                      <stop offset="100%" stop-color="#1e40af" stop-opacity="0" />
+                    </linearGradient>
+                    <clipPath id="chartPlotClip">
+                      <rect x="0" y="0" width="100" height="100" rx="0" />
+                    </clipPath>
+                  </defs>
+                  <rect class="chart-svg__bg" x="0" y="0" width="100" height="100" />
+                  <g class="chart-grid" clip-path="url(#chartPlotClip)">
+                    <line *ngFor="let gy of chartGridYStops" x1="0" [attr.y1]="gy" x2="100" [attr.y2]="gy" />
+                  </g>
+                  <g clip-path="url(#chartPlotClip)">
+                    <polygon
+                      class="chart-area chart-area--s1"
+                      [attr.points]="'0,100 ' + chartPolylinePoints() + ' 100,100'"
+                      fill="url(#chartFillS1)"
+                    />
+                    <polyline
+                      class="chart-line chart-line--s1"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      vector-effect="non-scaling-stroke"
+                      [attr.points]="chartPolylinePoints()"
+                    />
+                    <polyline
+                      *ngIf="chartHasSecondSeries()"
+                      class="chart-line chart-line--s2"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      vector-effect="non-scaling-stroke"
+                      [attr.points]="chartPolylinePoints2()"
+                    />
+                  </g>
+                  <g *ngIf="chartLastPointS1() as p1" class="chart-dot-wrap">
+                    <circle class="chart-dot chart-dot--ring" [attr.cx]="p1.cx" [attr.cy]="p1.cy" r="3.2" />
+                    <circle class="chart-dot chart-dot--core" [attr.cx]="p1.cx" [attr.cy]="p1.cy" r="1.6" />
+                  </g>
+                  <g *ngIf="chartHasSecondSeries() && chartLastPointS2() as p2" class="chart-dot-wrap">
+                    <circle class="chart-dot chart-dot--ring chart-dot--ring--s2" [attr.cx]="p2.cx" [attr.cy]="p2.cy" r="3.2" />
+                    <circle class="chart-dot chart-dot--core chart-dot--core--s2" [attr.cx]="p2.cx" [attr.cy]="p2.cy" r="1.6" />
+                  </g>
+                </svg>
+                <div class="chart-labels">
+                  <span *ngFor="let lb of chartDayLabels">{{ lb }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="chart-side">
+              <p class="chart-side__delta">{{ avgDeltaLabel }}</p>
+              <div class="chart-side__stats">
+                <span class="chart-side__stat-line">
+                  <i class="chart-side__swatch chart-side__swatch--s1"></i>{{ selectedSensor1Name }}: {{ chartCurrentLabel }}
+                </span>
+                <span class="chart-side__stat-line" *ngIf="chartHasSecondSeries()">
+                  <i class="chart-side__swatch chart-side__swatch--s2"></i>{{ selectedSensor2Name }}: {{ chartCurrentLabel2 }}
+                </span>
+                <span class="chart-side__range">{{ chartTempRangeLabel }}</span>
+              </div>
+              <span class="chart-side__humidity" *ngIf="hasHumidity">{{ humidityLabel }} humedad</span>
+            </div>
+            <div class="chart-timeline" *ngIf="chartTimelineItems.length; else noChartTimeline">
+              <p class="chart-timeline__title">Historial del gráfico</p>
+              <ul class="chart-timeline__list">
+                <li class="chart-timeline__item" *ngFor="let it of chartTimelineItems">
+                  <span>{{ it.whenLabel }}</span>
+                  <strong>{{ it.tempLabel }}</strong>
+                </li>
+              </ul>
+            </div>
+            <ng-template #noChartTimeline>
+              <p class="card__empty">Sin datos de temperatura para mostrar.</p>
+            </ng-template>
+          </article>
+
+          <div class="device-grid">
+            <article
+              class="device-card"
+              *ngFor="let d of filteredDevices"
+              [class.device-card--selected]="d.id === selectedDeviceId"
+              (click)="selectDevice(d.id)"
+            >
+              <header class="device-card__head">
+                <div>
+                  <h3 class="device-card__name">{{ d.name }}</h3>
+                  <span class="device-card__id">ID panel: {{ d.id }}</span>
+                  <span class="device-card__module" *ngIf="d.moduleId">ID dispositivo: {{ d.moduleId }}</span>
+                </div>
+                <span class="device-card__status" [class.device-card__status--off]="!d.online">
+                  <span class="device-card__dot"></span>
+                  {{ d.online ? 'Online' : 'Offline' }}
+                </span>
+              </header>
+              <div
+                class="device-card__temp"
+                [class.device-card__temp--pending]="d.temperatureC == null && d.temperature2C == null"
+              >
+                <ng-container *ngIf="d.temperatureC != null || d.temperature2C != null; else noTemp">
+                  <div class="device-card__temps-row">
+                    <span class="device-card__temp-val" *ngIf="d.temperatureC != null">{{
+                      formatTemp(d.temperatureC)
+                    }}</span>
+                    <span
+                      class="device-card__temp-sep"
+                      *ngIf="d.temperatureC != null && d.temperature2C != null"
+                      >·</span>
+                    <span
+                      class="device-card__temp-val device-card__temp-val--dual"
+                      *ngIf="d.temperature2C != null"
+                      >{{ formatTemp(d.temperature2C) }}</span>
+                  </div>
+                  <span
+                    class="device-card__temp-hint"
+                    *ngIf="d.temperatureC != null && d.temperature2C != null"
+                    >{{ (d.sensor1Label || 'Sensor 1') + ' / ' + (d.sensor2Label || 'Sensor 2') }}</span>
+                </ng-container>
+                <ng-template #noTemp>
+                  <span class="device-card__temp-val device-card__temp-val--muted">Dispositivo</span>
+                  <span class="device-card__temp-hint">Sin lectura</span>
+                </ng-template>
+              </div>
+              <footer class="device-card__foot">
+                <span class="device-card__meta">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                  {{ d.location }}
+                </span>
+                <span class="device-card__meta">{{ d.updatedAtLabel }}</span>
+                <span class="device-card__meta" *ngIf="d.espLocalIp">{{ d.espLocalIp }}</span>
+                <span class="device-card__meta" *ngIf="d.batteryPct != null">{{ d.batteryPct }}%</span>
+              </footer>
+              <div class="device-card__actions">
+                <button type="button" class="device-card__btn" (click)="openEditDeviceModal(d); $event.stopPropagation()">Editar</button>
+                <button type="button" class="device-card__btn device-card__btn--danger" (click)="confirmDeleteDevice(d); $event.stopPropagation()">Eliminar</button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <aside class="grid-main__right">
+          <article class="card">
+            <h2 class="card__title card__title--sm">Lectura actual (multi-sensor)</h2>
+            <div class="telemetry" *ngIf="selectedTelemetry as t; else noTelemetry">
+              <div class="telemetry__row">
+                <span>{{ selectedSensor1Name }}</span>
+                <strong>{{ formatTemp(t.temperatureC) }}</strong>
+              </div>
+              <div class="telemetry__row">
+                <span>{{ selectedSensor2Name }}</span>
+                <strong>{{ formatTemp(t.temp2C ?? null) }}</strong>
+              </div>
+              <div class="telemetry__row">
+                <span>Temperatura 3</span>
+                <strong>{{ formatTemp(t.temp3C ?? null) }}</strong>
+              </div>
+              <div class="telemetry__row">
+                <span>Consumo</span>
+                <strong>{{ formatPower(t.powerW) }}</strong>
+              </div>
+              <p class="telemetry__time">Actualizado: {{ t.at | date:'HH:mm dd/MM/yy' }}</p>
+            </div>
+            <ng-template #noTelemetry>
+              <p class="card__empty">Sin telemetría todavía para este dispositivo.</p>
+            </ng-template>
+          </article>
+
+          <article class="card card--sensor-labels" *ngIf="selectedDevice">
+            <h2 class="card__title card__title--sm">Nombres de sensores</h2>
+            <p class="card__hint card__hint--tight">
+              Se guardan en este equipo y en la nube (cuando el dispositivo tiene ID de panel UUID). Se usan en el gráfico, telemetría e historial.
+            </p>
+            <div class="notify-panel notify-panel--labels">
+              <label class="notify-panel__field notify-panel__field--full">
+                <span>Sensor 1 (temp. principal)</span>
+                <input
+                  type="text"
+                  [(ngModel)]="sensor1LabelForm"
+                  (ngModelChange)="onSensorLabelsInput()"
+                  maxlength="48"
+                  autocomplete="off"
+                  placeholder="Ej. Evaporador"
+                />
+              </label>
+              <label class="notify-panel__field notify-panel__field--full">
+                <span>Sensor 2 (segundo canal)</span>
+                <input
+                  type="text"
+                  [(ngModel)]="sensor2LabelForm"
+                  (ngModelChange)="onSensorLabelsInput()"
+                  maxlength="48"
+                  autocomplete="off"
+                  placeholder="Ej. Condensador"
+                />
+              </label>
+              <p
+                class="sensor-labels-feedback"
+                *ngIf="sensorLabelsFeedback && !sensorLabelsSaving"
+                [class.sensor-labels-feedback--warn]="sensorLabelsFeedback.includes('No se pudo')"
+              >
+                {{ sensorLabelsFeedback }}
+              </p>
+              <button
+                type="button"
+                class="btn btn--primary notify-panel__save"
+                [disabled]="sensorLabelsSaving"
+                (click)="saveSensorLabels()"
+              >
+                {{ sensorLabelsSaving ? 'Guardando…' : 'Guardar nombres' }}
+              </button>
+            </div>
+          </article>
+
+          <article class="card">
+            <h2 class="card__title card__title--sm">Notificaciones temperatura</h2>
+            <div class="notify-panel" *ngIf="selectedDevice as sd; else noDeviceSelected">
+              <p class="notify-panel__device">{{ sd.name }}</p>
+              <label class="notify-panel__toggle">
+                <input type="checkbox" [(ngModel)]="alertsEnabledForm" />
+                <span>Activar notificaciones</span>
+              </label>
+              <div class="notify-panel__grid" [class.notify-panel__grid--disabled]="!alertsEnabledForm">
+                <label class="notify-panel__field">
+                  <span>Mínima (°C)</span>
+                  <input type="text" [(ngModel)]="tempLowForm" [disabled]="!alertsEnabledForm" placeholder="Sin mínimo" />
+                </label>
+                <label class="notify-panel__field">
+                  <span>Máxima (°C)</span>
+                  <input type="text" [(ngModel)]="tempHighForm" [disabled]="!alertsEnabledForm" placeholder="Sin máximo" />
+                </label>
+              </div>
+              <p class="notify-panel__hint" *ngIf="!alertsEnabledForm">Sin notificaciones para este dispositivo.</p>
+              <button type="button" class="btn btn--primary notify-panel__save" (click)="saveNotificationSettings()">Guardar umbrales</button>
+            </div>
+            <ng-template #noDeviceSelected>
+              <p class="card__empty">Seleccioná un dispositivo.</p>
+            </ng-template>
+          </article>
+
+          <article class="card">
+            <h2 class="card__title card__title--sm">Actividad reciente</h2>
+            <ul class="activity-list">
+              <li class="activity-item" *ngFor="let a of activities">
+                <span class="activity-item__dot activity-item__dot--{{ a.accent }}"></span>
+                <div class="activity-item__body">
+                  <p class="activity-item__name">{{ a.deviceName }}</p>
+                  <p class="activity-item__sub">Dispositivo · {{ a.online ? 'Online' : 'Offline' }}</p>
+                </div>
+                <span class="activity-item__time">{{ a.timeLabel }}</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h2 class="card__title card__title--sm">Alertas activas</h2>
+            <ul class="alert-list" *ngIf="activeAlerts.length; else noAlerts">
+              <li class="alert-item" *ngFor="let al of activeAlerts" [class.alert-item--critical]="al.severity === 'critical'">
+                <span class="alert-item__icon" [class.alert-item__icon--critical]="al.severity === 'critical'">
+                  <svg *ngIf="al.severity === 'warning'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <svg *ngIf="al.severity === 'critical'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                </span>
+                <div>
+                  <p class="alert-item__device">{{ al.deviceName }}</p>
+                  <p class="alert-item__temp">{{ formatTemp(al.temperatureC) }}</p>
+                  <p class="alert-item__msg">{{ al.message }}</p>
+                </div>
+              </li>
+            </ul>
+            <ng-template #noAlerts>
+              <p class="card__empty">Sin alertas para la configuración actual.</p>
+            </ng-template>
+          </article>
+        </aside>
+      </div>
+    </div>
+
+    <ng-template #emptyState>
+      <div class="empty">
+        <div class="empty__card">
+          <h1 class="empty__title">Sin dispositivos</h1>
+          <p class="empty__text">Agregá un dispositivo para ver el panel.</p>
+          <div class="empty__actions">
+            <button type="button" class="btn btn--primary" (click)="openAddDeviceModal()">+ Dispositivo</button>
+            <button *ngIf="isDev" type="button" class="btn btn--ghost" (click)="loadDemoDevices()">Demo</button>
+          </div>
+          <p *ngIf="isDev" class="empty__hint">Demo solo en desarrollo.</p>
+        </div>
+      </div>
+    </ng-template>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="deviceModalMode"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="device-modal-title"
+  (click)="closeDeviceModal()"
+>
+  <div class="modal" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="device-modal-title" class="modal__title">Dispositivo</h2>
+      <button type="button" class="modal__close" (click)="closeDeviceModal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro" *ngIf="deviceModalMode === 'add'">Nuevo dispositivo. Si dejás vacío el ID módulo, se genera uno para cargar en WiFiManager del ESP.</p>
+    <p class="modal__intro" *ngIf="deviceModalMode === 'edit'">Editar dispositivo. Podés registrar una lectura manual abajo.</p>
+    <form class="modal__form" [formGroup]="deviceForm" (ngSubmit)="submitDeviceForm()">
+      <label class="modal__field">
+        <span class="modal__label">Nombre <span class="modal__req">*</span></span>
+        <input type="text" class="modal__input" formControlName="name" autocomplete="off" />
+        <span class="modal__err" *ngIf="deviceForm.controls.name.touched && deviceForm.controls.name.hasError('required')">Nombre requerido.</span>
+        <span class="modal__err" *ngIf="deviceForm.controls.name.touched && deviceForm.controls.name.hasError('minlength')">Mínimo 2 caracteres.</span>
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">Ubicación</span>
+        <input type="text" class="modal__input" formControlName="location" />
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">ID módulo (dispositivo)</span>
+        <input type="text" class="modal__input" formControlName="moduleId" autocomplete="off" />
+        <span class="modal__hint">Opcional. Vacío = se genera automático (mismo valor en WiFiManager: module_id).</span>
+      </label>
+      <div class="modal__field" *ngIf="deviceModalMode === 'edit' && editingDevice?.deviceToken">
+        <span class="modal__label">Código API (6 dígitos, solo este navegador)</span>
+        <input type="text" class="modal__input" readonly [value]="editingDevice?.deviceToken" />
+        <span class="modal__hint">Copialo al ESP (WiFiManager: api_key) si cambiaste de PC o borraste datos del navegador.</span>
+      </div>
+      <label class="modal__field">
+        <span class="modal__label">IP (WiFi)</span>
+        <input type="text" class="modal__input" formControlName="espLocalIp" autocomplete="off" />
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">Temperatura (°C), opcional</span>
+        <input type="text" class="modal__input" formControlName="manualTemp" placeholder="Ej. 3,5" inputmode="decimal" />
+        <span class="modal__hint">Registra una lectura ahora (prueba hasta conectar el dispositivo).</span>
+      </label>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" (click)="closeDeviceModal()">Cancelar</button>
+        <button type="submit" class="btn btn--primary" [disabled]="addDeviceSubmitting">
+          {{ addDeviceSubmitting ? 'Guardando…' : 'Guardar' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="provisioningOpen && provisioningCredentials as cred"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="provision-title"
+  (click)="closeProvisioningModal()"
+>
+  <div class="modal modal--wide" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="provision-title" class="modal__title">Configurar ESP (WiFiManager)</h2>
+      <button type="button" class="modal__close" (click)="closeProvisioningModal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro">Copiá estos valores en el portal del ESP (mismos nombres que en el firmware).</p>
+    <div class="provision-rows">
+      <div class="provision-row">
+        <span class="provision-row__label">api_url</span>
+        <code class="provision-row__val">{{ cred.ingestUrl }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(cred.ingestUrl)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">module_id</span>
+        <code class="provision-row__val">{{ cred.moduleId }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(cred.moduleId)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">api_key</span>
+        <code class="provision-row__val">{{ cred.deviceToken }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(cred.deviceToken)">Copiar</button>
+      </div>
+    </div>
+    <p class="modal__hint">En el firmware van como <code>moduleId</code> y <code>deviceToken</code> (api_key = 6 dígitos). Guardá este código: no se puede recuperar desde otro navegador.</p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--primary" (click)="closeProvisioningModal()">Listo</button>
+    </div>
+  </div>
+</div>
