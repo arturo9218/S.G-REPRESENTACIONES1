@@ -36,10 +36,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
   sensor1LabelForm = '';
   sensor2LabelForm = '';
   sensorLabelsDirty = false;
+  notificationSettingsDirty = false;
   sensorLabelsSaving = false;
   sensorLabelsFeedback = '';
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
+  private audioCtx: AudioContext | null = null;
+  private unlockAudioHandler: (() => void) | null = null;
 
   /** null = cerrado; 'add' | 'edit' */
   deviceModalMode: 'add' | 'edit' | null = null;
@@ -48,8 +51,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   /** Vista compacta vs ampliada del gráfico de temperaturas */
   chartExpanded = false;
+  /** Navegación móvil (barra inferior) — sección activa visual */
+  mobileNavSection: 'dashboard' | 'devices' | 'alerts' | 'settings' = 'dashboard';
   alarmEventsCount = 0;
   private lastActiveAlertIds = new Set<string>();
+  private lastAlarmToneAtMs = 0;
   private readonly alarmsCountStorageKey = 'sg_alarms_count_v1';
 
   /** Tras crear en la nube: datos para WiFiManager del ESP */
@@ -79,6 +85,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.setupAlarmAudioUnlock();
     this.alarmEventsCount = this.loadAlarmEventsCount();
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
       this.devices = list;
@@ -100,6 +107,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.unlockAudioHandler) {
+      window.removeEventListener('pointerdown', this.unlockAudioHandler);
+      window.removeEventListener('keydown', this.unlockAudioHandler);
+      this.unlockAudioHandler = null;
+    }
+    if (this.audioCtx) {
+      void this.audioCtx.close();
+      this.audioCtx = null;
+    }
     this.subDev?.unsubscribe();
     this.subRead?.unsubscribe();
   }
@@ -368,6 +384,21 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.chartExpanded = !this.chartExpanded;
   }
 
+  /** Scroll a secciones del dashboard (sidebar / barra móvil) */
+  scrollToSection(section: 'dashboard' | 'devices' | 'alerts' | 'settings'): void {
+    const ids: Record<typeof section, string> = {
+      dashboard: 'section-kpi',
+      devices: 'section-devices',
+      alerts: 'section-alerts',
+      settings: 'section-settings',
+    };
+    const el = document.getElementById(ids[section]);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    this.mobileNavSection = section;
+  }
+
   openChartInNewTab(e?: Event): void {
     e?.stopPropagation();
     const deviceId = this.selectedDeviceId ?? this.devices[0]?.id ?? null;
@@ -383,6 +414,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   selectDevice(deviceId: string | null): void {
     this.selectedDeviceId = deviceId;
     this.sensorLabelsDirty = false;
+    this.notificationSettingsDirty = false;
     this.syncNotificationFormWithSelected();
   }
 
@@ -421,15 +453,28 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
-  saveNotificationSettings(): void {
+  onNotificationFormChange(): void {
+    this.notificationSettingsDirty = true;
+  }
+
+  async saveNotificationSettings(): Promise<void> {
     const device = this.selectedDevice;
     if (!device) return;
+    if (this.alertsEnabledForm && typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        void Notification.requestPermission();
+      }
+    }
     if (!this.alertsEnabledForm) {
-      this.deviceStore.updateDeviceNotificationConfig(device.id, {
+      const result = await this.deviceStore.updateDeviceNotificationConfig(device.id, {
         alertsEnabled: false,
         tempLowC: null,
         tempHighC: null,
       });
+      if (result.cloudError) {
+        alert(`Guardado en este equipo. No se pudo guardar en la nube: ${result.cloudError}`);
+      }
+      this.notificationSettingsDirty = false;
       return;
     }
 
@@ -440,11 +485,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.deviceStore.updateDeviceNotificationConfig(device.id, {
+    const result = await this.deviceStore.updateDeviceNotificationConfig(device.id, {
       alertsEnabled: true,
       tempLowC: low,
       tempHighC: high,
     });
+    if (result.cloudError) {
+      alert(`Guardado en este equipo. No se pudo guardar en la nube: ${result.cloudError}`);
+    }
+    this.notificationSettingsDirty = false;
   }
 
   logout(): void {
@@ -528,12 +577,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
 
     if (this.deviceModalMode === 'edit' && this.editingDeviceId) {
-      this.deviceStore.updateDeviceMeta(this.editingDeviceId, {
+      const result = await this.deviceStore.updateDeviceMeta(this.editingDeviceId, {
         name: v.name ?? '',
         location: v.location ?? '',
         moduleId: v.moduleId ?? '',
         espLocalIp: v.espLocalIp ?? '',
       });
+      if (!result.ok) {
+        alert(
+          result.error
+            ? `No se pudo guardar el nombre en la nube: ${result.error}`
+            : 'No se pudo guardar el dispositivo.'
+        );
+        return;
+      }
       if (manualTemp != null && !Number.isNaN(manualTemp)) {
         this.deviceStore.recordTemperatureReading(this.editingDeviceId, manualTemp);
       }
@@ -622,30 +679,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
   get chartYMinLabel(): string {
     const r = this.chartPaddedBounds();
     return r ? this.formatChartAxisTick(r.minV, r.span) : '—';
-  }
-
-  /** Punto al final de la serie 1 (lectura más reciente en el gráfico) */
-  chartLastPointS1(): { cx: number; cy: number } | null {
-    const series = this.chartReadings();
-    const n = series.length;
-    if (n < 1) return null;
-    const sc = this.chartScale();
-    const i = n - 1;
-    const x = n > 1 ? (i / (n - 1)) * 100 : 50;
-    return { cx: x, cy: sc.toSvgY(series[i].temperatureC) };
-  }
-
-  /** Marca al final de la serie 2 (misma lógica de relleno que la polyline). */
-  chartLastPointS2(): { cx: number; cy: number } | null {
-    const series = this.chartReadings();
-    const n = series.length;
-    if (n < 1 || !this.chartHasSecondSeries()) return null;
-    const filled = this.temp2SeriesForwardFilled(series);
-    const tEnd = filled[n - 1];
-    if (tEnd == null || Number.isNaN(tEnd)) return null;
-    const sc = this.chartScale();
-    const x = n > 1 ? 100 : 50;
-    return { cx: x, cy: sc.toSvgY(tEnd) };
   }
 
   /** Min/máx reales de los datos (sin margen). */
@@ -817,6 +850,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.sensorLabelsDirty = false;
       return;
     }
+    // Mientras el usuario edita notificaciones, no pisar el estado del form por polling.
+    if (this.notificationSettingsDirty) {
+      return;
+    }
     this.alertsEnabledForm = device.alertsEnabled !== false;
     this.tempLowForm =
       device.tempLowC == null || Number.isNaN(device.tempLowC) ? '' : String(device.tempLowC);
@@ -845,7 +882,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (newEvents > 0) {
       this.alarmEventsCount += newEvents;
       this.persistAlarmEventsCount();
+      this.playAlarmTone();
       this.tryBrowserNotification(newEvents);
+    }
+    // Si hay alertas activas sostenidas, repetir sonido con cooldown
+    // para no sonar solo una vez.
+    if (current.size > 0) {
+      const now = Date.now();
+      const cooldownMs = 20000;
+      if (now - this.lastAlarmToneAtMs >= cooldownMs) {
+        this.playAlarmTone();
+      }
     }
     this.lastActiveAlertIds = current;
   }
@@ -883,5 +930,58 @@ export class DashboardComponent implements OnInit, OnDestroy {
     } catch {
       // no-op
     }
+  }
+
+  private playAlarmTone(): void {
+    if (typeof window === 'undefined') return;
+    const Ctx = (window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext) as
+      | typeof AudioContext
+      | undefined;
+    if (!Ctx) return;
+    try {
+      const ctx = this.audioCtx ?? new Ctx();
+      this.audioCtx = ctx;
+      if (ctx.state === 'suspended') {
+        void ctx.resume();
+      }
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = 1046.5;
+      g.gain.value = 0.001;
+      o.connect(g);
+      g.connect(ctx.destination);
+      const now = ctx.currentTime;
+      g.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
+      o.start(now);
+      o.stop(now + 0.43);
+      this.lastAlarmToneAtMs = Date.now();
+    } catch {
+      // no-op
+    }
+  }
+
+  private setupAlarmAudioUnlock(): void {
+    if (typeof window === 'undefined') return;
+    const Ctx = (window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext) as
+      | typeof AudioContext
+      | undefined;
+    if (!Ctx) return;
+    this.audioCtx = new Ctx();
+    this.unlockAudioHandler = () => {
+      if (this.audioCtx?.state === 'suspended') {
+        void this.audioCtx.resume();
+      }
+      if (this.audioCtx?.state === 'running' && this.unlockAudioHandler) {
+        window.removeEventListener('pointerdown', this.unlockAudioHandler);
+        window.removeEventListener('keydown', this.unlockAudioHandler);
+        this.unlockAudioHandler = null;
+      }
+    };
+    window.addEventListener('pointerdown', this.unlockAudioHandler);
+    window.addEventListener('keydown', this.unlockAudioHandler);
   }
 }

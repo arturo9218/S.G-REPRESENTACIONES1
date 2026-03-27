@@ -34,8 +34,16 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   sidebarCollapsed = false;
   sidebarPeek = false;
 
+  /** Serie para filtros de fecha en dispositivo nube (RPC Supabase). */
+  remoteChartSeries: TemperatureReading[] | null = null;
+  remoteChartLoading = false;
+  remoteChartError = '';
+
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
+  private remoteLoadTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Evita que una respuesta vieja de red pise un filtro nuevo. */
+  private remoteLoadGeneration = 0;
 
   readonly chartGridYStops = [14, 34, 54, 74, 86];
 
@@ -58,13 +66,21 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
       this.devices = list;
       if (!this.selectedDeviceId || !list.some((d) => d.id === this.selectedDeviceId)) {
         this.selectedDeviceId = this.pickBestDeviceId();
+        this.scheduleRemoteChartLoad();
       }
       this.syncSensorLabelsWithSelected();
+      // No llamar scheduleRemoteChartLoad() en cada emisión: el store actualiza
+      // dispositivos muy seguido (poll) y borraba la serie remota → parpadeo.
     });
 
     this.subRead = this.deviceStore.readings$.subscribe((list) => {
       this.readings = list;
-      if (this.selectedDeviceId && this.chartReadings().length === 0) {
+      const hasDateFilter =
+        !!this.filterDay?.trim() || !!this.filterFrom?.trim() || !!this.filterTo?.trim();
+      // Con filtro activo el gráfico puede estar vacío mientras carga la nube;
+      // no cambiar de dispositivo automáticamente (rompía Desde/Hasta).
+      if (hasDateFilter) return;
+      if (this.selectedDeviceId && this.chartReadingsLocalFiltered().length === 0) {
         const best = this.pickBestDeviceId();
         if (best) this.selectedDeviceId = best;
       }
@@ -81,6 +97,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.remoteLoadTimer != null) {
+      clearTimeout(this.remoteLoadTimer);
+      this.remoteLoadTimer = null;
+    }
     this.subDev?.unsubscribe();
     this.subRead?.unsubscribe();
   }
@@ -90,12 +110,25 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     return this.devices.find((d) => d.id === this.selectedDeviceId) ?? null;
   }
 
+  get selectedIsCloudDevice(): boolean {
+    return this.deviceStore.isCloudDeviceId(this.selectedDeviceId);
+  }
+
   get hasSecondSeries(): boolean {
     return this.chartReadings().some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
   }
 
   get hasChartData(): boolean {
     return this.chartReadings().length >= 2;
+  }
+
+  /** Hay filtro de fechas pero no alcanza puntos para dibujar la curva */
+  get filterActiveButNoPoints(): boolean {
+    const hasFilter =
+      !!this.filterDay?.trim() || !!this.filterFrom?.trim() || !!this.filterTo?.trim();
+    if (!hasFilter) return false;
+    if (this.remoteChartLoading) return false;
+    return this.chartReadings().length < 2;
   }
 
   get debugStatus(): string {
@@ -119,19 +152,21 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   get chartXStartLabel(): string {
     const s = this.chartReadings();
     if (!s.length) return '—';
-    return this.formatChartTime(s[0].at);
+    return this.formatChartAxisTime(s[0].at, s[0].at, s[s.length - 1].at);
   }
 
   get chartXMidLabel(): string {
     const s = this.chartReadings();
     if (!s.length) return '—';
-    return this.formatChartTime(s[Math.floor((s.length - 1) / 2)].at);
+    const mid = s[Math.floor((s.length - 1) / 2)];
+    return this.formatChartAxisTime(mid.at, s[0].at, s[s.length - 1].at);
   }
 
   get chartXEndLabel(): string {
     const s = this.chartReadings();
     if (!s.length) return '—';
-    return this.formatChartTime(s[s.length - 1].at);
+    const last = s[s.length - 1];
+    return this.formatChartAxisTime(last.at, s[0].at, last.at);
   }
 
   get hoverX(): number | null {
@@ -195,6 +230,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     this.filterDay = '';
     this.filterFrom = '';
     this.filterTo = '';
+    this.clearRemoteChartState();
   }
 
   onFilterDayChange(): void {
@@ -203,6 +239,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
       this.filterFrom = '';
       this.filterTo = '';
     }
+    this.scheduleRemoteChartLoad();
   }
 
   onFilterRangeChange(): void {
@@ -210,6 +247,12 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     if (this.filterFrom || this.filterTo) {
       this.filterDay = '';
     }
+    this.scheduleRemoteChartLoad();
+  }
+
+  onChartDeviceChange(): void {
+    this.syncSensorLabelsWithSelected();
+    this.scheduleRemoteChartLoad();
   }
 
   toggleSidebar(): void {
@@ -298,32 +341,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     this.sensor2LabelForm = d.sensor2Label?.trim() || 'Sensor 2';
   }
 
-  chartLastPointS1(): { cx: number; cy: number } | null {
-    if (!this.showTemp1) return null;
-    const series = this.chartReadings();
-    const n = series.length;
-    if (n < 1) return null;
-    const sc = this.chartScale();
-    const x = n > 1 ? 100 : 50;
-    return { cx: x, cy: sc.toSvgY(series[n - 1].temperatureC) };
-  }
-
-  chartLastPointS2(): { cx: number; cy: number } | null {
-    if (!this.showTemp2) return null;
-    if (!this.hasSecondSeries) return null;
-    const series = this.chartReadings();
-    const n = series.length;
-    if (n < 1) return null;
-    const filled = this.temp2SeriesForwardFilled(series);
-    const tEnd = filled[n - 1];
-    if (tEnd == null || Number.isNaN(tEnd)) return null;
-    const sc = this.chartScale();
-    return { cx: n > 1 ? 100 : 50, cy: sc.toSvgY(tEnd) };
-  }
-
   get chartCurrentLabel1(): string {
-    const p = this.chartLastPointS1();
-    if (!p) return '—';
+    if (!this.showTemp1) return '—';
     const series = this.chartReadings();
     const n = series.length;
     if (!n) return '—';
@@ -332,8 +351,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   }
 
   get chartCurrentLabel2(): string {
-    const p = this.chartLastPointS2();
-    if (!p) return '—';
+    if (!this.showTemp2 || !this.hasSecondSeries) return '—';
     const series = this.chartReadings();
     const n = series.length;
     if (!n) return '—';
@@ -446,44 +464,76 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   private chartReadings(): TemperatureReading[] {
     if (!this.selectedDeviceId) return [];
+
+    const bounds = this.getFilterRangeBounds();
+    const useRemote =
+      bounds !== null && this.deviceStore.isCloudDeviceId(this.selectedDeviceId);
+
+    if (useRemote) {
+      if (this.remoteChartLoading) return [];
+      if (this.remoteChartSeries !== null) {
+        return this.capChartPoints(this.remoteChartSeries);
+      }
+      if (this.remoteChartError) {
+        return this.chartReadingsLocalFiltered();
+      }
+      return [];
+    }
+
+    return this.chartReadingsLocalFiltered();
+  }
+
+  private chartReadingsLocalFiltered(): TemperatureReading[] {
+    if (!this.selectedDeviceId) return [];
     const source = this.readings.filter((r) => r.deviceId === this.selectedDeviceId);
     let filtered = [...source];
 
     if (this.filterDay) {
-      const dayStart = new Date(`${this.filterDay}T00:00:00`);
-      const dayEnd = new Date(`${this.filterDay}T23:59:59.999`);
-      const msStart = dayStart.getTime();
-      const msEnd = dayEnd.getTime();
-      filtered = filtered.filter((r) => {
-        const t = new Date(r.at).getTime();
-        return Number.isFinite(t) && t >= msStart && t <= msEnd;
-      });
+      const dayRange = this.parseDayRange(this.filterDay);
+      if (dayRange) {
+        const msStart = dayRange.from.getTime();
+        const msEnd = dayRange.to.getTime();
+        filtered = filtered.filter((r) => {
+          const t = new Date(r.at).getTime();
+          return Number.isFinite(t) && t >= msStart && t <= msEnd;
+        });
+      }
     }
 
     if (this.filterFrom) {
-      const fromMs = new Date(this.filterFrom).getTime();
+      const fromMs = this.parseLocalDateLike(this.filterFrom)?.getTime() ?? Number.NaN;
       if (Number.isFinite(fromMs)) {
         filtered = filtered.filter((r) => new Date(r.at).getTime() >= fromMs);
       }
     }
 
     if (this.filterTo) {
-      const parsedTo = new Date(this.filterTo);
-      // Si "Hasta" queda en 00:00, tomamos fin de día para que sea inclusivo.
-      if (parsedTo.getHours() === 0 && parsedTo.getMinutes() === 0 && parsedTo.getSeconds() === 0) {
+      const parsedTo = this.parseLocalDateLike(this.filterTo);
+      if (
+        parsedTo &&
+        parsedTo.getHours() === 0 &&
+        parsedTo.getMinutes() === 0 &&
+        parsedTo.getSeconds() === 0
+      ) {
         parsedTo.setHours(23, 59, 59, 999);
       }
-      const toMs = parsedTo.getTime();
+      const toMs = parsedTo?.getTime() ?? Number.NaN;
       if (Number.isFinite(toMs)) {
         filtered = filtered.filter((r) => new Date(r.at).getTime() <= toMs);
       }
     }
 
     const sorted = filtered.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
-    if (sorted.length) return sorted.slice(-48);
+    if (sorted.length) {
+      return this.capChartPoints(sorted);
+    }
 
-    // Fallback: si aún no hay historial, sintetizar una mini-serie con la temperatura actual
-    // para que el gráfico de análisis no quede en blanco.
+    const hasActiveFilter =
+      !!this.filterDay?.trim() || !!this.filterFrom?.trim() || !!this.filterTo?.trim();
+    if (hasActiveFilter) {
+      return [];
+    }
+
     const d = this.selectedDevice;
     if (d?.temperatureC != null && !Number.isNaN(d.temperatureC)) {
       const now = Date.now();
@@ -499,6 +549,253 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
       return synthetic;
     }
     return [];
+  }
+
+  private capChartPoints(sorted: TemperatureReading[]): TemperatureReading[] {
+    const cap = 8000;
+    if (sorted.length <= cap) return sorted;
+
+    // Mantener todo el rango temporal (inicio y fin), no solo los últimos puntos.
+    // Si no, filtros largos parecían "cortados" al día más reciente.
+    const out: TemperatureReading[] = [];
+    const lastIndex = sorted.length - 1;
+    for (let i = 0; i < cap; i++) {
+      const idx = Math.round((i * lastIndex) / (cap - 1));
+      out.push(sorted[idx]);
+    }
+    return out;
+  }
+
+  /** Límites del filtro actual para consultar Supabase. */
+  private getFilterRangeBounds(): { from: Date; to: Date } | null {
+    if (this.filterDay?.trim()) {
+      const dayRange = this.parseDayRange(this.filterDay.trim());
+      return dayRange ?? null;
+    }
+    const hasFrom = !!this.filterFrom?.trim();
+    const hasTo = !!this.filterTo?.trim();
+    if (!hasFrom && !hasTo) return null;
+
+    let from: Date;
+    let to: Date;
+
+    if (hasFrom) {
+      const parsed = this.parseLocalDateLike(this.filterFrom);
+      if (!parsed) return null;
+      from = parsed;
+      if (!Number.isFinite(from.getTime())) return null;
+    } else {
+      from = new Date(0);
+    }
+
+    if (hasTo) {
+      const parsed = this.parseLocalDateLike(this.filterTo);
+      if (!parsed) return null;
+      to = parsed;
+      if (!Number.isFinite(to.getTime())) return null;
+      if (to.getHours() === 0 && to.getMinutes() === 0 && to.getSeconds() === 0) {
+        to.setHours(23, 59, 59, 999);
+      }
+    } else {
+      to = new Date();
+    }
+
+    if (from > to) return null;
+    return { from, to };
+  }
+
+  /**
+   * Acepta formato ISO (datetime-local/date) y fallback manual dd/mm/yyyy [hh:mm[:ss]].
+   */
+  private parseLocalDateLike(raw: string | null | undefined): Date | null {
+    const v = (raw ?? '').trim();
+    if (!v) return null;
+
+    // Input date: yyyy-mm-dd (interpretar SIEMPRE en local para evitar desfase UTC).
+    const ymd = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (ymd) {
+      const year = Number(ymd[1]);
+      const month = Number(ymd[2]);
+      const day = Number(ymd[3]);
+      const d = new Date(year, month - 1, day, 0, 0, 0, 0);
+      if (!Number.isFinite(d.getTime())) return null;
+      return d;
+    }
+
+    // Input datetime-local: yyyy-mm-ddTHH:mm[:ss] (también en local).
+    const ymdHm = v.match(
+      /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/
+    );
+    if (ymdHm) {
+      const year = Number(ymdHm[1]);
+      const month = Number(ymdHm[2]);
+      const day = Number(ymdHm[3]);
+      const hh = Number(ymdHm[4]);
+      const mm = Number(ymdHm[5]);
+      const ss = Number(ymdHm[6] ?? 0);
+      const d = new Date(year, month - 1, day, hh, mm, ss, 0);
+      if (!Number.isFinite(d.getTime())) return null;
+      return d;
+    }
+
+    // Fallback para navegadores/locales que entregan dd/mm/yyyy hh:mm.
+    const m = v.match(
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?$/
+    );
+    if (m) {
+      const day = Number(m[1]);
+      const month = Number(m[2]);
+      const year = Number(m[3]);
+      const hh = Number(m[4] ?? 0);
+      const mm = Number(m[5] ?? 0);
+      const ss = Number(m[6] ?? 0);
+
+      const d = new Date(year, month - 1, day, hh, mm, ss, 0);
+      if (Number.isFinite(d.getTime())) return d;
+    }
+
+    // Fallback ultra tolerante:
+    // soporta variantes locales con texto extra (ej: "26/03/2026 10:05 p. m.").
+    // Formatos esperados en números:
+    // - yyyy mm dd [hh mm ss]
+    // - dd mm yyyy [hh mm ss]
+    const nums = v.match(/\d+/g)?.map((n) => Number(n)) ?? [];
+    if (nums.length >= 3) {
+      let year = 0;
+      let month = 0;
+      let day = 0;
+      let hh = 0;
+      let mm = 0;
+      let ss = 0;
+
+      if (String(nums[0]).length === 4) {
+        // yyyy-mm-dd ...
+        year = nums[0];
+        month = nums[1];
+        day = nums[2];
+        hh = nums[3] ?? 0;
+        mm = nums[4] ?? 0;
+        ss = nums[5] ?? 0;
+      } else {
+        // dd-mm-yyyy ...
+        day = nums[0];
+        month = nums[1];
+        year = nums[2];
+        hh = nums[3] ?? 0;
+        mm = nums[4] ?? 0;
+        ss = nums[5] ?? 0;
+      }
+
+      const lower = v.toLowerCase();
+      const hasPm = /\bpm\b|p\.\s*m\b|p\.?\s*m\.?/i.test(lower);
+      const hasAm = /\bam\b|a\.\s*m\b|a\.?\s*m\.?/i.test(lower);
+      if (hasPm && hh >= 1 && hh <= 11) hh += 12;
+      if (hasAm && hh === 12) hh = 0;
+
+      const parsed = new Date(year, month - 1, day, hh, mm, ss, 0);
+      if (Number.isFinite(parsed.getTime())) return parsed;
+    }
+
+    return null;
+  }
+
+  private parseDayRange(rawDay: string): { from: Date; to: Date } | null {
+    const d = this.parseLocalDateLike(rawDay);
+    if (!d) return null;
+    const from = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+    const to = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+    return { from, to };
+  }
+
+  private clearRemoteChartState(): void {
+    this.remoteChartSeries = null;
+    this.remoteChartLoading = false;
+    this.remoteChartError = '';
+  }
+
+  private scheduleRemoteChartLoad(): void {
+    if (this.remoteLoadTimer != null) {
+      clearTimeout(this.remoteLoadTimer);
+    }
+    const bounds = this.getFilterRangeBounds();
+    const deviceId = this.selectedDeviceId;
+    if (
+      !this.deviceStore.isCloudSyncActive() ||
+      !bounds ||
+      !deviceId ||
+      !this.deviceStore.isCloudDeviceId(deviceId)
+    ) {
+      this.clearRemoteChartState();
+      return;
+    }
+    this.remoteLoadGeneration++;
+    const loadGen = this.remoteLoadGeneration;
+    this.remoteChartLoading = true;
+    this.remoteChartError = '';
+    this.remoteChartSeries = null;
+    this.remoteLoadTimer = window.setTimeout(() => {
+      this.remoteLoadTimer = null;
+      void this.loadRemoteChartSeries(loadGen);
+    }, 400);
+  }
+
+  private async loadRemoteChartSeries(expectedGen: number): Promise<void> {
+    const bounds = this.getFilterRangeBounds();
+    const deviceId = this.selectedDeviceId;
+    if (
+      !this.deviceStore.isCloudSyncActive() ||
+      !bounds ||
+      !deviceId ||
+      !this.deviceStore.isCloudDeviceId(deviceId)
+    ) {
+      if (expectedGen === this.remoteLoadGeneration) {
+        this.clearRemoteChartState();
+      }
+      return;
+    }
+
+    this.remoteChartError = '';
+    try {
+      const { rows, error } = await this.deviceStore.fetchChartReadingsForRange(
+        deviceId,
+        bounds.from.toISOString(),
+        bounds.to.toISOString()
+      );
+      if (expectedGen !== this.remoteLoadGeneration) {
+        return;
+      }
+      if (error) {
+        this.remoteChartSeries = null;
+        this.remoteChartError = error;
+        return;
+      }
+      this.remoteChartSeries = rows;
+      this.remoteChartError = '';
+    } finally {
+      if (expectedGen === this.remoteLoadGeneration) {
+        this.remoteChartLoading = false;
+      }
+    }
+  }
+
+  private formatChartAxisTime(pointAt: string, firstAt: string, lastAt: string): string {
+    const t0 = new Date(firstAt).getTime();
+    const t1 = new Date(lastAt).getTime();
+    if (!Number.isFinite(t0) || !Number.isFinite(t1)) return '—';
+    const spanMs = Math.abs(t1 - t0);
+    if (spanMs > 36 * 60 * 60 * 1000) {
+      try {
+        return new Date(pointAt).toLocaleString('es-AR', {
+          day: '2-digit',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      } catch {
+        return pointAt;
+      }
+    }
+    return this.formatChartTime(pointAt);
   }
 
   private formatChartTime(iso: string): string {

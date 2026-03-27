@@ -13,7 +13,15 @@ import { DashboardDevice, TemperatureReading } from './models/dashboard.models';
 const STORAGE_KEY_PREFIX = 'sg-monitor-devices-v2';
 const READINGS_KEY_PREFIX = 'sg-monitor-readings-v2';
 const TOKEN_MAP_PREFIX = 'sg-monitor-device-tokens-v2';
-const MAX_READINGS = 1500;
+/**
+ * Máximo de lecturas en localStorage (tras merge con la nube).
+ * La consulta a Supabase ya no usa un solo `limit` global: se pide historial por dispositivo
+ * (ver CLOUD_READINGS_PER_DEVICE); si no, con ~15 s entre lecturas 5000 filas ≈ solo 24 h.
+ */
+const MAX_READINGS = 40000;
+
+/** Lecturas más recientes a traer por cada dispositivo UUID (Supabase). */
+const CLOUD_READINGS_PER_DEVICE = 25000;
 const DEFAULT_SENSOR_1_LABEL = 'Sensor 1';
 const DEFAULT_SENSOR_2_LABEL = 'Sensor 2';
 
@@ -340,9 +348,17 @@ export class DeviceStoreService {
   }
 
   private persistReadings(list: TemperatureReading[]): void {
-    const trimmed = list.slice(-MAX_READINGS);
-    localStorage.setItem(this.readingsStorageKey(), JSON.stringify(trimmed));
-    this.ngZone.run(() => this.readingsSubject.next(trimmed));
+    let max = MAX_READINGS;
+    while (max >= 1000) {
+      const trimmed = list.slice(-max);
+      try {
+        localStorage.setItem(this.readingsStorageKey(), JSON.stringify(trimmed));
+        this.ngZone.run(() => this.readingsSubject.next(trimmed));
+        return;
+      } catch {
+        max = Math.floor(max / 2);
+      }
+    }
   }
 
   private devicesStorageKey(): string {
@@ -422,10 +438,151 @@ export class DeviceStoreService {
     );
   }
 
+  /** Sesión con Supabase y sync activado (p. ej. historial largo por RPC). */
+  isCloudSyncActive(): boolean {
+    return this.isCloudSyncEnabled();
+  }
+
   private isUuid(id: string): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       id
     );
+  }
+
+  /** Dispositivo con UUID en Supabase (historial en la nube). */
+  isCloudDeviceId(id: string | null | undefined): boolean {
+    return !!id && this.isUuid(id);
+  }
+
+  /**
+   * Lecturas en un rango para el gráfico de análisis (RPC en Supabase).
+   * Resolución: cruda / horaria / diaria según duración (ver sql/003_chart_readings_range.sql).
+   */
+  async fetchChartReadingsForRange(
+    deviceId: string,
+    fromIso: string,
+    toIso: string
+  ): Promise<{ rows: TemperatureReading[]; error: string | null }> {
+    if (!this.isCloudSyncEnabled() || !this.isUuid(deviceId)) {
+      return { rows: [], error: null };
+    }
+    const { data, error } = await this.auth.client.rpc('get_device_readings_chart', {
+      p_device_id: deviceId,
+      p_from: fromIso,
+      p_to: toIso,
+    });
+    if (error) {
+      console.warn('get_device_readings_chart:', error.message, error);
+      if (this.isChartRpcMissingError(error.message)) {
+        const direct = await this.fetchChartReadingsForRangeDirect(deviceId, fromIso, toIso);
+        if (direct.error) {
+          return direct;
+        }
+        // Sin función SQL: lecturas directas (puede ser [] si no hay datos en el rango).
+        return { rows: direct.rows, error: null };
+      }
+      return { rows: [], error: this.formatChartRpcError(error.message) };
+    }
+    if (!data || !Array.isArray(data)) {
+      return { rows: [], error: null };
+    }
+    const rows = (data as Record<string, unknown>[]).map((row) => ({
+      deviceId,
+      at: typeof row['read_at'] === 'string' ? row['read_at'] : new Date().toISOString(),
+      temperatureC: row['temp1_c'] as number,
+      temp2C:
+        typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
+          ? (row['temp2_c'] as number)
+          : null,
+    }));
+    return { rows, error: null };
+  }
+
+  /**
+   * Sin RPC: lecturas crudas en el rango.
+   * Trae mitad del inicio + mitad del final para representar mejor rangos largos.
+   * Sirve si aún no ejecutaste 003_chart_readings_range.sql en Supabase.
+   */
+  private async fetchChartReadingsForRangeDirect(
+    deviceId: string,
+    fromIso: string,
+    toIso: string
+  ): Promise<{ rows: TemperatureReading[]; error: string | null }> {
+    const half = 10000;
+    const base = this.auth.client
+      .from('device_readings')
+      .select('created_at, temp1_c, temp2_c')
+      .eq('device_id', deviceId)
+      .gte('created_at', fromIso)
+      .lte('created_at', toIso);
+
+    const [{ data: dataAsc, error: errAsc }, { data: dataDesc, error: errDesc }] = await Promise.all([
+      base.order('created_at', { ascending: true }).limit(half),
+      base.order('created_at', { ascending: false }).limit(half),
+    ]);
+
+    const err = errAsc ?? errDesc;
+    if (err) {
+      console.warn('device_readings range:', err.message);
+      return { rows: [], error: err.message };
+    }
+
+    const merged = [
+      ...((dataAsc as Record<string, unknown>[] | null) ?? []),
+      ...((dataDesc as Record<string, unknown>[] | null) ?? []),
+    ];
+    if (!merged.length) {
+      return { rows: [], error: null };
+    }
+
+    const byAt = new Map<string, Record<string, unknown>>();
+    for (const row of merged) {
+      const at = typeof row['created_at'] === 'string' ? row['created_at'] : '';
+      if (!at) continue;
+      byAt.set(at, row);
+    }
+
+    const rows: TemperatureReading[] = [...byAt.values()]
+      .map((row: Record<string, unknown>) => ({
+        deviceId,
+        at: typeof row['created_at'] === 'string' ? row['created_at'] : new Date().toISOString(),
+        temperatureC: row['temp1_c'] as number,
+        temp2C:
+          typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
+            ? (row['temp2_c'] as number)
+            : null,
+      }))
+      .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    return { rows, error: null };
+  }
+
+  private isChartRpcMissingError(message: string): boolean {
+    const m = message.toLowerCase();
+    return (
+      m.includes('could not find the function') ||
+      m.includes('schema cache') ||
+      m.includes('does not exist')
+    );
+  }
+
+  private formatChartRpcError(message: string): string {
+    const m = message.toLowerCase();
+    if (m.includes('could not find the function') || m.includes('does not exist')) {
+      return (
+        'Supabase no expone la función get_device_readings_chart. ' +
+        'En el panel: SQL → pegá y ejecutá el archivo FRONTEND/supabase/sql/003_chart_readings_range.sql ' +
+        '(al final incluye NOTIFY para refrescar la API). ' +
+        'Mientras tanto la app intenta cargar lecturas sin esa función (hasta 20.000 puntos). ' +
+        `Detalle técnico: ${message}`
+      );
+    }
+    if (m.includes('not authorized') || m.includes('42501') || m.includes('permission denied')) {
+      return (
+        'No tenés permiso para leer ese dispositivo (sesión o dueño del equipo). ' +
+        `Detalle: ${message}`
+      );
+    }
+    return message;
   }
 
   private randomHex(byteLen: number): string {
@@ -504,11 +661,39 @@ export class DeviceStoreService {
       return;
     }
 
+    const ids = data.map((r) => r.id as string);
+    const thresholdsByDevice = new Map<
+      string,
+      { enabled: boolean; low: number | null; high: number | null }
+    >();
+    if (ids.length) {
+      const { data: thData } = await this.auth.client
+        .from('device_thresholds')
+        .select('device_id, notifications_enabled, temp1_min_c, temp1_max_c')
+        .in('device_id', ids);
+      for (const th of (thData ?? []) as Record<string, unknown>[]) {
+        const did = th['device_id'];
+        if (typeof did !== 'string') continue;
+        thresholdsByDevice.set(did, {
+          enabled: th['notifications_enabled'] !== false,
+          low:
+            typeof th['temp1_min_c'] === 'number' && !Number.isNaN(th['temp1_min_c'] as number)
+              ? (th['temp1_min_c'] as number)
+              : null,
+          high:
+            typeof th['temp1_max_c'] === 'number' && !Number.isNaN(th['temp1_max_c'] as number)
+              ? (th['temp1_max_c'] as number)
+              : null,
+        });
+      }
+    }
+
     const tokens = this.readTokenMap();
     const prevById = new Map(this.snapshot.map((d) => [d.id, d]));
     const cloudDevices: DashboardDevice[] = data.map((row) => {
       const rid = row.id as string;
       const prev = prevById.get(rid);
+      const th = thresholdsByDevice.get(rid);
       const s1 = row.sensor_1_label as string | null | undefined;
       const s2 = row.sensor_2_label as string | null | undefined;
       return {
@@ -522,9 +707,9 @@ export class DeviceStoreService {
         updatedAtLabel: prev?.updatedAtLabel ?? '—',
         batteryPct: prev?.batteryPct ?? null,
         espLocalIp: prev?.espLocalIp,
-        alertsEnabled: prev?.alertsEnabled !== false,
-        tempLowC: prev?.tempLowC ?? 2,
-        tempHighC: prev?.tempHighC ?? 8,
+        alertsEnabled: th?.enabled ?? (prev?.alertsEnabled !== false),
+        tempLowC: th?.low ?? (prev?.tempLowC ?? 2),
+        tempHighC: th?.high ?? (prev?.tempHighC ?? 8),
         cloudSynced: true,
         deviceToken: tokens[rid] ?? prev?.deviceToken,
         sensor1Label:
@@ -548,37 +733,50 @@ export class DeviceStoreService {
     const ids = this.snapshot.filter((d) => this.isUuid(d.id)).map((d) => d.id);
     if (!ids.length) return;
 
-    const { data, error } = await this.auth.client
-      .from('device_readings')
-      .select(
-        'device_id, created_at, temp1_c, temp2_c, temp3_c, power_w, press1_bar, press2_bar'
-      )
-      .in('device_id', ids)
-      .order('created_at', { ascending: false })
-      .limit(800);
+    const selectCols =
+      'device_id, created_at, temp1_c, temp2_c, temp3_c, power_w, press1_bar, press2_bar';
+    const rows: Record<string, unknown>[] = [];
 
-    if (error || !data) {
-      console.warn('Supabase readings:', error?.message);
-      return;
+    for (const deviceId of ids) {
+      const { data, error } = await this.auth.client
+        .from('device_readings')
+        .select(selectCols)
+        .eq('device_id', deviceId)
+        .order('created_at', { ascending: false })
+        .limit(CLOUD_READINGS_PER_DEVICE);
+
+      if (error) {
+        console.warn('Supabase readings:', error.message);
+        continue;
+      }
+      if (data?.length) rows.push(...data);
     }
 
-    const cloudReadings: TemperatureReading[] = data.map((r) => ({
-      deviceId: r.device_id as string,
-      at: r.created_at as string,
-      temperatureC: r.temp1_c as number,
+    if (!rows.length) return;
+
+    const cloudReadings: TemperatureReading[] = rows.map((r) => ({
+      deviceId: r['device_id'] as string,
+      at: r['created_at'] as string,
+      temperatureC: r['temp1_c'] as number,
       temp2C:
-        typeof r.temp2_c === 'number' && !Number.isNaN(r.temp2_c) ? r.temp2_c : null,
+        typeof r['temp2_c'] === 'number' && !Number.isNaN(r['temp2_c'] as number)
+          ? (r['temp2_c'] as number)
+          : null,
       temp3C:
-        typeof r.temp3_c === 'number' && !Number.isNaN(r.temp3_c) ? r.temp3_c : null,
+        typeof r['temp3_c'] === 'number' && !Number.isNaN(r['temp3_c'] as number)
+          ? (r['temp3_c'] as number)
+          : null,
       powerW:
-        typeof r.power_w === 'number' && !Number.isNaN(r.power_w) ? r.power_w : null,
+        typeof r['power_w'] === 'number' && !Number.isNaN(r['power_w'] as number)
+          ? (r['power_w'] as number)
+          : null,
       press1Bar:
-        typeof r.press1_bar === 'number' && !Number.isNaN(r.press1_bar)
-          ? r.press1_bar
+        typeof r['press1_bar'] === 'number' && !Number.isNaN(r['press1_bar'] as number)
+          ? (r['press1_bar'] as number)
           : null,
       press2Bar:
-        typeof r.press2_bar === 'number' && !Number.isNaN(r.press2_bar)
-          ? r.press2_bar
+        typeof r['press2_bar'] === 'number' && !Number.isNaN(r['press2_bar'] as number)
+          ? (r['press2_bar'] as number)
           : null,
     }));
 
@@ -684,10 +882,10 @@ export class DeviceStoreService {
     return { ok: true };
   }
 
-  updateDeviceMeta(
+  async updateDeviceMeta(
     id: string,
     input: { name: string; location: string; moduleId: string; espLocalIp: string }
-  ): void {
+  ): Promise<{ ok: boolean; error?: string }> {
     const name = input.name.trim();
     const location = input.location.trim() || 'Sin ubicación';
     const moduleId = input.moduleId.trim();
@@ -695,15 +893,18 @@ export class DeviceStoreService {
     const current = this.snapshot.find((d) => d.id === id);
     const moduleForDb = moduleId || current?.moduleId;
 
-    if (this.isCloudSyncEnabled() && this.isUuid(id) && moduleForDb) {
-      void this.auth.client
+    if (this.isCloudSyncEnabled() && this.isUuid(id)) {
+      const patch: Record<string, unknown> = { name, location };
+      if (moduleForDb) {
+        patch['module_id'] = moduleForDb;
+      }
+      const { error } = await this.auth.client
         .from('devices')
-        .update({
-          name,
-          location,
-          module_id: moduleForDb,
-        })
+        .update(patch)
         .eq('id', id);
+      if (error) {
+        return { ok: false, error: error.message };
+      }
     }
 
     this.persistDevices(
@@ -719,6 +920,7 @@ export class DeviceStoreService {
           : d
       )
     );
+    return { ok: true };
   }
 
   /**
@@ -750,9 +952,29 @@ export class DeviceStoreService {
     return { cloudError };
   }
 
-  updateDeviceNotificationConfig(id: string, input: DeviceNotificationConfigInput): void {
+  async updateDeviceNotificationConfig(
+    id: string,
+    input: DeviceNotificationConfigInput
+  ): Promise<{ cloudError?: string }> {
     const low = input.tempLowC;
     const high = input.tempHighC;
+    let cloudError: string | undefined;
+    if (this.isCloudSyncEnabled() && this.isUuid(id)) {
+      const { error } = await this.auth.client
+        .from('device_thresholds')
+        .upsert(
+          {
+            device_id: id,
+            notifications_enabled: input.alertsEnabled,
+            temp1_min_c: low,
+            temp1_max_c: high,
+          },
+          { onConflict: 'device_id' }
+        );
+      if (error) {
+        cloudError = error.message;
+      }
+    }
     this.persistDevices(
       this.snapshot.map((d) =>
         d.id === id
@@ -765,6 +987,7 @@ export class DeviceStoreService {
           : d
       )
     );
+    return { cloudError };
   }
 
   recordTemperatureReading(deviceId: string, temperatureC: number): void {

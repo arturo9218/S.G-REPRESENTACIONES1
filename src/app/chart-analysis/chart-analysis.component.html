@@ -1,4 +1,4 @@
-<div class="page">
+<div class="page page--dark">
   <header class="page__head">
     <div class="page__head-left">
       <button type="button" class="btn btn--ghost page__back" (click)="backToDashboard()">← Volver</button>
@@ -40,7 +40,7 @@
           <select
             [(ngModel)]="selectedDeviceId"
             class="control__select"
-            (ngModelChange)="syncSensorLabelsWithSelected()"
+            (ngModelChange)="onChartDeviceChange()"
           >
             <option *ngFor="let d of devices" [value]="d.id">
               {{ d.name }}
@@ -80,6 +80,10 @@
         <button type="button" class="btn btn--ghost" (click)="clearDateFilters()">
           Limpiar filtros
         </button>
+        <p class="panel__hint" *ngIf="selectedIsCloudDevice">
+          Con filtros de fecha, rangos largos (semanas a ~1 año) se cargan desde Supabase: pocos días en
+          detalle, luego promedio por hora o por día.
+        </p>
       </div>
 
       <div class="sensor-block">
@@ -151,7 +155,12 @@
         </div>
       </div>
 
-      <p class="chart-empty" *ngIf="!hasChartData">
+      <p class="chart-empty" *ngIf="remoteChartLoading">Cargando historial desde la nube…</p>
+      <p class="chart-empty" *ngIf="!remoteChartLoading && remoteChartError">{{ remoteChartError }}</p>
+      <p class="chart-empty" *ngIf="!remoteChartLoading && !remoteChartError && filterActiveButNoPoints">
+        No hay lecturas en el rango elegido. Probá otras fechas o limpiá los filtros.
+      </p>
+      <p class="chart-empty" *ngIf="!remoteChartLoading && !remoteChartError && !filterActiveButNoPoints && !hasChartData">
         Sin datos para este dispositivo todavía. Seleccioná otro o esperá nuevas lecturas del ESP8266.
       </p>
 
@@ -166,12 +175,12 @@
           <svg class="chart__svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             <defs>
               <linearGradient id="chartFillS1" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#1e40af" stop-opacity="0.18" />
-                <stop offset="100%" stop-color="#1e40af" stop-opacity="0" />
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.22" />
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
               </linearGradient>
               <linearGradient id="chartFillS2" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#0f766e" stop-opacity="0.16" />
-                <stop offset="100%" stop-color="#0f766e" stop-opacity="0" />
+                <stop offset="0%" stop-color="#14b8a6" stop-opacity="0.18" />
+                <stop offset="100%" stop-color="#14b8a6" stop-opacity="0" />
               </linearGradient>
               <clipPath id="chartPlotClip">
                 <rect x="0" y="0" width="100" height="100" rx="0" />
@@ -228,16 +237,6 @@
             </g>
             <g *ngIf="hoverYTemp2 as hy2">
               <line class="chart-hover-line chart-hover-line--temp2" x1="4" [attr.y1]="hy2" x2="100" [attr.y2]="hy2" />
-            </g>
-
-            <g *ngIf="chartLastPointS1() as p1">
-              <circle class="chart-dot chart-dot--ring" [attr.cx]="p1.cx" [attr.cy]="p1.cy" r="3.4" />
-              <circle class="chart-dot chart-dot--core" [attr.cx]="p1.cx" [attr.cy]="p1.cy" r="1.8" />
-            </g>
-
-            <g *ngIf="chartLastPointS2() as p2">
-              <circle class="chart-dot chart-dot--ring chart-dot--ring--s2" [attr.cx]="p2.cx" [attr.cy]="p2.cy" r="3.4" />
-              <circle class="chart-dot chart-dot--core chart-dot--core--s2" [attr.cx]="p2.cx" [attr.cy]="p2.cy" r="1.8" />
             </g>
           </svg>
           <div class="chart-tooltip" *ngIf="hoverIndex != null">
