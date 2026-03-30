@@ -1,3 +1,5 @@
+import { VAPID_INJECT } from './vapid.inject';
+
 export const environment = {
   production: false,
   /**
@@ -14,4 +16,6 @@ export const environment = {
   readingsPollIntervalMs: 4000,
   /** Sin telemetría nueva por este tiempo => se considera desconectado. */
   deviceOfflineAfterMs: 90000,
+  /** Clave pública VAPID (build: variable VAPID_PUBLIC_KEY o valor en vapid.inject.ts). */
+  vapidPublicKey: VAPID_INJECT,
 };

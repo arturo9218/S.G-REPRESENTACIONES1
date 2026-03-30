@@ -132,7 +132,16 @@
             <p class="kpi-card__value kpi-card__value--badge">{{ summaryNews }}</p>
           </div>
         </article>
-        <article class="kpi-card">
+        <article
+          class="kpi-card kpi-card--clickable"
+          role="button"
+          tabindex="0"
+          (click)="scrollToSection('alerts')"
+          (keydown.enter)="scrollToSection('alerts')"
+          (keydown.space)="$event.preventDefault(); scrollToSection('alerts')"
+          [attr.aria-label]="'Ver alertas activas: ' + summaryAlerts + ' activas, ' + summaryAlarmEvents + ' acumuladas'"
+          title="Ir a la lista de alertas activas"
+        >
           <div class="kpi-card__icon kpi-card__icon--rose">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           </div>
@@ -145,7 +154,15 @@
 
       <div class="grid-main">
         <div class="grid-main__left">
-          <article id="section-chart" class="card card--chart" [class.card--chart-expanded]="chartExpanded">
+          <article
+            id="section-chart"
+            class="card card--chart"
+            [class.card--chart-expanded]="chartExpanded"
+            [class.card--chart-style-line]="chartStylePreset === 'line'"
+            [class.card--chart-style-minimal]="chartStylePreset === 'minimal'"
+            [class.card--chart-style-technical]="chartStylePreset === 'technical'"
+            [class.card--chart-style-trend]="chartStylePreset === 'trend'"
+          >
             <div class="card__head card__head--chart">
               <div class="card__head-chart-text">
                 <h2 class="card__title">Temperatura en el tiempo · {{ selectedDevice?.name ?? 'Todos' }}</h2>
@@ -178,6 +195,52 @@
                 Abrir análisis
               </button>
             </div>
+            <div class="chart-style-bar" *ngIf="selectedDeviceId">
+              <label class="chart-style-bar__field">
+                <span class="chart-style-bar__label">Estilo del gráfico</span>
+                <select
+                  class="chart-style-bar__select"
+                  [(ngModel)]="chartStylePreset"
+                  (ngModelChange)="onChartStyleChange()"
+                  name="chart-style-preset"
+                >
+                  <option *ngFor="let o of chartStyleOptions" [ngValue]="o.value">{{ o.label }}</option>
+                </select>
+              </label>
+              <div class="chart-style-bar__dates">
+                <label class="chart-style-bar__date-field">
+                  <span class="chart-style-bar__label">PDF desde</span>
+                  <input
+                    type="date"
+                    class="chart-style-bar__date"
+                    [(ngModel)]="pdfExportFromDate"
+                    name="pdf-from"
+                    autocomplete="off"
+                  />
+                </label>
+                <label class="chart-style-bar__date-field">
+                  <span class="chart-style-bar__label">PDF hasta</span>
+                  <input
+                    type="date"
+                    class="chart-style-bar__date"
+                    [(ngModel)]="pdfExportToDate"
+                    name="pdf-to"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+              <p class="chart-style-bar__hint">
+                Dejá ambas fechas vacías para exportar las <strong>últimas 500</strong> lecturas en memoria. Con fechas (hora local), hasta <strong>4000</strong> filas con muestreo uniforme en todo el período. En <strong>nube</strong>, el PDF trae lecturas <strong>crudas</strong> del rango (hasta 20.000), no el resumen por hora del gráfico.
+              </p>
+              <button
+                type="button"
+                class="chart-style-bar__pdf btn btn--ghost"
+                [disabled]="pdfExporting"
+                (click)="downloadTemperaturesPdf($event)"
+              >
+                {{ pdfExporting ? 'Generando…' : 'Descargar PDF' }}
+              </button>
+            </div>
             <div class="chart-legend" *ngIf="selectedDeviceId">
               <span class="chart-legend__item"><i class="chart-legend__swatch chart-legend__swatch--s1"></i>{{ selectedSensor1Name }}</span>
               <span class="chart-legend__item" *ngIf="chartHasSecondSeries()"><i class="chart-legend__swatch chart-legend__swatch--s2"></i>{{ selectedSensor2Name }}</span>
@@ -202,30 +265,88 @@
                   <rect class="chart-svg__bg" x="0" y="0" width="100" height="100" />
                   <g class="chart-grid" clip-path="url(#chartPlotClip)">
                     <line *ngFor="let gy of chartGridYStops" x1="0" [attr.y1]="gy" x2="100" [attr.y2]="gy" />
+                    <ng-container *ngIf="chartStylePreset === 'trend'">
+                      <line
+                        *ngFor="let gx of chartGridXStops"
+                        [attr.x1]="gx"
+                        y1="8"
+                        [attr.x2]="gx"
+                        y2="92"
+                        class="chart-grid-v"
+                      />
+                    </ng-container>
                   </g>
                   <g clip-path="url(#chartPlotClip)">
                     <polygon
+                      *ngIf="chartShowsAreaFill()"
                       class="chart-area chart-area--s1"
                       [attr.points]="'0,100 ' + chartPolylinePoints() + ' 100,100'"
                       fill="url(#chartFillS1)"
                     />
-                    <polyline
-                      class="chart-line chart-line--s1"
-                      fill="none"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      vector-effect="non-scaling-stroke"
-                      [attr.points]="chartPolylinePoints()"
-                    />
-                    <polyline
-                      *ngIf="chartHasSecondSeries()"
-                      class="chart-line chart-line--s2"
-                      fill="none"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      vector-effect="non-scaling-stroke"
-                      [attr.points]="chartPolylinePoints2()"
-                    />
+                    <ng-container *ngIf="chartStylePreset === 'trend'; else dashChartLines">
+                      <line
+                        *ngFor="let seg of chartTrendSegments1()"
+                        fill="none"
+                        stroke-linecap="round"
+                        vector-effect="non-scaling-stroke"
+                        [attr.x1]="seg.x1"
+                        [attr.y1]="seg.y1"
+                        [attr.x2]="seg.x2"
+                        [attr.y2]="seg.y2"
+                        [class.chart-seg--up]="seg.trend === 'up'"
+                        [class.chart-seg--down]="seg.trend === 'down'"
+                        [class.chart-seg--flat]="seg.trend === 'flat'"
+                      />
+                      <circle
+                        *ngFor="let m of chartTrendMarkers1()"
+                        class="chart-trend-dot chart-trend-dot--s1"
+                        [attr.cx]="m.cx"
+                        [attr.cy]="m.cy"
+                        r="1.1"
+                        vector-effect="non-scaling-stroke"
+                      />
+                      <line
+                        *ngFor="let seg of chartTrendSegments2()"
+                        fill="none"
+                        stroke-linecap="round"
+                        vector-effect="non-scaling-stroke"
+                        [attr.x1]="seg.x1"
+                        [attr.y1]="seg.y1"
+                        [attr.x2]="seg.x2"
+                        [attr.y2]="seg.y2"
+                        [class.chart-seg--up]="seg.trend === 'up'"
+                        [class.chart-seg--down]="seg.trend === 'down'"
+                        [class.chart-seg--flat]="seg.trend === 'flat'"
+                        class="chart-seg--s2"
+                      />
+                      <circle
+                        *ngFor="let m of chartTrendMarkers2()"
+                        class="chart-trend-dot chart-trend-dot--s2"
+                        [attr.cx]="m.cx"
+                        [attr.cy]="m.cy"
+                        r="1.1"
+                        vector-effect="non-scaling-stroke"
+                      />
+                    </ng-container>
+                    <ng-template #dashChartLines>
+                      <polyline
+                        class="chart-line chart-line--s1"
+                        fill="none"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        vector-effect="non-scaling-stroke"
+                        [attr.points]="chartPolylinePoints()"
+                      />
+                      <polyline
+                        *ngIf="chartHasSecondSeries()"
+                        class="chart-line chart-line--s2"
+                        fill="none"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        vector-effect="non-scaling-stroke"
+                        [attr.points]="chartPolylinePoints2()"
+                      />
+                    </ng-template>
                   </g>
                 </svg>
                 <div class="chart-labels">
@@ -333,9 +454,10 @@
                   <svg *ngIf="al.severity === 'critical'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                 </span>
                 <div>
-                  <p class="alert-item__device">{{ al.deviceName }}</p>
-                  <p class="alert-item__temp">{{ formatTemp(al.temperatureC) }}</p>
-                  <p class="alert-item__msg">{{ al.message }}</p>
+                <p class="alert-item__device">{{ al.deviceName }}</p>
+                <p class="alert-item__temp">{{ formatTemp(al.temperatureC) }}</p>
+                <p class="alert-item__msg">{{ al.message }}</p>
+                <p class="alert-item__detail" *ngIf="al.detail">{{ al.detail }}</p>
                 </div>
               </li>
             </ul>
@@ -454,12 +576,83 @@
                   />
                 </label>
               </div>
-              <p class="notify-panel__hint" *ngIf="!alertsEnabledForm">Sin notificaciones para este dispositivo.</p>
+              <p class="notify-panel__hint" *ngIf="!alertsEnabledForm">
+                Sin alertas para este dispositivo: no suena el pitido, no aparecen en el panel ni avisos del navegador (tras guardar).
+              </p>
               <button type="button" class="btn btn--primary notify-panel__save" (click)="saveNotificationSettings()">Guardar umbrales</button>
             </div>
             <ng-template #noDeviceSelected>
               <p class="card__empty">Seleccioná un dispositivo.</p>
             </ng-template>
+          </article>
+
+          <article class="card" *ngIf="environment.deviceCloudSync">
+            <h2 class="card__title card__title--sm">Avisos con la app cerrada</h2>
+            <div class="notify-panel">
+              <p class="notify-panel__hint">
+                Notificaciones del sistema (Web Push) cuando superás umbrales o el equipo deja de enviar datos.
+                En Chrome/Edge funciona bien; en iPhone hace falta instalar la PWA en inicio en versiones recientes.
+              </p>
+              <p class="notify-panel__hint" *ngIf="webPushUiState === 'loading'">Comprobando soporte…</p>
+              <p class="notify-panel__hint" *ngIf="webPushUiState === 'unsupported'">
+                No disponible aquí (probá la URL publicada en Vercel con HTTPS o otro navegador).
+              </p>
+              <ng-container *ngIf="webPushUiState === 'none' || webPushUiState === 'active'">
+                <p class="notify-panel__hint" *ngIf="webPushUiState === 'active'">
+                  Este navegador está suscripto. Los umbrales se definen arriba con “Guardar umbrales”.
+                </p>
+                <div class="notify-panel__actions">
+                  <button
+                    type="button"
+                    class="btn btn--primary notify-panel__save"
+                    *ngIf="webPushUiState === 'none'"
+                    [disabled]="webPushBusy"
+                    (click)="enableWebPush()"
+                  >
+                    {{ webPushBusy ? 'Activando…' : 'Activar en este navegador' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn--ghost notify-panel__save"
+                    *ngIf="webPushUiState === 'active'"
+                    [disabled]="webPushBusy"
+                    (click)="disableWebPush()"
+                  >
+                    {{ webPushBusy ? '…' : 'Quitar suscripción' }}
+                  </button>
+                </div>
+              </ng-container>
+              <p
+                class="sensor-labels-feedback"
+                *ngIf="webPushFeedback"
+                [class.sensor-labels-feedback--warn]="webPushFeedbackIsError"
+              >
+                {{ webPushFeedback }}
+              </p>
+            </div>
+          </article>
+
+          <article class="card">
+            <h2 class="card__title card__title--sm">Sonido de alarmas</h2>
+            <div class="notify-panel">
+              <p class="notify-panel__hint">
+                Tono del pitido cuando hay alertas en el panel (desconectado, temperatura alta/baja). Hacé clic en la página una vez si el navegador bloquea el audio.
+              </p>
+              <label class="notify-panel__field notify-panel__field--full">
+                <span>Preset</span>
+                <select
+                  class="notify-panel__select"
+                  [(ngModel)]="alarmSoundPreset"
+                  (ngModelChange)="onAlarmSoundPresetChange()"
+                  name="alarm-sound-preset"
+                >
+                  <option *ngFor="let opt of alarmSoundOptions" [ngValue]="opt.value">{{ opt.label }}</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn--ghost notify-panel__save" (click)="previewAlarmSound()">
+                Probar sonido
+              </button>
+            </div>
           </article>
 
           <article class="card">

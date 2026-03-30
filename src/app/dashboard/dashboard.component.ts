@@ -6,12 +6,15 @@ import { AuthService } from '../core/auth.service';
 import { DeviceStoreService } from '../core/device-store.service';
 import {
   ActivityItem,
+  AlarmSoundPreset,
+  ChartStylePreset,
   DashboardAlert,
   DashboardDevice,
   HistoryListItem,
   TemperatureReading,
 } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
+import { WebPushService, WebPushUiState } from '../core/web-push.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -37,6 +40,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   sensor2LabelForm = '';
   sensorLabelsDirty = false;
   notificationSettingsDirty = false;
+
+  webPushUiState: WebPushUiState = 'loading';
+  webPushBusy = false;
+  webPushFeedback = '';
+  webPushFeedbackIsError = false;
   sensorLabelsSaving = false;
   sensorLabelsFeedback = '';
   private subDev: Subscription | null = null;
@@ -51,12 +59,38 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   /** Vista compacta vs ampliada del gráfico de temperaturas */
   chartExpanded = false;
+
+  private readonly chartStyleStorageKey = 'sg_chart_style_v1';
+  chartStylePreset: ChartStylePreset = 'area';
+  readonly chartStyleOptions: { value: ChartStylePreset; label: string }[] = [
+    { value: 'area', label: 'Área (relleno suave)' },
+    { value: 'line', label: 'Solo líneas' },
+    { value: 'minimal', label: 'Minimal (limpio)' },
+    { value: 'technical', label: 'Técnico (rejilla)' },
+    { value: 'trend', label: 'Tendencia (rejilla + color por subida/bajada)' },
+  ];
+  pdfExporting = false;
+  /** Tope de filas en la tabla del PDF; si hay más lecturas en el rango, muestreo uniforme en todo el período. */
+  private readonly pdfTableMaxRows = 4000;
+  /** Rango para PDF (`yyyy-MM-dd`, vacío = sin límite en ese extremo). */
+  pdfExportFromDate = '';
+  pdfExportToDate = '';
   /** Navegación móvil (barra inferior) — sección activa visual */
   mobileNavSection: 'dashboard' | 'devices' | 'alerts' | 'settings' = 'dashboard';
   alarmEventsCount = 0;
   private lastActiveAlertIds = new Set<string>();
   private lastAlarmToneAtMs = 0;
   private readonly alarmsCountStorageKey = 'sg_alarms_count_v1';
+  private readonly alarmSoundStorageKey = 'sg_alarm_sound_v1';
+
+  /** Preset de pitido (panel y notificación en primer plano) */
+  alarmSoundPreset: AlarmSoundPreset = 'classic';
+  readonly alarmSoundOptions: { value: AlarmSoundPreset; label: string }[] = [
+    { value: 'classic', label: 'Clásico (agudo)' },
+    { value: 'buzzer', label: 'Buzzer (doble)' },
+    { value: 'chime', label: 'Campanilla (3 notas)' },
+    { value: 'low', label: 'Grave (suave)' },
+  ];
 
   /** Tras crear en la nube: datos para WiFiManager del ESP */
   provisioningOpen = false;
@@ -75,7 +109,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     private readonly fb: FormBuilder,
     private readonly auth: AuthService,
     private readonly router: Router,
-    private readonly deviceStore: DeviceStoreService
+    private readonly deviceStore: DeviceStoreService,
+    private readonly webPush: WebPushService
   ) {
     void this.auth.getSession().then((s) => {
       this.email = s?.user.email ?? null;
@@ -85,6 +120,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.loadChartStylePreset();
+    this.loadAlarmSoundPreset();
+    void this.refreshWebPushUi();
     this.setupAlarmAudioUnlock();
     this.alarmEventsCount = this.loadAlarmEventsCount();
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
@@ -171,29 +209,46 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
 
     for (const d of this.devices) {
+      /** Solo si está explícitamente en false se silencian alarmas y notificaciones del navegador. */
+      const alertsOn = d.alertsEnabled !== false;
+
       const latestAt = latestByDevice.get(d.id);
       const disconnected = latestAt == null || nowMs - latestAt > offlineAfterMs;
       if (disconnected) {
-        out.push({
-          id: `${d.id}-offline`,
-          deviceName: d.name,
-          temperatureC: d.temperatureC ?? null,
-          message: 'Dispositivo desconectado',
-          severity: 'critical',
-        });
+        if (alertsOn) {
+          const detail =
+            latestAt != null
+              ? `Última lectura: ${this.formatFullDateTime(latestAt)} · Ahora: ${this.formatFullDateTime(nowMs)}`
+              : `Sin lecturas registradas · Ahora: ${this.formatFullDateTime(nowMs)}`;
+          out.push({
+            id: `${d.id}-offline`,
+            deviceName: d.name,
+            temperatureC: d.temperatureC ?? null,
+            message: 'Dispositivo desconectado',
+            detail,
+            kind: 'offline',
+            severity: 'critical',
+          });
+        }
         continue;
       }
 
       const t = d.temperatureC;
-      if (t == null || !d.alertsEnabled) continue;
+      if (t == null || d.alertsEnabled === false) continue;
       const low = d.tempLowC ?? null;
       const high = d.tempHighC ?? null;
+      const readingLabel =
+        latestAt != null
+          ? `Medición: ${this.formatFullDateTime(latestAt)}`
+          : `Ahora: ${this.formatFullDateTime(nowMs)}`;
       if (high != null && t >= high) {
         out.push({
           id: `${d.id}-crit`,
           deviceName: d.name,
           temperatureC: t,
-          message: 'Dispositivo',
+          message: 'Temperatura por encima del umbral',
+          detail: `${t.toFixed(1)} °C (máx. ${high} °C) · ${readingLabel}`,
+          kind: 'temp_high',
           severity: 'critical',
         });
       } else if (low != null && t <= low) {
@@ -201,7 +256,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
           id: `${d.id}-low`,
           deviceName: d.name,
           temperatureC: t,
-          message: 'Dispositivo',
+          message: 'Temperatura por debajo del umbral',
+          detail: `${t.toFixed(1)} °C (mín. ${low} °C) · ${readingLabel}`,
+          kind: 'temp_low',
           severity: 'warning',
         });
       }
@@ -384,6 +441,349 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.chartExpanded = !this.chartExpanded;
   }
 
+  /** Relleno bajo la curva (área / técnico). */
+  chartShowsAreaFill(): boolean {
+    return this.chartStylePreset === 'area' || this.chartStylePreset === 'technical';
+  }
+
+  readonly chartGridXStops = [20, 35, 50, 65, 80];
+
+  loadChartStylePreset(): void {
+    try {
+      const v = localStorage.getItem(this.chartStyleStorageKey);
+      if (v === 'area' || v === 'line' || v === 'minimal' || v === 'technical' || v === 'trend') {
+        this.chartStylePreset = v;
+        return;
+      }
+    } catch {
+      /* */
+    }
+    this.chartStylePreset = 'area';
+  }
+
+  onChartStyleChange(): void {
+    try {
+      localStorage.setItem(this.chartStyleStorageKey, this.chartStylePreset);
+    } catch {
+      /* */
+    }
+  }
+
+  async downloadTemperaturesPdf(event?: Event): Promise<void> {
+    event?.stopPropagation();
+    event?.preventDefault();
+    const deviceId = this.selectedDeviceId;
+    if (!deviceId) {
+      alert('Seleccioná un dispositivo para exportar lecturas.');
+      return;
+    }
+    const fromMs = this.pdfDayStartMs(this.pdfExportFromDate);
+    const toMs = this.pdfDayEndMs(this.pdfExportToDate);
+    if (fromMs != null && toMs != null && fromMs > toMs) {
+      alert('La fecha “Desde” no puede ser posterior a “Hasta”.');
+      return;
+    }
+    const usePdfRange =
+      this.pdfExportFromDate.trim() !== '' || this.pdfExportToDate.trim() !== '';
+    const useRemotePdf =
+      usePdfRange &&
+      this.deviceStore.isCloudSyncActive() &&
+      this.deviceStore.isCloudDeviceId(deviceId);
+
+    this.pdfExporting = true;
+    let rows: TemperatureReading[] = [];
+    let pdfNoteLine = '';
+    try {
+      if (useRemotePdf) {
+        const bounds = this.pdfExportRangeBounds();
+        if (!bounds) {
+          alert('Revisá las fechas del PDF.');
+          return;
+        }
+        const fetched = await this.deviceStore.fetchRawReadingsForPdfExport(
+          deviceId,
+          bounds.from.toISOString(),
+          bounds.to.toISOString()
+        );
+        if (fetched.error) {
+          alert(fetched.error);
+          return;
+        }
+        rows = [...fetched.rows].sort(
+          (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+        );
+        if (fetched.truncated) {
+          pdfNoteLine =
+            'En el rango hay más de 20.000 lecturas; el PDF incluye las primeras 20.000.';
+        }
+        const rawLen = rows.length;
+        rows = this.evenSamplePdfRows(rows, this.pdfTableMaxRows);
+        if (rawLen > this.pdfTableMaxRows) {
+          pdfNoteLine =
+            (pdfNoteLine ? pdfNoteLine + ' ' : '') +
+            `Tabla: muestreo uniforme (${this.pdfTableMaxRows} de ${rawLen} lecturas en el período).`;
+        }
+      } else {
+        rows = this.readingsForPdfExport();
+      }
+
+      if (!rows.length) {
+        alert(
+          'No hay lecturas en el rango elegido (o no hay datos en este equipo). Probá ampliar fechas o vaciar “Desde/Hasta” para usar las últimas 500.'
+        );
+        return;
+      }
+      const [jspdfMod, { autoTable }] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ]);
+      const JsPDF = jspdfMod.default;
+
+      const device = this.selectedDevice;
+      const name = device?.name ?? 'dispositivo';
+      const s1 = this.selectedSensor1Name;
+      const s2 = this.selectedSensor2Name;
+      const has2 = rows.some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
+
+      const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      doc.setFontSize(14);
+      doc.text('SG Monitoreo — temperaturas', 14, 16);
+      doc.setFontSize(10);
+      doc.text(`Dispositivo: ${name}`, 14, 23);
+      doc.setFontSize(8);
+      doc.setTextColor(80);
+      const rangeLabel = this.pdfRangeLabelForHeader();
+      let headerY = 28;
+      doc.text(
+        `Generado: ${new Date().toLocaleString('es-AR')} · ${rows.length} lecturas · ${rangeLabel}`,
+        14,
+        headerY
+      );
+      if (pdfNoteLine) {
+        headerY += 5;
+        doc.text(pdfNoteLine, 14, headerY);
+        headerY += 2;
+      }
+      doc.setTextColor(0);
+
+      const tableStartY = pdfNoteLine ? headerY + 2 : 32;
+
+      const head: string[][] = has2
+        ? [['Fecha y hora', `${s1} (°C)`, `${s2} (°C)`]]
+        : [['Fecha y hora', `${s1} (°C)`]];
+      const body: string[][] = rows.map((r) => {
+        const t1 = r.temperatureC.toFixed(1);
+        if (has2) {
+          const t2 =
+            r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C.toFixed(1) : '—';
+          return [this.formatPdfDateTime(r.at), t1, t2];
+        }
+        return [this.formatPdfDateTime(r.at), t1];
+      });
+
+      autoTable(doc, {
+        startY: tableStartY,
+        head,
+        body,
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+        alternateRowStyles: { fillColor: [245, 247, 250] },
+        margin: { left: 14, right: 14 },
+      });
+
+      const safe = name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);
+      doc.save(`temperaturas_${safe}_${this.pdfDateStamp()}.pdf`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      alert(`No se pudo generar el PDF: ${msg}`);
+    } finally {
+      this.pdfExporting = false;
+    }
+  }
+
+  private pdfDateStamp(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+  }
+
+  private formatPdfDateTime(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+    } catch {
+      return iso;
+    }
+  }
+
+  /**
+   * Lecturas del dispositivo en orden cronológico.
+   * Si ambas fechas PDF están vacías: últimas 500.
+   * Si hay “Desde” y/o “Hasta”: filtra por día local (inclusive); tope 3000 filas.
+   */
+  private readingsForPdfExport(): TemperatureReading[] {
+    if (!this.selectedDeviceId) return [];
+    let rows = [...this.readings.filter((r) => r.deviceId === this.selectedDeviceId)].sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+    );
+
+    const fromMs = this.pdfDayStartMs(this.pdfExportFromDate);
+    const toMs = this.pdfDayEndMs(this.pdfExportToDate);
+    const useRange = this.pdfExportFromDate.trim() !== '' || this.pdfExportToDate.trim() !== '';
+
+    if (useRange) {
+      if (fromMs != null) {
+        rows = rows.filter((r) => new Date(r.at).getTime() >= fromMs);
+      }
+      if (toMs != null) {
+        rows = rows.filter((r) => new Date(r.at).getTime() <= toMs);
+      }
+      if (rows.length > this.pdfTableMaxRows) {
+        rows = this.evenSamplePdfRows(rows, this.pdfTableMaxRows);
+      }
+    } else {
+      rows = rows.slice(-500);
+    }
+    return rows;
+  }
+
+  private pdfDayStartMs(yyyyMmDd: string): number | null {
+    const t = yyyyMmDd?.trim();
+    if (!t) return null;
+    const d = new Date(`${t}T00:00:00`);
+    const ms = d.getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+
+  private pdfDayEndMs(yyyyMmDd: string): number | null {
+    const t = yyyyMmDd?.trim();
+    if (!t) return null;
+    const d = new Date(`${t}T23:59:59.999`);
+    const ms = d.getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+
+  /**
+   * Límites del rango PDF en hora local (misma idea que el filtro del análisis de gráfico).
+   * Solo “hasta”: desde epoch; solo “desde”: hasta ahora.
+   */
+  private pdfExportRangeBounds(): { from: Date; to: Date } | null {
+    const hasFrom = !!this.pdfExportFromDate?.trim();
+    const hasTo = !!this.pdfExportToDate?.trim();
+    if (!hasFrom && !hasTo) {
+      return null;
+    }
+
+    let from: Date;
+    let to: Date;
+
+    if (hasFrom) {
+      const parsed = this.parsePdfYmdLocal(this.pdfExportFromDate);
+      if (!parsed || !Number.isFinite(parsed.getTime())) {
+        return null;
+      }
+      from = parsed;
+    } else {
+      from = new Date(0);
+    }
+
+    if (hasTo) {
+      const parsed = this.parsePdfYmdLocal(this.pdfExportToDate);
+      if (!parsed || !Number.isFinite(parsed.getTime())) {
+        return null;
+      }
+      to = new Date(parsed);
+      to.setHours(23, 59, 59, 999);
+    } else {
+      // Misma lógica que día completo en “Hasta”: si falta, el tope es fin del día local (no solo “ahora”).
+      const n = new Date();
+      to = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 23, 59, 59, 999);
+    }
+
+    if (from > to) {
+      return null;
+    }
+    return { from, to };
+  }
+
+  /** Reparte filas en todo el intervalo temporal (evita quedarse solo con el final del rango). */
+  private evenSamplePdfRows(sorted: TemperatureReading[], max: number): TemperatureReading[] {
+    if (sorted.length <= max) {
+      return sorted;
+    }
+    const out: TemperatureReading[] = [];
+    const last = sorted.length - 1;
+    for (let i = 0; i < max; i++) {
+      const idx = Math.round((i * last) / (max - 1));
+      out.push(sorted[idx]);
+    }
+    return out;
+  }
+
+  private parsePdfYmdLocal(yyyyMmDd: string): Date | null {
+    const v = (yyyyMmDd ?? '').trim();
+    if (!v) return null;
+    const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    const d = new Date(year, month - 1, day, 0, 0, 0, 0);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  private pdfRangeLabelForHeader(): string {
+    const a = this.pdfExportFromDate.trim();
+    const b = this.pdfExportToDate.trim();
+    if (!a && !b) return 'últimas 500 lecturas en memoria';
+    if (a && b) return `desde ${a} hasta ${b}`;
+    if (a) {
+      const implicitTo = this.toDateInputString(new Date());
+      return `desde ${a} hasta ${implicitTo}`;
+    }
+    return `hasta ${b}`;
+  }
+
+  /** Sugiere rango de 7 días según la última lectura en caché. */
+  private syncPdfExportDateDefaults(): void {
+    if (!this.selectedDeviceId) {
+      this.pdfExportFromDate = '';
+      this.pdfExportToDate = '';
+      return;
+    }
+    const rows = [...this.readings.filter((r) => r.deviceId === this.selectedDeviceId)].sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+    );
+    if (rows.length) {
+      const end = new Date(rows[rows.length - 1].at);
+      const start = new Date(end);
+      start.setDate(start.getDate() - 6);
+      this.pdfExportFromDate = this.toDateInputString(start);
+      this.pdfExportToDate = this.toDateInputString(end);
+      return;
+    }
+    // Sin lecturas en caché (muy habitual en nube): igual rellenamos desde y hasta para que el PDF no quede solo “desde”.
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(start.getDate() - 6);
+    this.pdfExportFromDate = this.toDateInputString(start);
+    this.pdfExportToDate = this.toDateInputString(today);
+  }
+
+  private toDateInputString(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
   /** Scroll a secciones del dashboard (sidebar / barra móvil) */
   scrollToSection(section: 'dashboard' | 'devices' | 'alerts' | 'settings'): void {
     const ids: Record<typeof section, string> = {
@@ -416,6 +816,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.sensorLabelsDirty = false;
     this.notificationSettingsDirty = false;
     this.syncNotificationFormWithSelected();
+    this.syncPdfExportDateDefaults();
   }
 
   onSensorLabelsInput(): void {
@@ -494,6 +895,35 @@ export class DashboardComponent implements OnInit, OnDestroy {
       alert(`Guardado en este equipo. No se pudo guardar en la nube: ${result.cloudError}`);
     }
     this.notificationSettingsDirty = false;
+  }
+
+  async refreshWebPushUi(): Promise<void> {
+    if (!environment.deviceCloudSync) {
+      this.webPushUiState = 'unsupported';
+      return;
+    }
+    this.webPushUiState = 'loading';
+    this.webPushUiState = await this.webPush.getUiState();
+  }
+
+  async enableWebPush(): Promise<void> {
+    this.webPushBusy = true;
+    this.webPushFeedback = '';
+    const r = await this.webPush.subscribeBackgroundAlerts();
+    this.webPushBusy = false;
+    this.webPushFeedback = r.message;
+    this.webPushFeedbackIsError = !r.ok;
+    await this.refreshWebPushUi();
+  }
+
+  async disableWebPush(): Promise<void> {
+    this.webPushBusy = true;
+    this.webPushFeedback = '';
+    const r = await this.webPush.unsubscribeBackground();
+    this.webPushBusy = false;
+    this.webPushFeedback = r.message;
+    this.webPushFeedbackIsError = !r.ok;
+    await this.refreshWebPushUi();
   }
 
   logout(): void {
@@ -723,9 +1153,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   chartPolylinePoints(): string {
-    const series = this.chartReadings();
+    const series = this.chartPointsForDraw();
     const w = 100;
-    const h = 100;
     const n = series.length;
     if (n < 2) return '0,50 100,50';
     const sc = this.chartScale();
@@ -738,12 +1167,111 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .join(' ');
   }
 
+  /** Serie dibujada (en dashboard siempre la misma que chartReadings). */
+  private chartPointsForDraw(): TemperatureReading[] {
+    return this.chartReadings();
+  }
+
+  chartTrendSegments1(): Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    trend: 'up' | 'down' | 'flat';
+  }> {
+    if (this.chartStylePreset !== 'trend') return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const sc = this.chartScale();
+    const eps = 1e-4;
+    const out: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      trend: 'up' | 'down' | 'flat';
+    }> = [];
+    for (let i = 0; i < n - 1; i++) {
+      const t0 = series[i].temperatureC;
+      const t1 = series[i + 1].temperatureC;
+      const d = t1 - t0;
+      const trend = d > eps ? 'up' : d < -eps ? 'down' : 'flat';
+      const x1 = (i / (n - 1)) * 100;
+      const x2 = ((i + 1) / (n - 1)) * 100;
+      out.push({ x1, y1: sc.toSvgY(t0), x2, y2: sc.toSvgY(t1), trend });
+    }
+    return out;
+  }
+
+  chartTrendMarkers1(): Array<{ cx: number; cy: number }> {
+    if (this.chartStylePreset !== 'trend') return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const sc = this.chartScale();
+    return series.map((r, i) => ({
+      cx: (i / (n - 1)) * 100,
+      cy: sc.toSvgY(r.temperatureC),
+    }));
+  }
+
+  chartTrendSegments2(): Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    trend: 'up' | 'down' | 'flat';
+  }> {
+    if (this.chartStylePreset !== 'trend' || !this.chartHasSecondSeries()) return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const filled = this.temp2SeriesForwardFilled(series);
+    const sc = this.chartScale();
+    const eps = 1e-4;
+    const out: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      trend: 'up' | 'down' | 'flat';
+    }> = [];
+    for (let i = 0; i < n - 1; i++) {
+      const t0 = filled[i];
+      const t1 = filled[i + 1];
+      if (t0 == null || t1 == null || Number.isNaN(t0) || Number.isNaN(t1)) continue;
+      const d = t1 - t0;
+      const trend = d > eps ? 'up' : d < -eps ? 'down' : 'flat';
+      const x1 = (i / (n - 1)) * 100;
+      const x2 = ((i + 1) / (n - 1)) * 100;
+      out.push({ x1, y1: sc.toSvgY(t0), x2, y2: sc.toSvgY(t1), trend });
+    }
+    return out;
+  }
+
+  chartTrendMarkers2(): Array<{ cx: number; cy: number }> {
+    if (this.chartStylePreset !== 'trend' || !this.chartHasSecondSeries()) return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const filled = this.temp2SeriesForwardFilled(series);
+    const sc = this.chartScale();
+    const pts: Array<{ cx: number; cy: number }> = [];
+    for (let i = 0; i < n; i++) {
+      const t = filled[i];
+      if (t == null || Number.isNaN(t)) continue;
+      pts.push({ cx: (i / (n - 1)) * 100, cy: sc.toSvgY(t) });
+    }
+    return pts;
+  }
+
   /**
    * Segunda serie (temp2), mismo eje Y. Rellena huecos con el último valor
    * conocido para que la línea no “escalone” cuando el backend no manda temp2 en cada fila.
    */
   chartPolylinePoints2(): string {
-    const series = this.chartReadings();
+    const series = this.chartPointsForDraw();
     const w = 100;
     const n = series.length;
     if (n < 2) return '';
@@ -875,15 +1403,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   private updateAlarmAccumulator(): void {
     const current = new Set(this.activeAlerts.map((a) => a.id));
-    let newEvents = 0;
+    const newIds: string[] = [];
     for (const id of current) {
-      if (!this.lastActiveAlertIds.has(id)) newEvents += 1;
+      if (!this.lastActiveAlertIds.has(id)) newIds.push(id);
     }
-    if (newEvents > 0) {
-      this.alarmEventsCount += newEvents;
+    if (newIds.length > 0) {
+      this.alarmEventsCount += newIds.length;
       this.persistAlarmEventsCount();
       this.playAlarmTone();
-      this.tryBrowserNotification(newEvents);
+      this.tryBrowserNotification(newIds);
     }
     // Si hay alertas activas sostenidas, repetir sonido con cooldown
     // para no sonar solo una vez.
@@ -916,19 +1444,136 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
-  private tryBrowserNotification(newEvents: number): void {
+  private tryBrowserNotification(newAlertIds: string[]): void {
     if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (newAlertIds.length === 0) return;
     if (Notification.permission === 'default') {
       void Notification.requestPermission();
       return;
     }
     if (Notification.permission !== 'granted') return;
-    const title = newEvents === 1 ? 'Nueva alarma de temperatura' : `${newEvents} nuevas alarmas`;
-    const body = `Total acumuladas: ${this.alarmEventsCount}`;
+    const byId = new Map(this.activeAlerts.map((a) => [a.id, a]));
+    for (const id of newAlertIds) {
+      const al = byId.get(id);
+      if (!al) continue;
+      let title = 'Alarma';
+      if (al.kind === 'offline') {
+        title = `${al.deviceName}: desconectado`;
+      } else if (al.kind === 'temp_high') {
+        title = `${al.deviceName}: temperatura alta`;
+      } else if (al.kind === 'temp_low') {
+        title = `${al.deviceName}: temperatura baja`;
+      }
+      const body = al.detail ? `${al.message}\n${al.detail}` : al.message;
+      try {
+        new Notification(title, { body, tag: al.id });
+      } catch {
+        // no-op
+      }
+    }
+  }
+
+  /** Fecha/hora en zona Argentina (alineado con textos de push). */
+  formatFullDateTime(ms: number): string {
+    return new Date(ms).toLocaleString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+      timeZone: 'America/Argentina/Buenos_Aires',
+    });
+  }
+
+  loadAlarmSoundPreset(): void {
     try {
-      new Notification(title, { body });
+      const v = localStorage.getItem(this.alarmSoundStorageKey);
+      if (v === 'buzzer' || v === 'chime' || v === 'low' || v === 'classic') {
+        this.alarmSoundPreset = v;
+        return;
+      }
     } catch {
-      // no-op
+      /* */
+    }
+    this.alarmSoundPreset = 'classic';
+  }
+
+  onAlarmSoundPresetChange(): void {
+    try {
+      localStorage.setItem(this.alarmSoundStorageKey, this.alarmSoundPreset);
+    } catch {
+      /* */
+    }
+  }
+
+  previewAlarmSound(): void {
+    this.playAlarmTone();
+  }
+
+  private pickAlarmContext(): 'offline' | 'temp_hot' | 'temp_cold' {
+    if (this.activeAlerts.some((a) => a.kind === 'offline')) return 'offline';
+    if (this.activeAlerts.some((a) => a.kind === 'temp_high')) return 'temp_hot';
+    if (this.activeAlerts.some((a) => a.kind === 'temp_low')) return 'temp_cold';
+    return 'temp_hot';
+  }
+
+  private beep(
+    ctx: AudioContext,
+    start: number,
+    freq: number,
+    type: OscillatorType,
+    durSec: number,
+    gainPeak: number
+  ): void {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.value = 0.0001;
+    o.connect(g);
+    g.connect(ctx.destination);
+    g.gain.exponentialRampToValueAtTime(Math.max(gainPeak, 0.0002), start + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + durSec);
+    o.start(start);
+    o.stop(start + durSec + 0.04);
+  }
+
+  private scheduleAlarmPattern(
+    ctx: AudioContext,
+    preset: AlarmSoundPreset,
+    alarmCtx: 'offline' | 'temp_hot' | 'temp_cold'
+  ): void {
+    const t0 = ctx.currentTime;
+    const scale =
+      alarmCtx === 'offline' ? 0.72 : alarmCtx === 'temp_cold' ? 0.88 : 1;
+
+    switch (preset) {
+      case 'classic':
+        this.beep(ctx, t0, 1046 * scale, 'sine', 0.38, 0.12);
+        break;
+      case 'low':
+        this.beep(ctx, t0, 196 * scale, 'sine', 0.58, 0.09);
+        break;
+      case 'buzzer':
+        this.beep(ctx, t0, 440, 'square', 0.14, 0.11);
+        this.beep(ctx, t0 + 0.2, 880, 'square', 0.14, 0.11);
+        if (alarmCtx === 'offline') {
+          this.beep(ctx, t0 + 0.42, 330, 'square', 0.22, 0.1);
+        }
+        break;
+      case 'chime': {
+        const freqs = [523.25, 659.25, 783.99].map((f) => f * scale);
+        let t = t0;
+        for (const f of freqs) {
+          this.beep(ctx, t, f, 'triangle', 0.24, 0.065);
+          t += 0.28;
+        }
+        break;
+      }
+      default:
+        this.beep(ctx, t0, 1046, 'sine', 0.38, 0.12);
     }
   }
 
@@ -945,18 +1590,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (ctx.state === 'suspended') {
         void ctx.resume();
       }
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = 'sine';
-      o.frequency.value = 1046.5;
-      g.gain.value = 0.001;
-      o.connect(g);
-      g.connect(ctx.destination);
-      const now = ctx.currentTime;
-      g.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
-      o.start(now);
-      o.stop(now + 0.43);
+      const alarmCtx = this.pickAlarmContext();
+      this.scheduleAlarmPattern(ctx, this.alarmSoundPreset, alarmCtx);
       this.lastAlarmToneAtMs = Date.now();
     } catch {
       // no-op

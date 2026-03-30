@@ -1,0 +1,121 @@
+// Invocar cada 5–10 min desde un cron externo (ej. cron-job.org) o Supabase Schedules.
+// POST con header: x-alert-cron-secret: <mismo valor que secret ALERT_CRON_SECRET>
+// Deploy: supabase functions deploy check-offline-push --no-verify-jwt
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { sendPushToUser } from '../_shared/send-web-push.ts';
+import { formatEsArDateTime } from '../_shared/format-datetime.ts';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-alert-cron-secret',
+};
+
+/** Sin lecturas nuevas por este tiempo ⇒ se considera desconectado para el push. */
+const OFFLINE_AFTER_MS = 10 * 60 * 1000;
+const OFFLINE_PUSH_COOLDOWN_MS = 30 * 60 * 1000;
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  const secret = Deno.env.get('ALERT_CRON_SECRET')?.trim();
+  const headerSecret = req.headers.get('x-alert-cron-secret')?.trim();
+  if (!secret || headerSecret !== secret) {
+    return new Response(JSON.stringify({ error: 'No autorizado' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const url = Deno.env.get('SUPABASE_URL');
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !serviceKey) {
+    return new Response(JSON.stringify({ error: 'Faltan variables de Supabase' }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const supabase = createClient(url, serviceKey);
+
+  const { data: lastRows, error: rpcErr } = await supabase.rpc(
+    'internal_last_reading_per_device'
+  );
+  if (rpcErr) {
+    return new Response(JSON.stringify({ error: rpcErr.message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const lastByDevice = new Map<string, number>();
+  for (const row of lastRows ?? []) {
+    const id = row.device_id as string;
+    const ts = row.last_at ? new Date(row.last_at as string).getTime() : 0;
+    if (id && ts) lastByDevice.set(id, ts);
+  }
+
+  const { data: devs, error: devErr } = await supabase
+    .from('devices')
+    .select('id, owner_user_id, name, device_thresholds(notifications_enabled, last_push_offline_at)')
+    .eq('active', true);
+
+  if (devErr) {
+    return new Response(JSON.stringify({ error: devErr.message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const now = Date.now();
+  let offlinePushes = 0;
+
+  for (const d of devs ?? []) {
+    const rawTh = d.device_thresholds as
+      | {
+          notifications_enabled?: boolean;
+          last_push_offline_at?: string | null;
+        }
+      | {
+          notifications_enabled?: boolean;
+          last_push_offline_at?: string | null;
+        }[]
+      | null;
+    const th = Array.isArray(rawTh) ? rawTh[0] : rawTh;
+    if (!th?.notifications_enabled || !d.owner_user_id) continue;
+
+    const lastAt = lastByDevice.get(d.id);
+    if (lastAt == null) continue;
+
+    if (now - lastAt <= OFFLINE_AFTER_MS) continue;
+
+    const lastPush = th.last_push_offline_at
+      ? new Date(th.last_push_offline_at).getTime()
+      : 0;
+    if (now - lastPush <= OFFLINE_PUSH_COOLDOWN_MS) continue;
+
+    const name = typeof d.name === 'string' ? d.name : 'Dispositivo';
+    const lastReadingAt = new Date(lastAt);
+    const avisoAt = new Date(now);
+    const r = await sendPushToUser(supabase, d.owner_user_id as string, {
+      title: `${name}: dispositivo desconectado`,
+      body:
+        `Sin lecturas nuevas. Última lectura: ${formatEsArDateTime(lastReadingAt)}. ` +
+        `Aviso: ${formatEsArDateTime(avisoAt)}.`,
+      data: { type: 'offline', deviceId: d.id },
+      tag: `offline-${d.id}`,
+    });
+    offlinePushes += r.sent;
+    await supabase
+      .from('device_thresholds')
+      .update({ last_push_offline_at: new Date().toISOString() })
+      .eq('device_id', d.id);
+  }
+
+  return new Response(JSON.stringify({ ok: true, offlinePushes }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+});

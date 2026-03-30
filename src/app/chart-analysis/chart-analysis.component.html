@@ -81,8 +81,9 @@
           Limpiar filtros
         </button>
         <p class="panel__hint" *ngIf="selectedIsCloudDevice">
-          Con filtros de fecha, rangos largos (semanas a ~1 año) se cargan desde Supabase: pocos días en
-          detalle, luego promedio por hora o por día.
+          Sin filtros, el gráfico carga los <strong>últimos 7 días</strong> desde Supabase (comportamiento
+          alineado al panel principal). Con día o rango Desde/Hasta, rangos largos usan detalle / promedio
+          por hora o por día según dure.
         </p>
       </div>
 
@@ -135,7 +136,14 @@
       </div>
     </div>
 
-    <div class="panel panel--chart" #chartPanel>
+    <div
+      class="panel panel--chart"
+      #chartPanel
+      [class.panel--chart-style-line]="chartStylePreset === 'line'"
+      [class.panel--chart-style-minimal]="chartStylePreset === 'minimal'"
+      [class.panel--chart-style-technical]="chartStylePreset === 'technical'"
+      [class.panel--chart-style-trend]="chartStylePreset === 'trend'"
+    >
       <div class="chart-head">
         <div class="chart-head__legend">
           <span class="legend-item" *ngIf="showTemp1">
@@ -148,6 +156,17 @@
           </span>
         </div>
         <div class="chart-head__actions">
+          <label class="chart-style-inline">
+            <span class="chart-style-inline__label">Estilo</span>
+            <select
+              class="chart-style-inline__select"
+              [(ngModel)]="chartStylePreset"
+              (ngModelChange)="onChartStyleChange()"
+              name="chart-analysis-style"
+            >
+              <option *ngFor="let o of chartStyleOptions" [ngValue]="o.value">{{ o.label }}</option>
+            </select>
+          </label>
           <div class="chart-head__hint">Actualización ~{{ (environment.readingsPollIntervalMs || 5000) / 1000 }}s</div>
           <button type="button" class="btn btn--ghost chart-full-btn" (click)="toggleChartFullscreen(chartPanel)">
             Pantalla completa
@@ -164,8 +183,9 @@
         Sin datos para este dispositivo todavía. Seleccioná otro o esperá nuevas lecturas del ESP8266.
       </p>
 
-      <div class="chart">
+      <div class="chart" [class.chart--trend]="chartStylePreset === 'trend'">
         <div class="chart__axis" aria-hidden="true">
+          <span class="chart__axis-title chart__axis-title--y" *ngIf="chartStylePreset === 'trend'">Temperatura</span>
           <span>{{ chartYMaxLabel }}</span>
           <span>{{ chartYMidLabel }}</span>
           <span>{{ chartYMinLabel }}</span>
@@ -175,68 +195,157 @@
           <svg class="chart__svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             <defs>
               <linearGradient id="chartFillS1" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.22" />
-                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
+                <stop offset="0%" stop-color="#1e40af" stop-opacity="0.14" />
+                <stop offset="100%" stop-color="#1e40af" stop-opacity="0" />
               </linearGradient>
               <linearGradient id="chartFillS2" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#14b8a6" stop-opacity="0.18" />
-                <stop offset="100%" stop-color="#14b8a6" stop-opacity="0" />
+                <stop offset="0%" stop-color="#0d9488" stop-opacity="0.12" />
+                <stop offset="100%" stop-color="#0d9488" stop-opacity="0" />
               </linearGradient>
               <clipPath id="chartPlotClip">
                 <rect x="0" y="0" width="100" height="100" rx="0" />
               </clipPath>
             </defs>
 
+            <rect class="chart__svg-bg" x="0" y="0" width="100" height="100" />
+
             <g class="chart__grid" clip-path="url(#chartPlotClip)">
               <line *ngFor="let gy of chartGridYStops" x1="0" [attr.y1]="gy" x2="100" [attr.y2]="gy" />
+              <ng-container *ngIf="chartStylePreset === 'trend'">
+                <line
+                  *ngFor="let gx of chartGridXStops"
+                  [attr.x1]="gx"
+                  y1="8"
+                  [attr.x2]="gx"
+                  y2="92"
+                  class="chart__grid-v"
+                />
+              </ng-container>
             </g>
             <line class="chart-axis-line" x1="4" y1="8" x2="4" y2="92" />
             <line class="chart-axis-line" x1="4" y1="92" x2="100" y2="92" />
 
             <g clip-path="url(#chartPlotClip)">
               <polygon
-                *ngIf="showTemp1"
+                *ngIf="showTemp1 && chartShowsAreaFill()"
                 class="chart-area chart-area--s1"
                 [attr.points]="'0,100 ' + chartPolylinePointsS1() + ' 100,100'"
                 fill="url(#chartFillS1)"
               />
 
               <polygon
-                *ngIf="showTemp2 && hasSecondSeries"
+                *ngIf="showTemp2 && hasSecondSeries && chartShowsAreaFill()"
                 class="chart-area chart-area--s2"
                 [attr.points]="'0,100 ' + chartPolylinePointsS2() + ' 100,100'"
                 fill="url(#chartFillS2)"
               />
 
-              <polyline
-                *ngIf="showTemp1"
-                class="chart-line chart-line--s1"
-                fill="none"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                vector-effect="non-scaling-stroke"
-                [attr.points]="chartPolylinePointsS1()"
-              />
+              <ng-container *ngIf="chartStylePreset === 'trend'; else analysisClassicLines">
+                <line
+                  *ngFor="let seg of chartTrendSegments1()"
+                  fill="none"
+                  stroke-linecap="round"
+                  vector-effect="non-scaling-stroke"
+                  [attr.x1]="seg.x1"
+                  [attr.y1]="seg.y1"
+                  [attr.x2]="seg.x2"
+                  [attr.y2]="seg.y2"
+                  [class.chart-seg--up]="seg.trend === 'up'"
+                  [class.chart-seg--down]="seg.trend === 'down'"
+                  [class.chart-seg--flat]="seg.trend === 'flat'"
+                />
+                <circle
+                  *ngFor="let m of chartTrendMarkers1()"
+                  class="chart-trend-dot chart-trend-dot--s1"
+                  [attr.cx]="m.cx"
+                  [attr.cy]="m.cy"
+                  r="1.15"
+                  vector-effect="non-scaling-stroke"
+                />
+                <line
+                  *ngFor="let seg of chartTrendSegments2()"
+                  fill="none"
+                  stroke-linecap="round"
+                  vector-effect="non-scaling-stroke"
+                  [attr.x1]="seg.x1"
+                  [attr.y1]="seg.y1"
+                  [attr.x2]="seg.x2"
+                  [attr.y2]="seg.y2"
+                  [class.chart-seg--up]="seg.trend === 'up'"
+                  [class.chart-seg--down]="seg.trend === 'down'"
+                  [class.chart-seg--flat]="seg.trend === 'flat'"
+                  class="chart-seg--s2"
+                />
+                <circle
+                  *ngFor="let m of chartTrendMarkers2()"
+                  class="chart-trend-dot chart-trend-dot--s2"
+                  [attr.cx]="m.cx"
+                  [attr.cy]="m.cy"
+                  r="1.15"
+                  vector-effect="non-scaling-stroke"
+                />
+              </ng-container>
+              <ng-template #analysisClassicLines>
+                <polyline
+                  *ngIf="showTemp1"
+                  class="chart-line chart-line--s1"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  vector-effect="non-scaling-stroke"
+                  [attr.points]="chartPolylinePointsS1()"
+                />
 
-              <polyline
-                *ngIf="showTemp2 && hasSecondSeries"
-                class="chart-line chart-line--s2"
-                fill="none"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                vector-effect="non-scaling-stroke"
-                [attr.points]="chartPolylinePointsS2()"
-              />
+                <polyline
+                  *ngIf="showTemp2 && hasSecondSeries"
+                  class="chart-line chart-line--s2"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  vector-effect="non-scaling-stroke"
+                  [attr.points]="chartPolylinePointsS2()"
+                />
+              </ng-template>
             </g>
 
             <g *ngIf="hoverX as hx">
-              <line class="chart-hover-line" [attr.x1]="hx" y1="8" [attr.x2]="hx" y2="92" />
+              <line
+                class="chart-hover-line"
+                [class.chart-hover-line--dash]="chartStylePreset === 'trend'"
+                [attr.x1]="hx"
+                y1="8"
+                [attr.x2]="hx"
+                y2="92"
+              />
             </g>
             <g *ngIf="hoverYTemp1 as hy1">
-              <line class="chart-hover-line chart-hover-line--temp1" x1="4" [attr.y1]="hy1" x2="100" [attr.y2]="hy1" />
+              <line
+                class="chart-hover-line chart-hover-line--temp1"
+                [class.chart-hover-line--dash]="chartStylePreset === 'trend'"
+                x1="4"
+                [attr.y1]="hy1"
+                x2="100"
+                [attr.y2]="hy1"
+              />
             </g>
             <g *ngIf="hoverYTemp2 as hy2">
-              <line class="chart-hover-line chart-hover-line--temp2" x1="4" [attr.y1]="hy2" x2="100" [attr.y2]="hy2" />
+              <line
+                class="chart-hover-line chart-hover-line--temp2"
+                [class.chart-hover-line--dash]="chartStylePreset === 'trend'"
+                x1="4"
+                [attr.y1]="hy2"
+                x2="100"
+                [attr.y2]="hy2"
+              />
+            </g>
+            <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYTemp1 != null">
+              <circle
+                class="chart-hover-dot"
+                [attr.cx]="hoverX"
+                [attr.cy]="hoverYTemp1"
+                r="1.4"
+                vector-effect="non-scaling-stroke"
+              />
             </g>
           </svg>
           <div class="chart-tooltip" *ngIf="hoverIndex != null">
@@ -245,20 +354,17 @@
             <div class="chart-tooltip__row" *ngIf="showTemp2">{{ sensor2Name }}: <strong>{{ hoverTemp2Label }}</strong></div>
           </div>
         </div>
-        <div class="chart__x-axis">
-          <span>{{ chartXStartLabel }}</span>
-          <span>{{ chartXMidLabel }}</span>
-          <span>{{ chartXEndLabel }}</span>
-        </div>
       </div>
 
       <div class="chart-stats">
+        <span class="chart-stat chart-stat--delta">Δ última: <strong>{{ avgDeltaLabel }}</strong></span>
         <span class="chart-stat" *ngIf="showTemp1">
           {{ sensor1Name }}: <strong>{{ chartCurrentLabel1 }}</strong>
         </span>
         <span class="chart-stat" *ngIf="showTemp2 && hasSecondSeries">
           {{ sensor2Name }}: <strong>{{ chartCurrentLabel2 }}</strong>
         </span>
+        <span class="chart-stat chart-stat--range">{{ chartTempRangeLabel }}</span>
       </div>
     </div>
   </section>

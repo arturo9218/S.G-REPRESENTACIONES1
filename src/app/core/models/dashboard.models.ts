@@ -46,12 +46,24 @@ export interface TemperatureReading {
   press2Bar?: number | null;
 }
 
+/** Tipo de alarma en panel y sonido */
+export type DashboardAlertKind = 'offline' | 'temp_high' | 'temp_low';
+
+/** Preset de pitido (localStorage `sg_alarm_sound_v1`) */
+export type AlarmSoundPreset = 'classic' | 'buzzer' | 'chime' | 'low';
+
+/** Estilo visual del gráfico de temperaturas (localStorage `sg_chart_style_v1`). */
+export type ChartStylePreset = 'area' | 'line' | 'minimal' | 'technical' | 'trend';
+
 export interface DashboardAlert {
   id: string;
   deviceName: string;
   temperatureC: number | null;
-  /** Texto corto en UI (pedido: solo "Dispositivo") */
+  /** Título corto del problema */
   message: string;
+  /** Línea secundaria: umbral, °C, fecha/hora */
+  detail?: string;
+  kind: DashboardAlertKind;
   severity: 'warning' | 'critical';
 }
 

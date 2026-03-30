@@ -4,6 +4,10 @@
 // supabase functions deploy ingest-reading --no-verify-jwt
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { sendPushToUser } from '../_shared/send-web-push.ts';
+import { formatEsArDateTime } from '../_shared/format-datetime.ts';
+
+const TEMP_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
 
 interface IngestPayload {
   moduleId: string;
@@ -58,7 +62,7 @@ Deno.serve(async (req) => {
 
     const { data: device, error: devErr } = await supabase
       .from('devices')
-      .select('id, device_token_hash, active')
+      .select('id, device_token_hash, active, owner_user_id, name')
       .eq('module_id', moduleId)
       .single();
 
@@ -100,6 +104,47 @@ Deno.serve(async (req) => {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    const { data: th } = await supabase
+      .from('device_thresholds')
+      .select(
+        'notifications_enabled, temp1_min_c, temp1_max_c, last_push_temp_breach_at'
+      )
+      .eq('device_id', device.id)
+      .maybeSingle();
+
+    if (th?.notifications_enabled) {
+      const t = payload.temp1_c;
+      let breach = false;
+      let msg = '';
+      if (th.temp1_min_c != null && t < th.temp1_min_c) {
+        breach = true;
+        msg = `Temperatura ${t.toFixed(1)} °C por debajo del mínimo (${th.temp1_min_c} °C).`;
+      }
+      if (th.temp1_max_c != null && t > th.temp1_max_c) {
+        breach = true;
+        msg = `Temperatura ${t.toFixed(1)} °C por encima del máximo (${th.temp1_max_c} °C).`;
+      }
+      if (breach && device.owner_user_id) {
+        const last = th.last_push_temp_breach_at
+          ? new Date(th.last_push_temp_breach_at).getTime()
+          : 0;
+        if (Date.now() - last > TEMP_PUSH_COOLDOWN_MS) {
+          const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
+          const when = formatEsArDateTime(new Date());
+          await sendPushToUser(supabase, device.owner_user_id, {
+            title: `${deviceName}: alarma de temperatura`,
+            body: `${msg}\nDetectado: ${when}`,
+            data: { type: 'temp_breach', deviceId: device.id },
+            tag: `temp-${device.id}`,
+          });
+          await supabase
+            .from('device_thresholds')
+            .update({ last_push_temp_breach_at: new Date().toISOString() })
+            .eq('device_id', device.id);
+        }
+      }
     }
 
     return new Response(JSON.stringify({ ok: true }), {

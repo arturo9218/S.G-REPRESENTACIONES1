@@ -3,7 +3,11 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
 import { DeviceStoreService } from '../core/device-store.service';
-import { DashboardDevice, TemperatureReading } from '../core/models/dashboard.models';
+import {
+  ChartStylePreset,
+  DashboardDevice,
+  TemperatureReading,
+} from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
 
 type AnalysisChannel = 'temp1' | 'temp2' | 'both';
@@ -41,11 +45,26 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
-  private remoteLoadTimer: ReturnType<typeof setTimeout> | null = null;
+  /** En navegador `setTimeout` devuelve `number` (no NodeJS.Timeout). */
+  private remoteLoadTimer: number | null = null;
   /** Evita que una respuesta vieja de red pise un filtro nuevo. */
   private remoteLoadGeneration = 0;
 
+  private readonly chartStyleStorageKey = 'sg_chart_style_v1';
+  chartStylePreset: ChartStylePreset = 'area';
+  readonly chartStyleOptions: { value: ChartStylePreset; label: string }[] = [
+    { value: 'area', label: 'Área (relleno suave)' },
+    { value: 'line', label: 'Solo líneas' },
+    { value: 'minimal', label: 'Minimal (limpio)' },
+    { value: 'technical', label: 'Técnico (rejilla)' },
+    { value: 'trend', label: 'Tendencia (rejilla + color por subida/bajada)' },
+  ];
+
   readonly chartGridYStops = [14, 34, 54, 74, 86];
+  readonly chartGridXStops = [20, 35, 50, 65, 80];
+
+  /** En modo tendencia, decimar puntos para que el SVG sea fluido. */
+  private readonly trendDrawPointCap = 420;
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -57,6 +76,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     // Asegura que el store use scope autenticado también en pestaña nueva.
     this.deviceStore.refreshScopeFromSession();
+    this.loadChartStylePreset();
 
     // Soporta ambos nombres por compatibilidad: deviceId (correcto) y deviceld (typo viejo).
     const qp = this.route.snapshot.queryParamMap;
@@ -75,16 +95,16 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
     this.subRead = this.deviceStore.readings$.subscribe((list) => {
       this.readings = list;
-      const hasDateFilter =
-        !!this.filterDay?.trim() || !!this.filterFrom?.trim() || !!this.filterTo?.trim();
-      // Con filtro activo el gráfico puede estar vacío mientras carga la nube;
-      // no cambiar de dispositivo automáticamente (rompía Desde/Hasta).
-      if (hasDateFilter) return;
+      // Con filtro de fechas activo no auto-cambiamos dispositivo (rompe Desde/Hasta).
+      if (this.hasUserDateFilter()) return;
       if (this.selectedDeviceId && this.chartReadingsLocalFiltered().length === 0) {
         const best = this.pickBestDeviceId();
         if (best) this.selectedDeviceId = best;
       }
     });
+
+    // Primera carga del gráfico (p. ej. deviceId en URL válido sin tocar filtros).
+    queueMicrotask(() => this.scheduleRemoteChartLoad());
 
     // Al abrir en pestaña nueva, forzamos una lectura de nube para evitar gráfico vacío.
     window.setTimeout(() => {
@@ -93,6 +113,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     window.setTimeout(() => {
       this.deviceStore.refreshScopeFromSession();
       this.deviceStore.forceRefreshCloudReadings();
+      this.scheduleRemoteChartLoad();
     }, 1200);
   }
 
@@ -122,11 +143,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     return this.chartReadings().length >= 2;
   }
 
-  /** Hay filtro de fechas pero no alcanza puntos para dibujar la curva */
+  /** Hay filtro de fechas explícito pero no alcanza puntos para dibujar la curva */
   get filterActiveButNoPoints(): boolean {
-    const hasFilter =
-      !!this.filterDay?.trim() || !!this.filterFrom?.trim() || !!this.filterTo?.trim();
-    if (!hasFilter) return false;
+    if (!this.hasUserDateFilter()) return false;
     if (this.remoteChartLoading) return false;
     return this.chartReadings().length < 2;
   }
@@ -149,36 +168,16 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     return this.analysisChannel === 'temp2' || this.analysisChannel === 'both';
   }
 
-  get chartXStartLabel(): string {
-    const s = this.chartReadings();
-    if (!s.length) return '—';
-    return this.formatChartAxisTime(s[0].at, s[0].at, s[s.length - 1].at);
-  }
-
-  get chartXMidLabel(): string {
-    const s = this.chartReadings();
-    if (!s.length) return '—';
-    const mid = s[Math.floor((s.length - 1) / 2)];
-    return this.formatChartAxisTime(mid.at, s[0].at, s[s.length - 1].at);
-  }
-
-  get chartXEndLabel(): string {
-    const s = this.chartReadings();
-    if (!s.length) return '—';
-    const last = s[s.length - 1];
-    return this.formatChartAxisTime(last.at, s[0].at, last.at);
-  }
-
   get hoverX(): number | null {
     if (this.hoverIndex == null) return null;
-    const n = this.chartReadings().length;
+    const n = this.chartPointsForDraw().length;
     if (n < 2) return n === 1 ? 50 : null;
     return (this.hoverIndex / (n - 1)) * 100;
   }
 
   get hoverYTemp1(): number | null {
     if (this.hoverIndex == null || !this.showTemp1) return null;
-    const s = this.chartReadings();
+    const s = this.chartPointsForDraw();
     const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
     if (!s[idx]) return null;
     return this.chartScale().toSvgY(s[idx].temperatureC);
@@ -186,7 +185,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   get hoverYTemp2(): number | null {
     if (this.hoverIndex == null || !this.showTemp2) return null;
-    const s = this.chartReadings();
+    const s = this.chartPointsForDraw();
     const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
     if (!s[idx]) return null;
     const filled = this.temp2SeriesForwardFilled(s);
@@ -197,7 +196,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   get hoverTimeLabel(): string {
     if (this.hoverIndex == null) return '';
-    const s = this.chartReadings();
+    const s = this.chartPointsForDraw();
     const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
     if (!s[idx]) return '';
     return this.formatChartDateTime(s[idx].at);
@@ -205,7 +204,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   get hoverTemp1Label(): string {
     if (this.hoverIndex == null || !this.showTemp1) return '—';
-    const s = this.chartReadings();
+    const s = this.chartPointsForDraw();
     const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
     if (!s[idx]) return '—';
     return `${s[idx].temperatureC.toFixed(1)}°C`;
@@ -213,7 +212,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   get hoverTemp2Label(): string {
     if (this.hoverIndex == null || !this.showTemp2) return '—';
-    const s = this.chartReadings();
+    const s = this.chartPointsForDraw();
     const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
     if (!s[idx]) return '—';
     const filled = this.temp2SeriesForwardFilled(s);
@@ -224,6 +223,59 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   toggleChannel(channel: AnalysisChannel): void {
     this.analysisChannel = channel;
+  }
+
+  /** Mismo criterio que el panel principal: relleno bajo la curva en área / técnico. */
+  chartShowsAreaFill(): boolean {
+    return this.chartStylePreset === 'area' || this.chartStylePreset === 'technical';
+  }
+
+  loadChartStylePreset(): void {
+    try {
+      const v = localStorage.getItem(this.chartStyleStorageKey);
+      if (v === 'area' || v === 'line' || v === 'minimal' || v === 'technical' || v === 'trend') {
+        this.chartStylePreset = v;
+        return;
+      }
+    } catch {
+      /* */
+    }
+    this.chartStylePreset = 'area';
+  }
+
+  onChartStyleChange(): void {
+    try {
+      localStorage.setItem(this.chartStyleStorageKey, this.chartStylePreset);
+    } catch {
+      /* */
+    }
+  }
+
+  get avgDeltaLabel(): string {
+    const series = this.chartReadings();
+    const last = series.length ? series[series.length - 1].temperatureC : null;
+    const prev = series.length > 1 ? series[series.length - 2].temperatureC : null;
+    if (last == null || prev == null) return '—';
+    const d = last - prev;
+    const sign = d >= 0 ? '+' : '';
+    return `${sign}${d.toFixed(1)}°C`;
+  }
+
+  /** Min/máx en el rango visible (como el resumen lateral del dashboard). */
+  get chartTempRangeLabel(): string {
+    const series = this.chartReadings();
+    if (!series.length) return '—';
+    const t1 = series.map((r) => r.temperatureC);
+    const n1 = this.sensor1Name;
+    let s = `${n1} min ${Math.min(...t1).toFixed(1)} · max ${Math.max(...t1).toFixed(1)}°C`;
+    const t2vals = series
+      .map((r) => r.temp2C)
+      .filter((x): x is number => x != null && !Number.isNaN(x));
+    if (t2vals.length) {
+      const n2 = this.sensor2Name;
+      s += ` · ${n2} min ${Math.min(...t2vals).toFixed(1)} · max ${Math.max(...t2vals).toFixed(1)}°C`;
+    }
+    return s;
   }
 
   clearDateFilters(): void {
@@ -279,7 +331,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   onChartMouseMove(event: MouseEvent): void {
     const el = event.currentTarget as HTMLElement | null;
     if (!el) return;
-    const series = this.chartReadings();
+    const series = this.chartPointsForDraw();
     if (!series.length) {
       this.hoverIndex = null;
       return;
@@ -433,7 +485,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   chartPolylinePointsS1(): string {
     if (!this.showTemp1) return '';
-    const series = this.chartReadings();
+    const series = this.chartPointsForDraw();
     const n = series.length;
     if (n < 2) return '0,50 100,50';
     const sc = this.chartScale();
@@ -447,7 +499,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   chartPolylinePointsS2(): string {
     if (!this.showTemp2) return '';
-    const series = this.chartReadings();
+    const series = this.chartPointsForDraw();
     const n = series.length;
     if (n < 2) return '';
     const filled = this.temp2SeriesForwardFilled(series);
@@ -462,12 +514,129 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     return pts.length >= 2 ? pts.join(' ') : '';
   }
 
+  /**
+   * Puntos que se dibujan: en modo tendencia se deciman para no generar miles de segmentos.
+   * La escala Y sigue usando todas las lecturas (`chartReadings`).
+   */
+  chartPointsForDraw(): TemperatureReading[] {
+    const s = this.chartReadings();
+    if (this.chartStylePreset !== 'trend') return s;
+    return this.evenSampleReadings(s, this.trendDrawPointCap);
+  }
+
+  private evenSampleReadings(arr: TemperatureReading[], cap: number): TemperatureReading[] {
+    if (arr.length <= cap) return [...arr];
+    const out: TemperatureReading[] = [];
+    const last = arr.length - 1;
+    for (let i = 0; i < cap; i++) {
+      const idx = Math.round((i * last) / (cap - 1));
+      out.push(arr[idx]);
+    }
+    return out;
+  }
+
+  chartTrendSegments1(): Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    trend: 'up' | 'down' | 'flat';
+  }> {
+    if (this.chartStylePreset !== 'trend' || !this.showTemp1) return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const sc = this.chartScale();
+    const eps = 1e-4;
+    const out: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      trend: 'up' | 'down' | 'flat';
+    }> = [];
+    for (let i = 0; i < n - 1; i++) {
+      const t0 = series[i].temperatureC;
+      const t1 = series[i + 1].temperatureC;
+      const d = t1 - t0;
+      const trend = d > eps ? 'up' : d < -eps ? 'down' : 'flat';
+      const x1 = (i / (n - 1)) * 100;
+      const x2 = ((i + 1) / (n - 1)) * 100;
+      out.push({ x1, y1: sc.toSvgY(t0), x2, y2: sc.toSvgY(t1), trend });
+    }
+    return out;
+  }
+
+  chartTrendMarkers1(): Array<{ cx: number; cy: number }> {
+    if (this.chartStylePreset !== 'trend' || !this.showTemp1) return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const sc = this.chartScale();
+    return series.map((r, i) => ({
+      cx: (i / (n - 1)) * 100,
+      cy: sc.toSvgY(r.temperatureC),
+    }));
+  }
+
+  chartTrendSegments2(): Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    trend: 'up' | 'down' | 'flat';
+  }> {
+    if (this.chartStylePreset !== 'trend' || !this.showTemp2 || !this.hasSecondSeries) return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const filled = this.temp2SeriesForwardFilled(series);
+    const sc = this.chartScale();
+    const eps = 1e-4;
+    const out: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      trend: 'up' | 'down' | 'flat';
+    }> = [];
+    for (let i = 0; i < n - 1; i++) {
+      const t0 = filled[i];
+      const t1 = filled[i + 1];
+      if (t0 == null || t1 == null || Number.isNaN(t0) || Number.isNaN(t1)) continue;
+      const d = t1 - t0;
+      const trend = d > eps ? 'up' : d < -eps ? 'down' : 'flat';
+      const x1 = (i / (n - 1)) * 100;
+      const x2 = ((i + 1) / (n - 1)) * 100;
+      out.push({ x1, y1: sc.toSvgY(t0), x2, y2: sc.toSvgY(t1), trend });
+    }
+    return out;
+  }
+
+  chartTrendMarkers2(): Array<{ cx: number; cy: number }> {
+    if (this.chartStylePreset !== 'trend' || !this.showTemp2 || !this.hasSecondSeries) return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const filled = this.temp2SeriesForwardFilled(series);
+    const sc = this.chartScale();
+    const pts: Array<{ cx: number; cy: number }> = [];
+    for (let i = 0; i < n; i++) {
+      const t = filled[i];
+      if (t == null || Number.isNaN(t)) continue;
+      pts.push({ cx: (i / (n - 1)) * 100, cy: sc.toSvgY(t) });
+    }
+    return pts;
+  }
+
   private chartReadings(): TemperatureReading[] {
     if (!this.selectedDeviceId) return [];
 
-    const bounds = this.getFilterRangeBounds();
+    const bounds = this.getEffectiveChartBounds();
     const useRemote =
-      bounds !== null && this.deviceStore.isCloudDeviceId(this.selectedDeviceId);
+      bounds !== null &&
+      this.deviceStore.isCloudSyncActive() &&
+      this.deviceStore.isCloudDeviceId(this.selectedDeviceId);
 
     if (useRemote) {
       if (this.remoteChartLoading) return [];
@@ -525,12 +694,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
     const sorted = filtered.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
     if (sorted.length) {
-      return this.capChartPoints(sorted);
+      const windowed = this.hasUserDateFilter() ? sorted : sorted.slice(-48);
+      return this.capChartPoints(windowed);
     }
 
-    const hasActiveFilter =
-      !!this.filterDay?.trim() || !!this.filterFrom?.trim() || !!this.filterTo?.trim();
-    if (hasActiveFilter) {
+    if (this.hasUserDateFilter()) {
       return [];
     }
 
@@ -566,8 +734,37 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     return out;
   }
 
-  /** Límites del filtro actual para consultar Supabase. */
-  private getFilterRangeBounds(): { from: Date; to: Date } | null {
+  private hasUserDateFilter(): boolean {
+    return !!this.filterDay?.trim() || !!this.filterFrom?.trim() || !!this.filterTo?.trim();
+  }
+
+  /** Rango por defecto en nube cuando no hay filtros (misma ventana que sugerimos en PDF). */
+  private defaultCloudChartBounds(): { from: Date; to: Date } {
+    const to = new Date();
+    const from = new Date(to);
+    from.setDate(from.getDate() - 6);
+    from.setHours(0, 0, 0, 0);
+    return { from, to };
+  }
+
+  /**
+   * Límites que usa el gráfico: filtros del usuario o, en dispositivo nube, últimos 7 días en servidor.
+   */
+  private getEffectiveChartBounds(): { from: Date; to: Date } | null {
+    const user = this.getUserDateFilterBounds();
+    if (user) return user;
+    if (
+      !this.selectedDeviceId ||
+      !this.deviceStore.isCloudSyncActive() ||
+      !this.deviceStore.isCloudDeviceId(this.selectedDeviceId)
+    ) {
+      return null;
+    }
+    return this.defaultCloudChartBounds();
+  }
+
+  /** Límites solo si el usuario eligió día o rango (consulta Supabase). */
+  private getUserDateFilterBounds(): { from: Date; to: Date } | null {
     if (this.filterDay?.trim()) {
       const dayRange = this.parseDayRange(this.filterDay.trim());
       return dayRange ?? null;
@@ -717,7 +914,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     if (this.remoteLoadTimer != null) {
       clearTimeout(this.remoteLoadTimer);
     }
-    const bounds = this.getFilterRangeBounds();
+    const bounds = this.getEffectiveChartBounds();
     const deviceId = this.selectedDeviceId;
     if (
       !this.deviceStore.isCloudSyncActive() ||
@@ -740,7 +937,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   }
 
   private async loadRemoteChartSeries(expectedGen: number): Promise<void> {
-    const bounds = this.getFilterRangeBounds();
+    const bounds = this.getEffectiveChartBounds();
     const deviceId = this.selectedDeviceId;
     if (
       !this.deviceStore.isCloudSyncActive() ||
@@ -775,37 +972,6 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
       if (expectedGen === this.remoteLoadGeneration) {
         this.remoteChartLoading = false;
       }
-    }
-  }
-
-  private formatChartAxisTime(pointAt: string, firstAt: string, lastAt: string): string {
-    const t0 = new Date(firstAt).getTime();
-    const t1 = new Date(lastAt).getTime();
-    if (!Number.isFinite(t0) || !Number.isFinite(t1)) return '—';
-    const spanMs = Math.abs(t1 - t0);
-    if (spanMs > 36 * 60 * 60 * 1000) {
-      try {
-        return new Date(pointAt).toLocaleString('es-AR', {
-          day: '2-digit',
-          month: 'short',
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-      } catch {
-        return pointAt;
-      }
-    }
-    return this.formatChartTime(pointAt);
-  }
-
-  private formatChartTime(iso: string): string {
-    try {
-      return new Date(iso).toLocaleTimeString('es-AR', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return iso;
     }
   }
 

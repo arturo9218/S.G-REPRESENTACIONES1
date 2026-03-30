@@ -499,6 +499,70 @@ export class DeviceStoreService {
   }
 
   /**
+   * Lecturas **crudas** en el rango (sin agregar por hora/día).
+   * El RPC `get_device_readings_chart` agrupa si el rango supera 4 días; el PDF debe listar lecturas reales.
+   */
+  async fetchRawReadingsForPdfExport(
+    deviceId: string,
+    fromIso: string,
+    toIso: string,
+    maxRows = 20000
+  ): Promise<{ rows: TemperatureReading[]; error: string | null; truncated: boolean }> {
+    if (!this.isCloudSyncEnabled() || !this.isUuid(deviceId)) {
+      return { rows: [], error: null, truncated: false };
+    }
+    const pageSize = 1000;
+    const rows: TemperatureReading[] = [];
+    let offset = 0;
+    let lastBatchLen = 0;
+
+    while (rows.length < maxRows) {
+      const { data, error } = await this.auth.client
+        .from('device_readings')
+        .select('created_at, temp1_c, temp2_c')
+        .eq('device_id', deviceId)
+        .gte('created_at', fromIso)
+        .lte('created_at', toIso)
+        .order('created_at', { ascending: true })
+        .range(offset, offset + pageSize - 1);
+
+      if (error) {
+        console.warn('device_readings pdf export:', error.message);
+        return { rows, error: error.message, truncated: false };
+      }
+
+      const batch = (data as Record<string, unknown>[] | null) ?? [];
+      lastBatchLen = batch.length;
+      if (!batch.length) {
+        break;
+      }
+
+      for (const row of batch) {
+        if (rows.length >= maxRows) {
+          break;
+        }
+        rows.push({
+          deviceId,
+          at: typeof row['created_at'] === 'string' ? row['created_at'] : new Date().toISOString(),
+          temperatureC: row['temp1_c'] as number,
+          temp2C:
+            typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
+              ? (row['temp2_c'] as number)
+              : null,
+        });
+      }
+
+      if (rows.length >= maxRows || lastBatchLen < pageSize) {
+        break;
+      }
+      offset += lastBatchLen;
+    }
+
+    const truncated = rows.length >= maxRows && lastBatchLen === pageSize;
+    return { rows, error: null, truncated };
+  }
+
+  /**
    * Sin RPC: lecturas crudas en el rango.
    * Trae mitad del inicio + mitad del final para representar mejor rangos largos.
    * Sirve si aún no ejecutaste 003_chart_readings_range.sql en Supabase.

@@ -1,3 +1,5 @@
+import { VAPID_INJECT } from './vapid.inject';
+
 export const environment = {
   production: true,
   supabaseUrl: 'https://fohbhymulrmdsgrubtlo.supabase.co',
@@ -7,4 +9,5 @@ export const environment = {
   ingestFunctionPath: '/functions/v1/ingest-reading',
   readingsPollIntervalMs: 4000,
   deviceOfflineAfterMs: 90000,
+  vapidPublicKey: VAPID_INJECT,
 };
