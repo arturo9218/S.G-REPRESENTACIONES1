@@ -9,5 +9,6 @@ export const environment = {
   ingestFunctionPath: '/functions/v1/ingest-reading',
   readingsPollIntervalMs: 4000,
   deviceOfflineAfterMs: 90000,
+  displayLineVoltageVForFallback: 220,
   vapidPublicKey: VAPID_INJECT,
 };

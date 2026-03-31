@@ -16,6 +16,8 @@ export const environment = {
   readingsPollIntervalMs: 4000,
   /** Sin telemetría nueva por este tiempo => se considera desconectado. */
   deviceOfflineAfterMs: 90000,
+  /** Si una lectura vieja solo tiene `power_w`, se estima I = P / V (debe coincidir con MAINS_V_RMS del ESP). */
+  displayLineVoltageVForFallback: 220,
   /** Clave pública VAPID (build: variable VAPID_PUBLIC_KEY o valor en vapid.inject.ts). */
   vapidPublicKey: VAPID_INJECT,
 };

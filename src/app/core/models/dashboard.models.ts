@@ -41,6 +41,8 @@ export interface TemperatureReading {
   /** Canales opcionales extras */
   temp2C?: number | null;
   temp3C?: number | null;
+  /** Corriente RMS (A), ej. SCT-013 */
+  currentA?: number | null;
   powerW?: number | null;
   press1Bar?: number | null;
   press2Bar?: number | null;
@@ -81,6 +83,8 @@ export interface HistoryListItem {
   deviceName: string;
   temperatureC: number;
   temp2C?: number | null;
+  currentA?: number | null;
+  powerW?: number | null;
   timeLabel: string;
   sensor1Label?: string;
   sensor2Label?: string;

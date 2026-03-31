@@ -15,6 +15,7 @@ import {
 } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
+import { effectiveCurrentA } from '../core/reading.utils';
 
 @Component({
   selector: 'app-dashboard',
@@ -322,6 +323,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
           deviceName: d?.name ?? r.deviceId,
           temperatureC: r.temperatureC,
           temp2C: r.temp2C ?? null,
+          currentA: r.currentA ?? null,
+          powerW: r.powerW ?? null,
           timeLabel: this.formatShortDate(r.at),
           sensor1Label: d?.sensor1Label,
           sensor2Label: d?.sensor2Label,
@@ -392,7 +395,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .map((r) => ({
         id: `${r.deviceId}-${r.at}`,
         whenLabel: this.formatChartDateTime(r.at),
-        tempLabel: this.formatReadingTempsLine(r, l1, l2),
+        tempLabel: this.formatReadingTempsAndCurrentLine(r, l1, l2),
       }));
   }
 
@@ -412,6 +415,62 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.chartReadings().some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
   }
 
+  chartHasCurrentSeries(): boolean {
+    return this.chartReadings().some((r) => effectiveCurrentA(r) != null);
+  }
+
+  get chartCurrentLatestLabel(): string {
+    if (!this.chartHasCurrentSeries()) return '—';
+    const series = this.chartReadings();
+    const filled = this.currentSeriesForwardFilled(series);
+    const n = filled.length;
+    if (!n) return '—';
+    const v = filled[n - 1];
+    if (v == null || Number.isNaN(v)) return '—';
+    return `${v.toFixed(2)} A`;
+  }
+
+  get chartCurrentRangeLabel(): string {
+    const series = this.chartReadings();
+    const filled = this.currentSeriesForwardFilled(series);
+    const vals = filled.filter((x): x is number => x != null && Number.isFinite(x));
+    if (!vals.length) return '—';
+    return `I min ${Math.min(...vals).toFixed(2)} · max ${Math.max(...vals).toFixed(2)} A`;
+  }
+
+  currentChartPolylinePoints(): string {
+    const series = this.chartReadings();
+    const filled = this.currentSeriesForwardFilled(series);
+    const w = 100;
+    const n = series.length;
+    if (n < 2) return '0,50 100,50';
+    const sc = this.currentChartScale();
+    const pts: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const p = filled[i];
+      if (p == null || Number.isNaN(p)) continue;
+      const x = (i / (n - 1)) * w;
+      pts.push(`${x},${sc.toSvgY(p)}`);
+    }
+    return pts.length >= 2 ? pts.join(' ') : '0,50 100,50';
+  }
+
+  get currentChartYMaxLabel(): string {
+    const p = this.currentChartPaddedBounds();
+    return p ? `${this.formatCurrentAxisTick(p.maxV, p.span)} A` : '—';
+  }
+
+  get currentChartYMidLabel(): string {
+    const p = this.currentChartPaddedBounds();
+    if (!p) return '—';
+    return `${this.formatCurrentAxisTick((p.minV + p.maxV) / 2, p.span)} A`;
+  }
+
+  get currentChartYMinLabel(): string {
+    const p = this.currentChartPaddedBounds();
+    return p ? `${this.formatCurrentAxisTick(p.minV, p.span)} A` : '—';
+  }
+
   get selectedDevice(): DashboardDevice | null {
     if (!this.selectedDeviceId) return null;
     return this.devices.find((d) => d.id === this.selectedDeviceId) ?? null;
@@ -428,6 +487,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .filter((r) => r.deviceId === this.selectedDeviceId)
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
     return source[0] ?? null;
+  }
+
+  get selectedTelemetryCurrentA(): number | null {
+    const t = this.selectedTelemetry;
+    return t ? effectiveCurrentA(t) : null;
   }
 
   get hasHumidity(): boolean {
@@ -544,10 +608,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const s1 = this.selectedSensor1Name;
       const s2 = this.selectedSensor2Name;
       const has2 = rows.some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
+      const hasCurrent = rows.some((r) => effectiveCurrentA(r) != null);
 
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       doc.setFontSize(14);
-      doc.text('SG Monitoreo — temperaturas', 14, 16);
+      doc.text(
+        hasCurrent ? 'SG Monitoreo — temperaturas y corriente' : 'SG Monitoreo — temperaturas',
+        14,
+        16
+      );
       doc.setFontSize(10);
       doc.text(`Dispositivo: ${name}`, 14, 23);
       doc.setFontSize(8);
@@ -568,17 +637,26 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
       const tableStartY = pdfNoteLine ? headerY + 2 : 32;
 
-      const head: string[][] = has2
-        ? [['Fecha y hora', `${s1} (°C)`, `${s2} (°C)`]]
-        : [['Fecha y hora', `${s1} (°C)`]];
+      const buildHead = (): string[][] => {
+        const cols = ['Fecha y hora', `${s1} (°C)`];
+        if (has2) cols.push(`${s2} (°C)`);
+        if (hasCurrent) cols.push('Corriente (A)');
+        return [cols];
+      };
+      const head = buildHead();
       const body: string[][] = rows.map((r) => {
         const t1 = r.temperatureC.toFixed(1);
+        const row: string[] = [this.formatPdfDateTime(r.at), t1];
         if (has2) {
-          const t2 =
-            r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C.toFixed(1) : '—';
-          return [this.formatPdfDateTime(r.at), t1, t2];
+          row.push(
+            r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C.toFixed(1) : '—'
+          );
         }
-        return [this.formatPdfDateTime(r.at), t1];
+        if (hasCurrent) {
+          const ia = effectiveCurrentA(r);
+          row.push(ia != null && Number.isFinite(ia) ? ia.toFixed(2) : '—');
+        }
+        return row;
       });
 
       autoTable(doc, {
@@ -1068,8 +1146,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const n1 = h.sensor1Label?.trim() || 'Sensor 1';
     const n2 = h.sensor2Label?.trim() || 'Sensor 2';
     const t1 = this.formatTemp(h.temperatureC);
-    if (h.temp2C == null || Number.isNaN(h.temp2C)) return `${n1}: ${t1}`;
-    return `${n1}: ${t1} · ${n2}: ${this.formatTemp(h.temp2C)}`;
+    let s =
+      h.temp2C == null || Number.isNaN(h.temp2C)
+        ? `${n1}: ${t1}`
+        : `${n1}: ${t1} · ${n2}: ${this.formatTemp(h.temp2C)}`;
+    const ia = effectiveCurrentA({
+      deviceId: '',
+      at: '',
+      temperatureC: h.temperatureC,
+      currentA: h.currentA ?? null,
+      powerW: h.powerW ?? null,
+    });
+    if (ia != null && Number.isFinite(ia)) s += ` · ${ia.toFixed(2)} A`;
+    return s;
   }
 
   private formatReadingTempsLine(
@@ -1082,9 +1171,22 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return `${name1}: ${t1} · ${name2}: ${this.formatTemp(r.temp2C)}`;
   }
 
-  formatPower(w: number | null | undefined): string {
-    if (w == null || Number.isNaN(w)) return '—';
-    return `${w.toFixed(1)} W`;
+  private formatReadingTempsAndCurrentLine(
+    r: TemperatureReading,
+    name1 = 'Sensor 1',
+    name2 = 'Sensor 2'
+  ): string {
+    let s = this.formatReadingTempsLine(r, name1, name2);
+    const ia = effectiveCurrentA(r);
+    if (ia != null && Number.isFinite(ia)) {
+      s += ` · ${ia.toFixed(2)} A`;
+    }
+    return s;
+  }
+
+  formatCurrent(amps: number | null | undefined): string {
+    if (amps == null || Number.isNaN(amps)) return '—';
+    return `${amps.toFixed(2)} A`;
   }
 
   formatPressure(bar: number | null | undefined): string {
@@ -1338,6 +1440,73 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return [...source]
       .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
       .slice(-48);
+  }
+
+  private currentSeriesForwardFilled(series: TemperatureReading[]): (number | null)[] {
+    const n = series.length;
+    const out: (number | null)[] = new Array(n).fill(null);
+    let last: number | null = null;
+    for (let i = 0; i < n; i++) {
+      const t = effectiveCurrentA(series[i]);
+      if (t != null && Number.isFinite(t)) last = t;
+      out[i] = last;
+    }
+    let next: number | null = null;
+    for (let i = n - 1; i >= 0; i--) {
+      if (out[i] == null && next != null) out[i] = next;
+      if (out[i] != null) next = out[i];
+    }
+    return out;
+  }
+
+  private currentChartValueRange(): { minV: number; maxV: number } | null {
+    const series = this.chartReadings();
+    const filled = this.currentSeriesForwardFilled(series);
+    const vals = filled.filter((x): x is number => x != null && Number.isFinite(x));
+    if (!vals.length) return null;
+    return { minV: Math.min(...vals), maxV: Math.max(...vals) };
+  }
+
+  private currentChartPaddedBounds(): { minV: number; maxV: number; span: number } | null {
+    const raw = this.currentChartValueRange();
+    if (!raw) return null;
+    let span = raw.maxV - raw.minV;
+    if (span < 1e-6) {
+      span = Math.max(0.5, Math.abs(raw.maxV) * 0.25, 0.15);
+      return {
+        minV: raw.minV - span / 2,
+        maxV: raw.maxV + span / 2,
+        span,
+      };
+    }
+    const pad = Math.max(0.05, span * 0.08);
+    return {
+      minV: raw.minV - pad,
+      maxV: raw.maxV + pad,
+      span: span + 2 * pad,
+    };
+  }
+
+  private currentChartScale(): { toSvgY: (v: number) => number } {
+    const padded = this.currentChartPaddedBounds();
+    if (!padded) {
+      return { toSvgY: () => 50 };
+    }
+    const { minV, maxV } = padded;
+    const span = maxV - minV || 1;
+    return {
+      toSvgY: (v: number) => {
+        const ratio = (v - minV) / span;
+        const fromBottom = 8 + ratio * 84;
+        return 100 - fromBottom;
+      },
+    };
+  }
+
+  private formatCurrentAxisTick(value: number, span: number): string {
+    if (span >= 40) return value.toFixed(1);
+    if (span >= 8) return value.toFixed(2);
+    return value.toFixed(3);
   }
 
   private formatShortDate(iso: string): string {

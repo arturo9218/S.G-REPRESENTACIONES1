@@ -244,6 +244,7 @@
             <div class="chart-legend" *ngIf="selectedDeviceId">
               <span class="chart-legend__item"><i class="chart-legend__swatch chart-legend__swatch--s1"></i>{{ selectedSensor1Name }}</span>
               <span class="chart-legend__item" *ngIf="chartHasSecondSeries()"><i class="chart-legend__swatch chart-legend__swatch--s2"></i>{{ selectedSensor2Name }}</span>
+              <span class="chart-legend__item" *ngIf="chartHasCurrentSeries()"><i class="chart-legend__swatch chart-legend__swatch--power"></i>Corriente</span>
             </div>
             <div class="chart-panel">
               <div class="chart-y-axis" aria-hidden="true">
@@ -354,6 +355,51 @@
                 </div>
               </div>
             </div>
+
+            <div class="chart-panel chart-panel--power" *ngIf="chartHasCurrentSeries()">
+              <div class="chart-y-axis chart-y-axis--power" aria-hidden="true">
+                <span>{{ currentChartYMaxLabel }}</span>
+                <span>{{ currentChartYMidLabel }}</span>
+                <span>{{ currentChartYMinLabel }}</span>
+              </div>
+              <div class="chart-svg-wrap chart-svg-wrap--power" (click)="openChartInNewTab($event)">
+                <svg class="chart-svg chart-svg--power" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="dashChartFillPower" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="#d97706" stop-opacity="0.2" />
+                      <stop offset="100%" stop-color="#d97706" stop-opacity="0" />
+                    </linearGradient>
+                    <clipPath id="dashChartPlotClipPower">
+                      <rect x="0" y="0" width="100" height="100" rx="0" />
+                    </clipPath>
+                  </defs>
+                  <rect class="chart-svg__bg" x="0" y="0" width="100" height="100" />
+                  <g class="chart-grid" clip-path="url(#dashChartPlotClipPower)">
+                    <line *ngFor="let gy of chartGridYStops" x1="0" [attr.y1]="gy" x2="100" [attr.y2]="gy" />
+                  </g>
+                  <g clip-path="url(#dashChartPlotClipPower)">
+                    <polygon
+                      *ngIf="chartShowsAreaFill()"
+                      class="chart-area chart-area--power"
+                      [attr.points]="'0,100 ' + currentChartPolylinePoints() + ' 100,100'"
+                      fill="url(#dashChartFillPower)"
+                    />
+                    <polyline
+                      class="chart-line chart-line--power"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      vector-effect="non-scaling-stroke"
+                      [attr.points]="currentChartPolylinePoints()"
+                    />
+                  </g>
+                </svg>
+                <div class="chart-labels chart-labels--power">
+                  <span *ngFor="let lb of chartDayLabels">{{ lb }}</span>
+                </div>
+              </div>
+            </div>
+
             <div class="chart-side">
               <p class="chart-side__delta">{{ avgDeltaLabel }}</p>
               <div class="chart-side__stats">
@@ -363,7 +409,11 @@
                 <span class="chart-side__stat-line" *ngIf="chartHasSecondSeries()">
                   <i class="chart-side__swatch chart-side__swatch--s2"></i>{{ selectedSensor2Name }}: {{ chartCurrentLabel2 }}
                 </span>
+                <span class="chart-side__stat-line" *ngIf="chartHasCurrentSeries()">
+                  <i class="chart-side__swatch chart-side__swatch--power"></i>Corriente: {{ chartCurrentLatestLabel }}
+                </span>
                 <span class="chart-side__range">{{ chartTempRangeLabel }}</span>
+                <span class="chart-side__range" *ngIf="chartHasCurrentSeries()">{{ chartCurrentRangeLabel }}</span>
               </div>
               <span class="chart-side__humidity" *ngIf="hasHumidity">{{ humidityLabel }} humedad</span>
             </div>
@@ -482,8 +532,8 @@
                 <strong>{{ formatTemp(t.temp3C ?? null) }}</strong>
               </div>
               <div class="telemetry__row">
-                <span>Consumo</span>
-                <strong>{{ formatPower(t.powerW) }}</strong>
+                <span>Corriente</span>
+                <strong>{{ formatCurrent(selectedTelemetryCurrentA) }}</strong>
               </div>
               <p class="telemetry__time">Actualizado: {{ t.at | date:'HH:mm dd/MM/yy' }}</p>
             </div>
@@ -590,8 +640,8 @@
             <h2 class="card__title card__title--sm">Avisos con la app cerrada</h2>
             <div class="notify-panel">
               <p class="notify-panel__hint">
-                Notificaciones del sistema (Web Push) cuando superás umbrales o el equipo deja de enviar datos.
-                En Chrome/Edge funciona bien; en iPhone hace falta instalar la PWA en inicio en versiones recientes.
+                Avisos del sistema (Web Push) aunque la app esté en segundo plano o cerrada: umbrales de temperatura y equipo sin datos.
+                En Chrome, Edge y Android conviene aceptar “Notificaciones”; en iPhone, agregar la PWA a inicio y permisos recientes.
               </p>
               <p class="notify-panel__hint" *ngIf="webPushUiState === 'loading'">Comprobando soporte…</p>
               <p class="notify-panel__hint" *ngIf="webPushUiState === 'unsupported'">

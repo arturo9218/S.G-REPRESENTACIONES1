@@ -81,6 +81,7 @@ export interface TelemetryInput {
   temp1C: number;
   temp2C?: number | null;
   temp3C?: number | null;
+  currentA?: number | null;
   powerW?: number | null;
   press1Bar?: number | null;
   press2Bar?: number | null;
@@ -323,6 +324,8 @@ export class DeviceStoreService {
               typeof r['temp2C'] === 'number' && !Number.isNaN(r['temp2C']) ? r['temp2C'] : null,
             temp3C:
               typeof r['temp3C'] === 'number' && !Number.isNaN(r['temp3C']) ? r['temp3C'] : null,
+            currentA:
+              typeof r['currentA'] === 'number' && !Number.isNaN(r['currentA']) ? r['currentA'] : null,
             powerW:
               typeof r['powerW'] === 'number' && !Number.isNaN(r['powerW']) ? r['powerW'] : null,
             press1Bar:
@@ -494,6 +497,10 @@ export class DeviceStoreService {
         typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
           ? (row['temp2_c'] as number)
           : null,
+      currentA:
+        typeof row['current_a'] === 'number' && !Number.isNaN(row['current_a'] as number)
+          ? (row['current_a'] as number)
+          : null,
     }));
     return { rows, error: null };
   }
@@ -519,7 +526,7 @@ export class DeviceStoreService {
     while (rows.length < maxRows) {
       const { data, error } = await this.auth.client
         .from('device_readings')
-        .select('created_at, temp1_c, temp2_c')
+        .select('created_at, temp1_c, temp2_c, current_a, power_w')
         .eq('device_id', deviceId)
         .gte('created_at', fromIso)
         .lte('created_at', toIso)
@@ -549,6 +556,14 @@ export class DeviceStoreService {
             typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
               ? (row['temp2_c'] as number)
               : null,
+          currentA:
+            typeof row['current_a'] === 'number' && !Number.isNaN(row['current_a'] as number)
+              ? (row['current_a'] as number)
+              : null,
+          powerW:
+            typeof row['power_w'] === 'number' && !Number.isNaN(row['power_w'] as number)
+              ? (row['power_w'] as number)
+              : null,
         });
       }
 
@@ -575,7 +590,7 @@ export class DeviceStoreService {
     const half = 10000;
     const base = this.auth.client
       .from('device_readings')
-      .select('created_at, temp1_c, temp2_c')
+      .select('created_at, temp1_c, temp2_c, current_a, power_w')
       .eq('device_id', deviceId)
       .gte('created_at', fromIso)
       .lte('created_at', toIso);
@@ -614,6 +629,14 @@ export class DeviceStoreService {
         temp2C:
           typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
             ? (row['temp2_c'] as number)
+            : null,
+        currentA:
+          typeof row['current_a'] === 'number' && !Number.isNaN(row['current_a'] as number)
+            ? (row['current_a'] as number)
+            : null,
+        powerW:
+          typeof row['power_w'] === 'number' && !Number.isNaN(row['power_w'] as number)
+            ? (row['power_w'] as number)
             : null,
       }))
       .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
@@ -798,7 +821,7 @@ export class DeviceStoreService {
     if (!ids.length) return;
 
     const selectCols =
-      'device_id, created_at, temp1_c, temp2_c, temp3_c, power_w, press1_bar, press2_bar';
+      'device_id, created_at, temp1_c, temp2_c, temp3_c, current_a, power_w, press1_bar, press2_bar';
     const rows: Record<string, unknown>[] = [];
 
     for (const deviceId of ids) {
@@ -829,6 +852,10 @@ export class DeviceStoreService {
       temp3C:
         typeof r['temp3_c'] === 'number' && !Number.isNaN(r['temp3_c'] as number)
           ? (r['temp3_c'] as number)
+          : null,
+      currentA:
+        typeof r['current_a'] === 'number' && !Number.isNaN(r['current_a'] as number)
+          ? (r['current_a'] as number)
           : null,
       powerW:
         typeof r['power_w'] === 'number' && !Number.isNaN(r['power_w'] as number)
@@ -912,6 +939,8 @@ export class DeviceStoreService {
             Math.round((base + Math.cos(day * 0.6) * 0.4 + 0.2) * 10) / 10,
           temp3C:
             Math.round((base + Math.sin(day * 0.5) * 0.3 - 0.3) * 10) / 10,
+          currentA:
+            Math.round((2.1 + (dev.id.charCodeAt(1) % 10) * 0.35 + Math.sin(day) * 0.4) * 100) / 100,
           powerW:
             Math.round((160 + (dev.id.charCodeAt(1) % 12) * 8 + Math.sin(day) * 18) * 10) / 10,
           press1Bar:
@@ -1102,6 +1131,7 @@ export class DeviceStoreService {
       temperatureC: input.temp1C,
       temp2C: input.temp2C ?? null,
       temp3C: input.temp3C ?? null,
+      currentA: input.currentA ?? null,
       powerW: input.powerW ?? null,
       press1Bar: input.press1Bar ?? null,
       press2Bar: input.press2Bar ?? null,

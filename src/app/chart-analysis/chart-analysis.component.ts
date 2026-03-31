@@ -9,8 +9,9 @@ import {
   TemperatureReading,
 } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
+import { effectiveCurrentA } from '../core/reading.utils';
 
-type AnalysisChannel = 'temp1' | 'temp2' | 'both';
+type AnalysisChannel = 'temp1' | 'temp2' | 'both' | 'current';
 
 @Component({
   selector: 'app-chart-analysis',
@@ -139,8 +140,23 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     return this.chartReadings().some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
   }
 
+  get hasCurrentSeries(): boolean {
+    return this.chartReadings().some((r) => effectiveCurrentA(r) != null);
+  }
+
+  /** Canal corriente (A) en el selector */
+  get analysisShowsCurrent(): boolean {
+    return this.analysisChannel === 'current';
+  }
+
   get hasChartData(): boolean {
-    return this.chartReadings().length >= 2;
+    const s = this.chartReadings();
+    if (s.length < 2) return false;
+    if (this.analysisShowsCurrent) {
+      const filled = this.currentSeriesForwardFilled(s);
+      return filled.some((v) => v != null && Number.isFinite(v as number));
+    }
+    return true;
   }
 
   /** Hay filtro de fechas explícito pero no alcanza puntos para dibujar la curva */
@@ -161,10 +177,12 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   }
 
   get showTemp1(): boolean {
+    if (this.analysisShowsCurrent) return false;
     return this.analysisChannel === 'temp1' || this.analysisChannel === 'both';
   }
 
   get showTemp2(): boolean {
+    if (this.analysisShowsCurrent) return false;
     return this.analysisChannel === 'temp2' || this.analysisChannel === 'both';
   }
 
@@ -221,6 +239,26 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     return `${t2.toFixed(1)}°C`;
   }
 
+  get hoverYCurrent(): number | null {
+    if (this.hoverIndex == null || !this.analysisShowsCurrent) return null;
+    const s = this.chartPointsForDraw();
+    const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
+    const filled = this.currentSeriesForwardFilled(s);
+    const amps = filled[idx];
+    if (amps == null || Number.isNaN(amps)) return null;
+    return this.chartScale().toSvgY(amps);
+  }
+
+  get hoverCurrentLabel(): string {
+    if (this.hoverIndex == null || !this.analysisShowsCurrent) return '—';
+    const s = this.chartPointsForDraw();
+    const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
+    const filled = this.currentSeriesForwardFilled(s);
+    const amps = filled[idx];
+    if (amps == null || Number.isNaN(amps)) return '—';
+    return `${amps.toFixed(2)} A`;
+  }
+
   toggleChannel(channel: AnalysisChannel): void {
     this.analysisChannel = channel;
   }
@@ -253,6 +291,17 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   get avgDeltaLabel(): string {
     const series = this.chartReadings();
+    if (this.analysisShowsCurrent) {
+      const filled = this.currentSeriesForwardFilled(series);
+      const n = filled.length;
+      if (n < 2) return '—';
+      const last = filled[n - 1];
+      const prev = filled[n - 2];
+      if (last == null || prev == null || Number.isNaN(last) || Number.isNaN(prev)) return '—';
+      const d = last - prev;
+      const sign = d >= 0 ? '+' : '';
+      return `${sign}${d.toFixed(2)} A`;
+    }
     const last = series.length ? series[series.length - 1].temperatureC : null;
     const prev = series.length > 1 ? series[series.length - 2].temperatureC : null;
     if (last == null || prev == null) return '—';
@@ -276,6 +325,18 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
       s += ` · ${n2} min ${Math.min(...t2vals).toFixed(1)} · max ${Math.max(...t2vals).toFixed(1)}°C`;
     }
     return s;
+  }
+
+  get chartCurrentRangeLabel(): string {
+    const series = this.chartReadings();
+    const filled = this.currentSeriesForwardFilled(series);
+    const vals = filled.filter((x): x is number => x != null && Number.isFinite(x));
+    if (!vals.length) return '—';
+    return `I min ${Math.min(...vals).toFixed(2)} · max ${Math.max(...vals).toFixed(2)} A`;
+  }
+
+  get chartSideRangeLabel(): string {
+    return this.analysisShowsCurrent ? this.chartCurrentRangeLabel : this.chartTempRangeLabel;
   }
 
   clearDateFilters(): void {
@@ -413,9 +474,30 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     return `${v.toFixed(1)}°C`;
   }
 
+  get chartLatestCurrentLabel(): string {
+    if (!this.analysisShowsCurrent) return '—';
+    const series = this.chartReadings();
+    const filled = this.currentSeriesForwardFilled(series);
+    const n = filled.length;
+    if (!n) return '—';
+    const v = filled[n - 1];
+    if (v == null || Number.isNaN(v)) return '—';
+    return `${v.toFixed(2)} A`;
+  }
+
   private chartValueRange(): { minV: number; maxV: number; span: number } | null {
     const series = this.chartReadings();
     if (!series.length) return null;
+
+    if (this.analysisShowsCurrent) {
+      const filled = this.currentSeriesForwardFilled(series);
+      const vals = filled.filter((x): x is number => x != null && Number.isFinite(x));
+      if (!vals.length) return null;
+      const minV = Math.min(...vals);
+      const maxV = Math.max(...vals);
+      const span = maxV - minV;
+      return { minV, maxV, span };
+    }
 
     const vals: number[] = [];
     if (this.showTemp1) vals.push(...series.map((r) => r.temperatureC));
@@ -442,10 +524,16 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
     let { minV, maxV, span } = raw;
     if (span < 1e-6) {
+      if (this.analysisShowsCurrent) {
+        span = Math.max(0.5, Math.abs(maxV) * 0.25, 0.15);
+        return { minV: minV - span / 2, maxV: maxV + span / 2, span };
+      }
       span = 0.6;
       return { minV: minV - span / 2, maxV: maxV + span / 2, span };
     }
-    const pad = Math.max(0.25, span * 0.06, Math.abs(maxV) * 0.01);
+    const pad = this.analysisShowsCurrent
+      ? Math.max(0.05, span * 0.08)
+      : Math.max(0.25, span * 0.06, Math.abs(maxV) * 0.01);
     minV = minV - pad;
     maxV = maxV + pad;
     return { minV, maxV, span: maxV - minV };
@@ -468,19 +556,34 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   get chartYMaxLabel(): string {
     const padded = this.chartPaddedBounds();
     if (!padded) return '—';
+    if (this.analysisShowsCurrent) {
+      return `${this.formatCurrentAxisTick(padded.maxV, padded.span)} A`;
+    }
     return `${padded.maxV.toFixed(1)}°C`;
   }
 
   get chartYMidLabel(): string {
     const padded = this.chartPaddedBounds();
     if (!padded) return '—';
+    if (this.analysisShowsCurrent) {
+      return `${this.formatCurrentAxisTick((padded.minV + padded.maxV) / 2, padded.span)} A`;
+    }
     return `${((padded.minV + padded.maxV) / 2).toFixed(1)}°C`;
   }
 
   get chartYMinLabel(): string {
     const padded = this.chartPaddedBounds();
     if (!padded) return '—';
+    if (this.analysisShowsCurrent) {
+      return `${this.formatCurrentAxisTick(padded.minV, padded.span)} A`;
+    }
     return `${padded.minV.toFixed(1)}°C`;
+  }
+
+  private formatCurrentAxisTick(value: number, span: number): string {
+    if (span >= 40) return value.toFixed(1);
+    if (span >= 8) return value.toFixed(2);
+    return value.toFixed(3);
   }
 
   chartPolylinePointsS1(): string {
@@ -512,6 +615,23 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
       pts.push(`${x},${sc.toSvgY(t2)}`);
     }
     return pts.length >= 2 ? pts.join(' ') : '';
+  }
+
+  chartPolylinePointsCurrent(): string {
+    if (!this.analysisShowsCurrent) return '';
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return '0,50 100,50';
+    const filled = this.currentSeriesForwardFilled(series);
+    const sc = this.chartScale();
+    const pts: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const pw = filled[i];
+      if (pw == null || Number.isNaN(pw)) continue;
+      const x = (i / (n - 1)) * 100;
+      pts.push(`${x},${sc.toSvgY(pw)}`);
+    }
+    return pts.length >= 2 ? pts.join(' ') : '0,50 100,50';
   }
 
   /**
@@ -619,6 +739,56 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     const n = series.length;
     if (n < 2) return [];
     const filled = this.temp2SeriesForwardFilled(series);
+    const sc = this.chartScale();
+    const pts: Array<{ cx: number; cy: number }> = [];
+    for (let i = 0; i < n; i++) {
+      const t = filled[i];
+      if (t == null || Number.isNaN(t)) continue;
+      pts.push({ cx: (i / (n - 1)) * 100, cy: sc.toSvgY(t) });
+    }
+    return pts;
+  }
+
+  chartTrendSegmentsCurrent(): Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    trend: 'up' | 'down' | 'flat';
+  }> {
+    if (this.chartStylePreset !== 'trend' || !this.analysisShowsCurrent) return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const filled = this.currentSeriesForwardFilled(series);
+    const sc = this.chartScale();
+    const eps = 1e-4;
+    const out: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      trend: 'up' | 'down' | 'flat';
+    }> = [];
+    for (let i = 0; i < n - 1; i++) {
+      const t0 = filled[i];
+      const t1 = filled[i + 1];
+      if (t0 == null || t1 == null || Number.isNaN(t0) || Number.isNaN(t1)) continue;
+      const d = t1 - t0;
+      const trend = d > eps ? 'up' : d < -eps ? 'down' : 'flat';
+      const x1 = (i / (n - 1)) * 100;
+      const x2 = ((i + 1) / (n - 1)) * 100;
+      out.push({ x1, y1: sc.toSvgY(t0), x2, y2: sc.toSvgY(t1), trend });
+    }
+    return out;
+  }
+
+  chartTrendMarkersCurrent(): Array<{ cx: number; cy: number }> {
+    if (this.chartStylePreset !== 'trend' || !this.analysisShowsCurrent) return [];
+    const series = this.chartPointsForDraw();
+    const n = series.length;
+    if (n < 2) return [];
+    const filled = this.currentSeriesForwardFilled(series);
     const sc = this.chartScale();
     const pts: Array<{ cx: number; cy: number }> = [];
     for (let i = 0; i < n; i++) {
@@ -1003,6 +1173,23 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
       return bHasTemp - aHasTemp;
     });
     return ordered[0]?.id ?? null;
+  }
+
+  private currentSeriesForwardFilled(series: TemperatureReading[]): (number | null)[] {
+    const n = series.length;
+    const out: (number | null)[] = new Array(n).fill(null);
+    let last: number | null = null;
+    for (let i = 0; i < n; i++) {
+      const t = effectiveCurrentA(series[i]);
+      if (t != null && Number.isFinite(t)) last = t;
+      out[i] = last;
+    }
+    let next: number | null = null;
+    for (let i = n - 1; i >= 0; i--) {
+      if (out[i] == null && next != null) out[i] = next;
+      if (out[i] != null) next = out[i];
+    }
+    return out;
   }
 
   /** Solo para dibujo: arrastra temp2 hacia adelante y rellena el inicio hacia atrás. */

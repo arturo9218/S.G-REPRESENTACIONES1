@@ -82,7 +82,7 @@ export class WebPushService {
       return {
         ok: true,
         message:
-          'Activado. Vas a recibir avisos de umbral y de desconexión (según navegador y permisos).',
+          'Activado. Con la app en segundo plano o la pestaña cerrada, el sistema puede avisarte (Chrome/Edge/Android; iPhone: PWA en inicio y permisos).',
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

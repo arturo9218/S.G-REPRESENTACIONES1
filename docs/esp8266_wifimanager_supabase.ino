@@ -7,6 +7,7 @@
 #include <EEPROM.h>
 #include <cstring>
 #include <ctype.h>
+#include <math.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
@@ -29,8 +30,26 @@ static const uint8_t PIN_TEMP_GPIO2 = 2;
 static const int PIN_FORCE_CONFIG = 14;
 static const unsigned long SERIAL_CONFIG_WINDOW_MS = 2500;
 
-static const float ADC_TO_WATTS_FACTOR = 0.35f;
-static const float WATTS_OFFSET = 0.0f;
+/**
+ * Consumo: SCT-013 60A / 1V (salida AC ya referida, 1 V RMS = 60 A en el primario).
+ * Hardware típico: pin A0 con polarización DC al centro (ej. divisor 10k desde 3V3 a GND,
+ * nodo central al ADC; señal del SCT por condensador 10µF). Rango útil en NodeMCU: 0–3,3 V en A0.
+ *
+ * I_rms (A) = V_rms_salida_SCT * (60 / 1). Potencia aparente: P ≈ V_red * I_rms (PF=1; calibrá si hace falta).
+ */
+static const float SCT013_MAX_PRIMARY_A = 60.0f;
+static const float SCT013_OUTPUT_V_RMS_AT_MAX_A = 1.0f;
+/** Tensión de red (RMS), ej. 220 o 110 — ajustá a tu instalación. */
+static const float MAINS_V_RMS = 220.0f;
+/** NodeMCU: analogRead 0–1023 ≈ 0–3,3 V en el pin A0. */
+static const float ADC_FULLSCALE_V = 3.3f;
+/** Multiplicador fino si comparás con un medidor de referencia (1.0 = sin corrección). */
+static const float SCT_POWER_CALIB = 1.0f;
+/** Muestras para RMS (~40 ms a 200 µs entre lecturas → varios ciclos a 50 Hz). */
+static const int SCT_RMS_SAMPLES = 200;
+static const int SCT_SAMPLE_DELAY_US = 200;
+/** Por debajo de esto se envía 0 W (ruido del ADC). */
+static const float SCT_MIN_WATTS = 8.0f;
 
 /**
  * EEPROM v2: magic + version + XOR del payload (evita leer basura de flash).
@@ -477,11 +496,29 @@ void readTemps12(float *out1, float *out2) {
   *out2 = (b == DEVICE_DISCONNECTED_C) ? NAN : b;
 }
 
-float readPowerW() {
-  int adc = analogRead(PIN_CONSUMO_A0);
-  float watts = adc * ADC_TO_WATTS_FACTOR + WATTS_OFFSET;
-  if (watts < 0) watts = 0;
-  return watts;
+/** Corriente RMS (A) en el conductor; potencia = MAINS_V_RMS * I (con calibración). */
+float readSctAmpsRms() {
+  static uint16_t buf[SCT_RMS_SAMPLES];
+  long sum = 0;
+  for (int i = 0; i < SCT_RMS_SAMPLES; i++) {
+    buf[i] = analogRead(PIN_CONSUMO_A0);
+    sum += (long)buf[i];
+    delayMicroseconds(SCT_SAMPLE_DELAY_US);
+    yield();
+  }
+  float mean = (float)sum / (float)SCT_RMS_SAMPLES;
+  double acc = 0.0;
+  for (int i = 0; i < SCT_RMS_SAMPLES; i++) {
+    double d = (double)buf[i] - (double)mean;
+    acc += d * d;
+  }
+  float rms_adc = sqrtf((float)(acc / (double)SCT_RMS_SAMPLES));
+  float v_rms = (rms_adc / 1023.0f) * ADC_FULLSCALE_V;
+  float amps_from_sct = v_rms * (SCT013_MAX_PRIMARY_A / SCT013_OUTPUT_V_RMS_AT_MAX_A);
+  float amps = amps_from_sct * SCT_POWER_CALIB;
+  float watts = MAINS_V_RMS * amps;
+  if (watts < SCT_MIN_WATTS) return 0.0f;
+  return amps;
 }
 
 void sendTelemetry() {
@@ -507,7 +544,8 @@ void sendTelemetry() {
   g_jsonDoc["deviceToken"] = cfg.apiKey;
   float t1 = NAN, t2 = NAN;
   readTemps12(&t1, &t2);
-  float p = readPowerW();
+  float amps = readSctAmpsRms();
+  float p = MAINS_V_RMS * amps;
 
   if (isnan(t1)) {
     Serial.println(F("[TMP] Sensor 1 desconectado (GPIO2)"));
@@ -522,6 +560,7 @@ void sendTelemetry() {
     g_jsonDoc["temp2_c"] = t2;
   }
   g_jsonDoc["temp3_c"] = static_cast<const char *>(nullptr);
+  g_jsonDoc["current_a"] = amps;
   g_jsonDoc["power_w"] = p;
 
   String body;

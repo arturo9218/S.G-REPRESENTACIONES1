@@ -683,6 +683,10 @@ $border: rgba(148, 163, 184, 0.18);
   &--s2 {
     background: #0f766e;
   }
+
+  &--power {
+    background: #d97706;
+  }
 }
 
 .card--chart {
@@ -970,6 +974,55 @@ $border: rgba(148, 163, 184, 0.18);
   min-height: min(68vh, 480px);
 }
 
+.chart-panel--power {
+  min-height: 108px;
+  margin-top: 0.5rem;
+}
+
+.card--chart-expanded .chart-panel--power {
+  min-height: 140px;
+}
+
+.chart-svg-wrap--power {
+  height: 88px;
+  min-height: 88px;
+  cursor: pointer;
+}
+
+.card--chart-expanded .chart-svg-wrap--power {
+  min-height: min(22vh, 160px);
+  height: auto;
+}
+
+.chart-svg--power {
+  min-height: 76px;
+}
+
+.card--chart-expanded .chart-svg--power {
+  min-height: min(18vh, 140px);
+}
+
+.chart-labels--power {
+  font-size: 0.55rem;
+}
+
+.chart-y-axis--power {
+  font-size: 0.52rem;
+}
+
+.chart-area--power {
+  stroke: none;
+}
+
+.chart-line--power {
+  stroke: #f59e0b;
+  stroke-width: 1.45;
+}
+
+.card--chart-expanded .chart-line--power {
+  stroke-width: 1.6;
+}
+
 .chart-y-axis {
   display: flex;
   flex-direction: column;
@@ -1144,6 +1197,10 @@ $border: rgba(148, 163, 184, 0.18);
 
   &--s2 {
     background: #0f766e;
+  }
+
+  &--power {
+    background: #d97706;
   }
 }
 

@@ -9,6 +9,18 @@ export interface PushPayload {
   tag?: string;
 }
 
+/** TTL del mensaje en la red push (segundos). Antes 120s: en segundo plano a veces expiraba antes de entregar. */
+const PUSH_TTL_SECONDS = 86_400;
+
+/**
+ * URL pública del front (HTTPS, sin barra final), ej. https://tu-app.vercel.app
+ * Secret en Supabase: APP_PUBLIC_URL — para icon/badge absolutos en Android/Chrome en segundo plano.
+ */
+function notificationBaseUrl(): string | undefined {
+  const u = Deno.env.get('APP_PUBLIC_URL')?.trim().replace(/\/$/, '');
+  return u || undefined;
+}
+
 export async function sendPushToUser(
   supabase: SupabaseClient,
   userId: string,
@@ -33,12 +45,24 @@ export async function sendPushToUser(
   }
 
   // Formato que espera @angular/service-worker (ngsw-worker.js → handlePush).
-  const notif: Record<string, string> = {
+  // icon/badge absolutos + vibrate/renotify ayudan a que el SO muestre aviso con app en segundo plano.
+  const base = notificationBaseUrl();
+  const notif: Record<string, unknown> = {
     title: payload.title,
     body: payload.body,
+    vibrate: [200, 100, 200],
+    renotify: Boolean(payload.tag),
+    silent: false,
   };
   if (payload.tag) {
     notif.tag = payload.tag;
+  }
+  if (base) {
+    notif.icon = `${base}/assets/icons/icon-192.svg`;
+    notif.badge = `${base}/favicon.ico`;
+  }
+  if (payload.data && Object.keys(payload.data).length) {
+    notif.data = payload.data;
   }
 
   const body = JSON.stringify({
@@ -55,7 +79,7 @@ export async function sendPushToUser(
           keys: { p256dh: s.p256dh, auth: s.auth },
         },
         body,
-        { TTL: 120 }
+        { TTL: PUSH_TTL_SECONDS }
       );
       sent++;
     } catch (e: unknown) {

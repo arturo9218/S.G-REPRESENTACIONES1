@@ -271,6 +271,18 @@ $border: rgba(148, 163, 184, 0.18);
   stroke: #94a3b8;
 }
 
+.chart-seg--power.chart-seg--up {
+  stroke: #ea580c;
+}
+
+.chart-seg--power.chart-seg--down {
+  stroke: #ca8a04;
+}
+
+.chart-seg--power.chart-seg--flat {
+  stroke: #a16207;
+}
+
 .chart-trend-dot {
   fill: #2563eb;
   stroke: #fff;
@@ -281,6 +293,10 @@ $border: rgba(148, 163, 184, 0.18);
   fill: #0891b2;
 }
 
+.chart-trend-dot--power {
+  fill: #d97706;
+}
+
 .chart-hover-line--dash {
   stroke-dasharray: 1.2 1.8;
   stroke: rgba(15, 23, 42, 0.55) !important;
@@ -288,14 +304,24 @@ $border: rgba(148, 163, 184, 0.18);
 }
 
 .panel--chart-style-trend .chart-hover-line--temp1,
-.panel--chart-style-trend .chart-hover-line--temp2 {
+.panel--chart-style-trend .chart-hover-line--temp2,
+.panel--chart-style-trend .chart-hover-line--power {
   stroke: rgba(15, 23, 42, 0.5) !important;
+}
+
+.chart-hover-line--power {
+  stroke: #d97706;
+  opacity: 0.55;
 }
 
 .chart-hover-dot {
   fill: #16a34a;
   stroke: #fff;
   stroke-width: 0.4;
+}
+
+.chart-hover-dot--power {
+  fill: #d97706;
 }
 
 .panel__title {
@@ -495,6 +521,10 @@ $border: rgba(148, 163, 184, 0.18);
   background: $teal;
 }
 
+.legend-item__swatch--power {
+  background: #d97706;
+}
+
 .chart-head__hint {
   font-size: 0.75rem;
   color: $muted;
@@ -633,6 +663,15 @@ $border: rgba(148, 163, 184, 0.18);
 .chart-line--s2 {
   stroke: $teal;
   stroke-width: 2;
+}
+
+.chart-line--power {
+  stroke: #f59e0b;
+  stroke-width: 2;
+}
+
+.chart-area--power {
+  stroke: none;
 }
 
 .chart-dot--ring {

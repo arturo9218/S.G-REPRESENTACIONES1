@@ -16,6 +16,8 @@ interface IngestPayload {
   temp1_c: number;
   temp2_c?: number | null;
   temp3_c?: number | null;
+  /** Corriente RMS (A), ej. SCT-013 */
+  current_a?: number | null;
   power_w?: number | null;
   press1_bar?: number | null;
   press2_bar?: number | null;
@@ -94,6 +96,7 @@ Deno.serve(async (req) => {
       temp1_c: payload.temp1_c,
       temp2_c: payload.temp2_c ?? null,
       temp3_c: payload.temp3_c ?? null,
+      current_a: payload.current_a ?? null,
       power_w: payload.power_w ?? null,
       press1_bar: payload.press1_bar ?? null,
       press2_bar: payload.press2_bar ?? null,

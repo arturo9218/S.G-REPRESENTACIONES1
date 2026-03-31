@@ -2,6 +2,7 @@
 -- Tras ejecutar: Dashboard → Project Settings → Edge Functions → Secrets:
 --   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (ej. mailto:tu@email.com)
 --   ALERT_CRON_SECRET (string larga; misma valor en el cron que llama a check-offline-push)
+--   APP_PUBLIC_URL (opcional, ej. https://tu-app.vercel.app) — icono/badge en notificaciones en segundo plano
 
 create table if not exists public.push_subscriptions (
   id uuid primary key default gen_random_uuid(),
