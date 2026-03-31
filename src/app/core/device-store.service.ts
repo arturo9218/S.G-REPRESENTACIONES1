@@ -74,6 +74,7 @@ export interface DeviceNotificationConfigInput {
   alertsEnabled: boolean;
   tempLowC: number | null;
   tempHighC: number | null;
+  tempPushCooldownMs: number | null;
 }
 
 export interface TelemetryInput {
@@ -198,6 +199,7 @@ export class DeviceStoreService {
         notifications_enabled: true,
         temp1_min_c: 2,
         temp1_max_c: 8,
+        temp_push_cooldown_ms: 15 * 60 * 1000,
         power_max_w: 350,
         press1_min_bar: 1.8,
         press1_max_bar: 2.8,
@@ -751,12 +753,12 @@ export class DeviceStoreService {
     const ids = data.map((r) => r.id as string);
     const thresholdsByDevice = new Map<
       string,
-      { enabled: boolean; low: number | null; high: number | null }
+      { enabled: boolean; low: number | null; high: number | null; cooldownMs: number | null }
     >();
     if (ids.length) {
       const { data: thData } = await this.auth.client
         .from('device_thresholds')
-        .select('device_id, notifications_enabled, temp1_min_c, temp1_max_c')
+        .select('device_id, notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms')
         .in('device_id', ids);
       for (const th of (thData ?? []) as Record<string, unknown>[]) {
         const did = th['device_id'];
@@ -770,6 +772,11 @@ export class DeviceStoreService {
           high:
             typeof th['temp1_max_c'] === 'number' && !Number.isNaN(th['temp1_max_c'] as number)
               ? (th['temp1_max_c'] as number)
+              : null,
+          cooldownMs:
+            typeof th['temp_push_cooldown_ms'] === 'number' &&
+            !Number.isNaN(th['temp_push_cooldown_ms'] as number)
+              ? Math.max(60 * 1000, Math.round(th['temp_push_cooldown_ms'] as number))
               : null,
         });
       }
@@ -797,6 +804,7 @@ export class DeviceStoreService {
         alertsEnabled: th?.enabled ?? (prev?.alertsEnabled !== false),
         tempLowC: th?.low ?? (prev?.tempLowC ?? 2),
         tempHighC: th?.high ?? (prev?.tempHighC ?? 8),
+        tempPushCooldownMs: th?.cooldownMs ?? (prev?.tempPushCooldownMs ?? 15 * 60 * 1000),
         cloudSynced: true,
         deviceToken: tokens[rid] ?? prev?.deviceToken,
         sensor1Label:
@@ -1061,6 +1069,7 @@ export class DeviceStoreService {
             notifications_enabled: input.alertsEnabled,
             temp1_min_c: low,
             temp1_max_c: high,
+            temp_push_cooldown_ms: input.tempPushCooldownMs,
           },
           { onConflict: 'device_id' }
         );
@@ -1076,6 +1085,7 @@ export class DeviceStoreService {
               alertsEnabled: input.alertsEnabled,
               tempLowC: low,
               tempHighC: high,
+              tempPushCooldownMs: input.tempPushCooldownMs,
             }
           : d
       )

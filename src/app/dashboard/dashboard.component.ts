@@ -37,6 +37,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   alertsEnabledForm = true;
   tempLowForm = '';
   tempHighForm = '';
+  tempPushDelayMinForm = '15';
   sensor1LabelForm = '';
   sensor2LabelForm = '';
   sensorLabelsDirty = false;
@@ -949,6 +950,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         alertsEnabled: false,
         tempLowC: null,
         tempHighC: null,
+        tempPushCooldownMs: this.parseDelayMinutesToMs(this.tempPushDelayMinForm),
       });
       if (result.cloudError) {
         alert(`Guardado en este equipo. No se pudo guardar en la nube: ${result.cloudError}`);
@@ -959,6 +961,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     const low = this.parseTempValue(this.tempLowForm);
     const high = this.parseTempValue(this.tempHighForm);
+    const delayMs = this.parseDelayMinutesToMs(this.tempPushDelayMinForm);
     if (low != null && high != null && low > high) {
       alert('El umbral mínimo no puede ser mayor al máximo.');
       return;
@@ -968,6 +971,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       alertsEnabled: true,
       tempLowC: low,
       tempHighC: high,
+      tempPushCooldownMs: delayMs,
     });
     if (result.cloudError) {
       alert(`Guardado en este equipo. No se pudo guardar en la nube: ${result.cloudError}`);
@@ -1542,6 +1546,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.alertsEnabledForm = false;
       this.tempLowForm = '';
       this.tempHighForm = '';
+      this.tempPushDelayMinForm = '15';
       this.sensor1LabelForm = '';
       this.sensor2LabelForm = '';
       this.sensorLabelsDirty = false;
@@ -1556,6 +1561,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
       device.tempLowC == null || Number.isNaN(device.tempLowC) ? '' : String(device.tempLowC);
     this.tempHighForm =
       device.tempHighC == null || Number.isNaN(device.tempHighC) ? '' : String(device.tempHighC);
+    this.tempPushDelayMinForm = String(
+      this.cooldownMsToMinutes(device.tempPushCooldownMs ?? 15 * 60 * 1000)
+    );
     // Mientras el usuario escribe, no pisar el input con refrescos de polling.
     if (!this.sensorLabelsDirty) {
       this.sensor1LabelForm = device.sensor1Label?.trim() || 'Sensor 1';
@@ -1568,6 +1576,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!clean) return null;
     const n = Number.parseFloat(clean);
     return Number.isNaN(n) ? null : n;
+  }
+
+  private parseDelayMinutesToMs(value: string): number {
+    const clean = value.trim().replace(',', '.');
+    const n = Number.parseFloat(clean);
+    const safeMinutes = Number.isNaN(n) ? 15 : Math.min(240, Math.max(1, n));
+    return Math.round(safeMinutes * 60 * 1000);
+  }
+
+  private cooldownMsToMinutes(value: number): number {
+    if (!Number.isFinite(value) || value <= 0) return 15;
+    return Math.max(1, Math.round(value / 60000));
   }
 
   private updateAlarmAccumulator(): void {

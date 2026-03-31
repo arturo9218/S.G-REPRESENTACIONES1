@@ -8,6 +8,7 @@ import { sendPushToUser } from '../_shared/send-web-push.ts';
 import { formatEsArDateTime } from '../_shared/format-datetime.ts';
 
 const TEMP_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
+const MIN_TEMP_PUSH_COOLDOWN_MS = 60 * 1000;
 
 interface IngestPayload {
   moduleId: string;
@@ -112,7 +113,7 @@ Deno.serve(async (req) => {
     const { data: th } = await supabase
       .from('device_thresholds')
       .select(
-        'notifications_enabled, temp1_min_c, temp1_max_c, last_push_temp_breach_at'
+        'notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms, last_push_temp_breach_at'
       )
       .eq('device_id', device.id)
       .maybeSingle();
@@ -133,7 +134,12 @@ Deno.serve(async (req) => {
         const last = th.last_push_temp_breach_at
           ? new Date(th.last_push_temp_breach_at).getTime()
           : 0;
-        if (Date.now() - last > TEMP_PUSH_COOLDOWN_MS) {
+        const configuredCooldown =
+          typeof th.temp_push_cooldown_ms === 'number' &&
+          Number.isFinite(th.temp_push_cooldown_ms)
+            ? Math.max(MIN_TEMP_PUSH_COOLDOWN_MS, Math.round(th.temp_push_cooldown_ms))
+            : TEMP_PUSH_COOLDOWN_MS;
+        if (Date.now() - last > configuredCooldown) {
           const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
           const when = formatEsArDateTime(new Date());
           await sendPushToUser(supabase, device.owner_user_id, {

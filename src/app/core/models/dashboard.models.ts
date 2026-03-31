@@ -23,6 +23,8 @@ export interface DashboardDevice {
   tempLowC?: number | null;
   /** Umbral de temperatura alta (>=), null = sin umbral */
   tempHighC?: number | null;
+  /** Retardo entre alertas push de temperatura para este equipo (ms) */
+  tempPushCooldownMs?: number | null;
   /** Creado en Supabase; lecturas vienen de la nube */
   cloudSynced?: boolean;
   /** Código de 6 dígitos para WiFiManager api_key (solo en este navegador tras el alta) */

@@ -625,6 +625,20 @@
                     name="temp-threshold-high"
                   />
                 </label>
+                <label class="notify-panel__field">
+                  <span>Retardo alarma (min)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="240"
+                    step="1"
+                    [(ngModel)]="tempPushDelayMinForm"
+                    (ngModelChange)="onNotificationFormChange()"
+                    [disabled]="!alertsEnabledForm"
+                    placeholder="15"
+                    name="temp-threshold-delay"
+                  />
+                </label>
               </div>
               <p class="notify-panel__hint" *ngIf="!alertsEnabledForm">
                 Sin alertas para este dispositivo: no suena el pitido, no aparecen en el panel ni avisos del navegador (tras guardar).
