@@ -1,7 +1,8 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormBuilder, Validators } from '@angular/forms';
-import { Router } from '@angular/router';
+import { NavigationEnd, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
+import { filter } from 'rxjs/operators';
 import { AuthService } from '../core/auth.service';
 import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
 import {
@@ -49,6 +50,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   sensor2LabelForm = '';
   sensorLabelsDirty = false;
   notificationSettingsDirty = false;
+  /** Evita marcar el form como "dirty" cuando el polling rellena campos desde el dispositivo. */
+  private syncingNotificationFormFromDevice = false;
+  /** Igual que arriba, para offsets de corrección de temperatura. */
+  private syncingCalibrationFromDevice = false;
 
   webPushUiState: WebPushUiState = 'loading';
   webPushBusy = false;
@@ -61,6 +66,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   notificationSettingsFeedbackIsError = false;
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
+  private routerSub: Subscription | null = null;
   private audioCtx: AudioContext | null = null;
   private unlockAudioHandler: (() => void) | null = null;
 
@@ -87,8 +93,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Rango para PDF (`yyyy-MM-dd`, vacío = sin límite en ese extremo). */
   pdfExportFromDate = '';
   pdfExportToDate = '';
-  /** Navegación móvil (barra inferior) — sección activa visual */
-  mobileNavSection: 'dashboard' | 'devices' | 'alerts' | 'settings' = 'dashboard';
+  /**
+   * Vista según la URL: panel principal, dispositivos, alertas o configuración.
+   * Sidebar y barra móvil reflejan este valor (sincronizado en `syncShellRoute`).
+   */
+  shellRoute: 'dashboard' | 'devices' | 'alerts' | 'settings' = 'dashboard';
   alarmEventsCount = 0;
   private lastActiveAlertIds = new Set<string>();
   private lastAlarmToneAtMs = 0;
@@ -132,6 +141,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.syncShellRoute();
+    this.routerSub = this.router.events
+      .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
+      .subscribe(() => this.syncShellRoute());
     this.loadChartStylePreset();
     this.loadAlarmSoundPreset();
     void this.refreshWebPushUi();
@@ -168,6 +181,27 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     this.subDev?.unsubscribe();
     this.subRead?.unsubscribe();
+    this.routerSub?.unsubscribe();
+  }
+
+  private syncShellRoute(): void {
+    const path = this.router.url.split('?')[0];
+    if (path === '/configuracion') {
+      this.shellRoute = 'settings';
+      void this.refreshWebPushUi();
+      return;
+    }
+    if (path === '/dispositivos') {
+      this.shellRoute = 'devices';
+      return;
+    }
+    if (path === '/alertas') {
+      this.shellRoute = 'alerts';
+      return;
+    }
+    if (path === '/dashboard') {
+      this.shellRoute = 'dashboard';
+    }
   }
 
   get hasDevices(): boolean {
@@ -873,19 +907,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return `${y}-${m}-${day}`;
   }
 
-  /** Scroll a secciones del dashboard (sidebar / barra móvil) */
+  /** Navegación lateral / móvil: cada ítem va a su ruta dedicada. */
   scrollToSection(section: 'dashboard' | 'devices' | 'alerts' | 'settings'): void {
-    const ids: Record<typeof section, string> = {
-      dashboard: 'section-kpi',
-      devices: 'section-devices',
-      alerts: 'section-alerts',
-      settings: 'section-settings',
+    const paths: Record<typeof section, string> = {
+      dashboard: '/dashboard',
+      devices: '/dispositivos',
+      alerts: '/alertas',
+      settings: '/configuracion',
     };
-    const el = document.getElementById(ids[section]);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-    this.mobileNavSection = section;
+    void this.router.navigate([paths[section]]);
   }
 
   openChartInNewTab(e?: Event): void {
@@ -944,10 +974,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   onNotificationFormChange(): void {
+    if (this.syncingNotificationFormFromDevice) {
+      return;
+    }
     this.notificationSettingsDirty = true;
   }
 
   onCalibrationFormChange(): void {
+    if (this.syncingCalibrationFromDevice) {
+      return;
+    }
     this.calibrationDirty = true;
   }
 
@@ -956,13 +992,22 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!device) return;
     this.calibrationSaving = true;
     this.calibrationFeedback = '';
-    const input: DeviceTempCalibrationInput = {
-      temp1OffsetC: this.parseOffsetValue(this.temp1OffsetForm),
-      temp2OffsetC: this.parseOffsetValue(this.temp2OffsetForm),
-      temp3OffsetC: this.parseOffsetValue(this.temp3OffsetForm),
-    };
-    const { cloudError } = await this.deviceStore.updateDeviceTempCalibration(device.id, input);
-    this.calibrationSaving = false;
+    let cloudError: string | undefined;
+    try {
+      const input: DeviceTempCalibrationInput = {
+        temp1OffsetC: this.parseOffsetValue(this.temp1OffsetForm),
+        temp2OffsetC: this.parseOffsetValue(this.temp2OffsetForm),
+        temp3OffsetC: this.parseOffsetValue(this.temp3OffsetForm),
+      };
+      const result = await this.deviceStore.updateDeviceTempCalibration(device.id, input);
+      cloudError = result.cloudError;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.calibrationFeedback = `No se pudo guardar: ${msg}`;
+      return;
+    } finally {
+      this.calibrationSaving = false;
+    }
     this.calibrationDirty = false;
     if (cloudError) {
       const needsCol = cloudError.includes('temp1_offset') || cloudError.includes('column');
@@ -970,7 +1015,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         ? 'Ejecutá en Supabase el SQL: FRONTEND/supabase/sql/007_temp_calibration_offsets.sql'
         : `No se pudo guardar en la nube: ${cloudError}`;
     } else {
-      this.calibrationFeedback = 'Corrección guardada. Las próximas lecturas del ESP se guardarán ya ajustadas.';
+      this.calibrationFeedback =
+        'Corrección guardada. El valor en la tarjeta se recalcula al instante (bruto + offset) cuando cada lectura tiene temperatura bruta en la nube (SQL 009 + función ingest actualizada).';
     }
     window.setTimeout(() => {
       this.calibrationFeedback = '';
@@ -1004,6 +1050,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
           this.notificationSettingsFeedback =
             'Umbrales guardados: notificaciones desactivadas para este dispositivo.';
         }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.notificationSettingsFeedbackIsError = true;
+        this.notificationSettingsFeedback = `No se pudo guardar: ${msg}`;
       } finally {
         this.notificationSettingsSaving = false;
       }
@@ -1012,9 +1062,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const low = this.parseTempValue(this.tempLowForm);
-    const high = this.parseTempValue(this.tempHighForm);
-    const delayMs = this.parseDelayMinutesToMs(this.tempPushDelayMinForm);
+    let low: number | null;
+    let high: number | null;
+    let delayMs: number;
+    try {
+      low = this.parseTempValue(this.tempLowForm);
+      high = this.parseTempValue(this.tempHighForm);
+      delayMs = this.parseDelayMinutesToMs(this.tempPushDelayMinForm);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.notificationSettingsFeedbackIsError = true;
+      this.notificationSettingsFeedback = `Revisá los valores (min/máx/retardo): ${msg}`;
+      this.scheduleNotificationFeedbackClear();
+      return;
+    }
     if (low != null && high != null && low > high) {
       this.notificationSettingsFeedbackIsError = true;
       this.notificationSettingsFeedback = 'El umbral mínimo no puede ser mayor al máximo.';
@@ -1037,6 +1098,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.notificationSettingsFeedback =
           'Umbrales guardados correctamente (mín., máx., retardo y avisos).';
       }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.notificationSettingsFeedbackIsError = true;
+      this.notificationSettingsFeedback = `No se pudo guardar: ${msg}`;
     } finally {
       this.notificationSettingsSaving = false;
     }
@@ -1627,57 +1692,67 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.sensorLabelsDirty = false;
       return;
     }
-    // Mientras el usuario edita notificaciones, no pisar el estado del form por polling.
-    if (this.notificationSettingsDirty) {
-      return;
+    // Umbrales/notificaciones: solo si el usuario no está editando ese bloque (no return global:
+    // si no, nunca se sincronizan nombres ni corrección de sensores).
+    if (!this.notificationSettingsDirty) {
+      this.syncingNotificationFormFromDevice = true;
+      try {
+        this.alertsEnabledForm = device.alertsEnabled !== false;
+        this.tempLowForm =
+          device.tempLowC == null || Number.isNaN(device.tempLowC) ? '' : String(device.tempLowC);
+        this.tempHighForm =
+          device.tempHighC == null || Number.isNaN(device.tempHighC) ? '' : String(device.tempHighC);
+        this.tempPushDelayMinForm = String(
+          this.cooldownMsToMinutes(device.tempPushCooldownMs ?? 15 * 60 * 1000)
+        );
+      } finally {
+        this.syncingNotificationFormFromDevice = false;
+      }
     }
-    this.alertsEnabledForm = device.alertsEnabled !== false;
-    this.tempLowForm =
-      device.tempLowC == null || Number.isNaN(device.tempLowC) ? '' : String(device.tempLowC);
-    this.tempHighForm =
-      device.tempHighC == null || Number.isNaN(device.tempHighC) ? '' : String(device.tempHighC);
-    this.tempPushDelayMinForm = String(
-      this.cooldownMsToMinutes(device.tempPushCooldownMs ?? 15 * 60 * 1000)
-    );
     // Mientras el usuario escribe, no pisar el input con refrescos de polling.
     if (!this.sensorLabelsDirty) {
       this.sensor1LabelForm = device.sensor1Label?.trim() || 'Sensor 1';
       this.sensor2LabelForm = device.sensor2Label?.trim() || 'Sensor 2';
     }
     if (!this.calibrationDirty) {
-      this.temp1OffsetForm =
-        device.temp1OffsetC == null || Number.isNaN(device.temp1OffsetC)
-          ? '0'
-          : String(device.temp1OffsetC);
-      this.temp2OffsetForm =
-        device.temp2OffsetC == null || Number.isNaN(device.temp2OffsetC)
-          ? '0'
-          : String(device.temp2OffsetC);
-      this.temp3OffsetForm =
-        device.temp3OffsetC == null || Number.isNaN(device.temp3OffsetC)
-          ? '0'
-          : String(device.temp3OffsetC);
+      this.syncingCalibrationFromDevice = true;
+      try {
+        this.temp1OffsetForm =
+          device.temp1OffsetC == null || Number.isNaN(device.temp1OffsetC)
+            ? '0'
+            : String(device.temp1OffsetC);
+        this.temp2OffsetForm =
+          device.temp2OffsetC == null || Number.isNaN(device.temp2OffsetC)
+            ? '0'
+            : String(device.temp2OffsetC);
+        this.temp3OffsetForm =
+          device.temp3OffsetC == null || Number.isNaN(device.temp3OffsetC)
+            ? '0'
+            : String(device.temp3OffsetC);
+      } finally {
+        this.syncingCalibrationFromDevice = false;
+      }
     }
   }
 
-  private parseTempValue(value: string): number | null {
-    const clean = value.trim().replace(',', '.');
-    if (!clean) return null;
-    const n = Number.parseFloat(clean);
+  private parseTempValue(value: string | number | null | undefined): number | null {
+    const s = value == null ? '' : String(value).trim().replace(',', '.');
+    if (!s) return null;
+    const n = Number.parseFloat(s);
     return Number.isNaN(n) ? null : n;
   }
 
   /** Offset en °C (puede ser negativo). Vacío = 0. */
-  private parseOffsetValue(value: string): number {
-    const clean = value.trim().replace(',', '.');
-    if (!clean) return 0;
-    const n = Number.parseFloat(clean);
+  private parseOffsetValue(value: string | number | null | undefined): number {
+    const s = value == null ? '' : String(value).trim().replace(',', '.');
+    if (!s) return 0;
+    const n = Number.parseFloat(s);
     return Number.isNaN(n) ? 0 : n;
   }
 
-  private parseDelayMinutesToMs(value: string): number {
-    const clean = value.trim().replace(',', '.');
-    const n = Number.parseFloat(clean);
+  private parseDelayMinutesToMs(value: string | number | null | undefined): number {
+    const s = value == null ? '' : String(value).trim().replace(',', '.');
+    const n = Number.parseFloat(s);
     const safeMinutes = Number.isNaN(n) ? 15 : Math.min(240, Math.max(1, n));
     return Math.round(safeMinutes * 60 * 1000);
   }

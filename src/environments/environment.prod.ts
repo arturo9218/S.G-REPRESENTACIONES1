@@ -11,4 +11,5 @@ export const environment = {
   deviceOfflineAfterMs: 90000,
   displayLineVoltageVForFallback: 220,
   vapidPublicKey: VAPID_INJECT,
+  serviceWorkerEnabled: true,
 };

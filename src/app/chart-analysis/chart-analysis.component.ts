@@ -25,6 +25,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   readings: TemperatureReading[] = [];
 
   selectedDeviceId: string | null = null;
+  /**
+   * `deviceId` de la query al abrir la pestaña. Mientras coincida con un equipo real,
+   * no se sustituye por otro aunque no haya lecturas locales (p. ej. equipo offline).
+   */
+  private deviceIdFromUrl: string | null = null;
 
   analysisChannel: AnalysisChannel = 'both';
 
@@ -82,26 +87,34 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     // Soporta ambos nombres por compatibilidad: deviceId (correcto) y deviceld (typo viejo).
     const qp = this.route.snapshot.queryParamMap;
     this.selectedDeviceId = qp.get('deviceId') ?? qp.get('deviceld');
+    this.deviceIdFromUrl = this.selectedDeviceId;
 
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
       this.devices = list;
+      if (list.length === 0) {
+        this.syncSensorLabelsWithSelected();
+        return;
+      }
+      const urlId = this.deviceIdFromUrl;
+      if (urlId && list.some((d) => d.id === urlId)) {
+        this.selectedDeviceId = urlId;
+        this.syncSensorLabelsWithSelected();
+        return;
+      }
+      if (urlId && !list.some((d) => d.id === urlId)) {
+        this.deviceIdFromUrl = null;
+      }
       if (!this.selectedDeviceId || !list.some((d) => d.id === this.selectedDeviceId)) {
         this.selectedDeviceId = this.pickBestDeviceId();
         this.scheduleRemoteChartLoad();
       }
       this.syncSensorLabelsWithSelected();
-      // No llamar scheduleRemoteChartLoad() en cada emisión: el store actualiza
-      // dispositivos muy seguido (poll) y borraba la serie remota → parpadeo.
+      // No llamar scheduleRemoteChartLoad() en cada emisión salvo al fijar selección arriba:
+      // el store actualiza dispositivos muy seguido (poll) y borraba la serie remota → parpadeo.
     });
 
     this.subRead = this.deviceStore.readings$.subscribe((list) => {
       this.readings = list;
-      // Con filtro de fechas activo no auto-cambiamos dispositivo (rompe Desde/Hasta).
-      if (this.hasUserDateFilter()) return;
-      if (this.selectedDeviceId && this.chartReadingsLocalFiltered().length === 0) {
-        const best = this.pickBestDeviceId();
-        if (best) this.selectedDeviceId = best;
-      }
     });
 
     // Primera carga del gráfico (p. ej. deviceId en URL válido sin tocar filtros).
@@ -364,6 +377,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   }
 
   onChartDeviceChange(): void {
+    this.deviceIdFromUrl = null;
     this.syncSensorLabelsWithSelected();
     this.scheduleRemoteChartLoad();
   }

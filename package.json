@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
+    "prestart": "node scripts/inject-vapid.cjs",
     "start": "ng serve",
     "prebuild": "node scripts/inject-vapid.cjs",
     "build": "ng build",

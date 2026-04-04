@@ -46,14 +46,14 @@ export class WebPushService {
       return {
         ok: false,
         message:
-          'Falta la clave pública VAPID en environment (vapidPublicKey). Generala con web-push y copiala al build.',
+          'Falta VAPID_PUBLIC_KEY: definila en el entorno (Vercel / local) y ejecutá npm start o npm run build para regenerar src/environments/vapid.inject.ts (script scripts/inject-vapid.cjs). En Supabase Edge Functions deben coincidir VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY.',
       };
     }
     if (!this.swPush.isEnabled) {
       return {
         ok: false,
         message:
-          'El service worker está desactivado en desarrollo. Probá en la URL de Vercel (build producción).',
+          'El Service Worker no está activo (ngsw). Revisá que environment.serviceWorkerEnabled sea true y que el build incluya el SW (angular.json → serviceWorker). Tras cambiarlo, recargá la página con Ctrl+F5.',
       };
     }
     const {
@@ -61,6 +61,24 @@ export class WebPushService {
     } = await this.auth.client.auth.getUser();
     if (!user) {
       return { ok: false, message: 'Iniciá sesión para activar avisos en este navegador.' };
+    }
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'denied') {
+        return {
+          ok: false,
+          message:
+            'Las notificaciones están bloqueadas. En el navegador o en Ajustes del sistema, permití notificaciones para este sitio.',
+        };
+      }
+      if (Notification.permission === 'default') {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          return {
+            ok: false,
+            message: 'Sin permiso de notificaciones no se puede recibir avisos con la app cerrada.',
+          };
+        }
+      }
     }
     try {
       const sub = await this.swPush.requestSubscription({ serverPublicKey: pk });

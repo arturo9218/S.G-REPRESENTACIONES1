@@ -29,7 +29,7 @@ import { environment } from '../environments/environment';
     ReactiveFormsModule,
     AppRoutingModule,
     ServiceWorkerModule.register('ngsw-worker.js', {
-      enabled: environment.production,
+      enabled: environment.serviceWorkerEnabled,
       registrationStrategy: 'registerWhenStable:30000',
     }),
   ],

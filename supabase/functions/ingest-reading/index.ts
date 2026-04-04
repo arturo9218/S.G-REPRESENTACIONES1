@@ -118,6 +118,15 @@ Deno.serve(async (req) => {
     const { error: insErr } = await supabase.from('device_readings').insert({
       device_id: device.id,
       created_at: payload.sentAt ?? new Date().toISOString(),
+      temp1_raw_c: payload.temp1_c,
+      temp2_raw_c:
+        payload.temp2_c == null || Number.isNaN(payload.temp2_c as number)
+          ? null
+          : (payload.temp2_c as number),
+      temp3_raw_c:
+        payload.temp3_c == null || Number.isNaN(payload.temp3_c as number)
+          ? null
+          : (payload.temp3_c as number),
       temp1_c: temp1Corrected,
       temp2_c: temp2Corrected,
       temp3_c: temp3Corrected,
@@ -185,8 +194,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(
-      JSON.stringify(pushDiag ? { ok: true, push: pushDiag } : { ok: true }),
+    return new Response(JSON.stringify(pushDiag ? { ok: true, push: pushDiag } : { ok: true }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

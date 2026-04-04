@@ -6,6 +6,11 @@
 /out-tsc
 /bazel-out
 
+# Secrets locales (nunca subir claves privadas)
+.env
+.env.*
+!.env.example
+
 # Node
 /node_modules
 npm-debug.log

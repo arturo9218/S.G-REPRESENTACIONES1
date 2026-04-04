@@ -20,4 +20,8 @@ export const environment = {
   displayLineVoltageVForFallback: 220,
   /** Clave pública VAPID (build: variable VAPID_PUBLIC_KEY o valor en vapid.inject.ts). */
   vapidPublicKey: VAPID_INJECT,
+  /**
+   * Registrar Service Worker (requerido para Web Push). Debe ser true en dev si el build incluye ngsw (angular.json).
+   */
+  serviceWorkerEnabled: true,
 };

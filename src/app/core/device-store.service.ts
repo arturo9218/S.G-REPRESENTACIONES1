@@ -151,6 +151,12 @@ export class DeviceStoreService {
     void this.refreshReadingsFromCloud();
   }
 
+  /** Recarga dispositivos, umbrales (incl. offsets) y lecturas desde Supabase. */
+  forceRefreshAllFromCloud(): void {
+    if (!this.isCloudSyncEnabled()) return;
+    void this.hydrateFromCloud();
+  }
+
   /** URL del endpoint que debe usar el ESP en WiFiManager (`api_url`). */
   getIngestUrl(): string {
     return ingestFunctionUrl();
@@ -335,6 +341,12 @@ export class DeviceStoreService {
             deviceId: r['deviceId'],
             at: r['at'],
             temperatureC: r['temperatureC'],
+            temp1RawC:
+              typeof r['temp1RawC'] === 'number' && !Number.isNaN(r['temp1RawC']) ? r['temp1RawC'] : null,
+            temp2RawC:
+              typeof r['temp2RawC'] === 'number' && !Number.isNaN(r['temp2RawC']) ? r['temp2RawC'] : null,
+            temp3RawC:
+              typeof r['temp3RawC'] === 'number' && !Number.isNaN(r['temp3RawC']) ? r['temp3RawC'] : null,
             temp2C:
               typeof r['temp2C'] === 'number' && !Number.isNaN(r['temp2C']) ? r['temp2C'] : null,
             temp3C:
@@ -541,7 +553,9 @@ export class DeviceStoreService {
     while (rows.length < maxRows) {
       const { data, error } = await this.auth.client
         .from('device_readings')
-        .select('created_at, temp1_c, temp2_c, current_a, power_w')
+        .select(
+          'created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w'
+        )
         .eq('device_id', deviceId)
         .gte('created_at', fromIso)
         .lte('created_at', toIso)
@@ -563,13 +577,32 @@ export class DeviceStoreService {
         if (rows.length >= maxRows) {
           break;
         }
+        const t1Raw =
+          typeof row['temp1_raw_c'] === 'number' && !Number.isNaN(row['temp1_raw_c'] as number)
+            ? (row['temp1_raw_c'] as number)
+            : null;
+        const t2Raw =
+          typeof row['temp2_raw_c'] === 'number' && !Number.isNaN(row['temp2_raw_c'] as number)
+            ? (row['temp2_raw_c'] as number)
+            : null;
+        const t3Raw =
+          typeof row['temp3_raw_c'] === 'number' && !Number.isNaN(row['temp3_raw_c'] as number)
+            ? (row['temp3_raw_c'] as number)
+            : null;
         rows.push({
           deviceId,
           at: typeof row['created_at'] === 'string' ? row['created_at'] : new Date().toISOString(),
           temperatureC: row['temp1_c'] as number,
+          temp1RawC: t1Raw,
+          temp2RawC: t2Raw,
+          temp3RawC: t3Raw,
           temp2C:
             typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
               ? (row['temp2_c'] as number)
+              : null,
+          temp3C:
+            typeof row['temp3_c'] === 'number' && !Number.isNaN(row['temp3_c'] as number)
+              ? (row['temp3_c'] as number)
               : null,
           currentA:
             typeof row['current_a'] === 'number' && !Number.isNaN(row['current_a'] as number)
@@ -589,7 +622,8 @@ export class DeviceStoreService {
     }
 
     const truncated = rows.length >= maxRows && lastBatchLen === pageSize;
-    return { rows, error: null, truncated };
+    const applied = this.applyOffsetsToReadings(rows, this.snapshot);
+    return { rows: applied, error: null, truncated };
   }
 
   /**
@@ -605,7 +639,9 @@ export class DeviceStoreService {
     const half = 10000;
     const base = this.auth.client
       .from('device_readings')
-      .select('created_at, temp1_c, temp2_c, current_a, power_w')
+      .select(
+        'created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w'
+      )
       .eq('device_id', deviceId)
       .gte('created_at', fromIso)
       .lte('created_at', toIso);
@@ -637,25 +673,46 @@ export class DeviceStoreService {
     }
 
     const rows: TemperatureReading[] = [...byAt.values()]
-      .map((row: Record<string, unknown>) => ({
-        deviceId,
-        at: typeof row['created_at'] === 'string' ? row['created_at'] : new Date().toISOString(),
-        temperatureC: row['temp1_c'] as number,
-        temp2C:
-          typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
-            ? (row['temp2_c'] as number)
-            : null,
-        currentA:
-          typeof row['current_a'] === 'number' && !Number.isNaN(row['current_a'] as number)
-            ? (row['current_a'] as number)
-            : null,
-        powerW:
-          typeof row['power_w'] === 'number' && !Number.isNaN(row['power_w'] as number)
-            ? (row['power_w'] as number)
-            : null,
-      }))
+      .map((row: Record<string, unknown>) => {
+        const t1Raw =
+          typeof row['temp1_raw_c'] === 'number' && !Number.isNaN(row['temp1_raw_c'] as number)
+            ? (row['temp1_raw_c'] as number)
+            : null;
+        const t2Raw =
+          typeof row['temp2_raw_c'] === 'number' && !Number.isNaN(row['temp2_raw_c'] as number)
+            ? (row['temp2_raw_c'] as number)
+            : null;
+        const t3Raw =
+          typeof row['temp3_raw_c'] === 'number' && !Number.isNaN(row['temp3_raw_c'] as number)
+            ? (row['temp3_raw_c'] as number)
+            : null;
+        return {
+          deviceId,
+          at: typeof row['created_at'] === 'string' ? row['created_at'] : new Date().toISOString(),
+          temperatureC: row['temp1_c'] as number,
+          temp1RawC: t1Raw,
+          temp2RawC: t2Raw,
+          temp3RawC: t3Raw,
+          temp2C:
+            typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
+              ? (row['temp2_c'] as number)
+              : null,
+          temp3C:
+            typeof row['temp3_c'] === 'number' && !Number.isNaN(row['temp3_c'] as number)
+              ? (row['temp3_c'] as number)
+              : null,
+          currentA:
+            typeof row['current_a'] === 'number' && !Number.isNaN(row['current_a'] as number)
+              ? (row['current_a'] as number)
+              : null,
+          powerW:
+            typeof row['power_w'] === 'number' && !Number.isNaN(row['power_w'] as number)
+              ? (row['power_w'] as number)
+              : null,
+        };
+      })
       .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
-    return { rows, error: null };
+    return { rows: this.applyOffsetsToReadings(rows, this.snapshot), error: null };
   }
 
   private isChartRpcMissingError(message: string): boolean {
@@ -854,80 +911,53 @@ export class DeviceStoreService {
     await this.refreshReadingsFromCloud();
   }
 
-  private async refreshReadingsFromCloud(): Promise<void> {
-    if (!this.isCloudSyncEnabled()) return;
-    const ids = this.snapshot.filter((d) => this.isUuid(d.id)).map((d) => d.id);
-    if (!ids.length) return;
-
-    const selectCols =
-      'device_id, created_at, temp1_c, temp2_c, temp3_c, current_a, power_w, press1_bar, press2_bar';
-    const rows: Record<string, unknown>[] = [];
-
-    for (const deviceId of ids) {
-      const { data, error } = await this.auth.client
-        .from('device_readings')
-        .select(selectCols)
-        .eq('device_id', deviceId)
-        .order('created_at', { ascending: false })
-        .limit(CLOUD_READINGS_PER_DEVICE);
-
-      if (error) {
-        console.warn('Supabase readings:', error.message);
-        continue;
+  /**
+   * Si la lectura trae bruto del ESP (tempNRawC), el valor mostrado = bruto + offset actual del dispositivo.
+   * Así al cambiar la corrección en el panel se actualiza la tarjeta sin esperar un nuevo POST del ESP.
+   */
+  private applyOffsetsToReadings(
+    readings: TemperatureReading[],
+    devices: DashboardDevice[]
+  ): TemperatureReading[] {
+    const byId = new Map(devices.map((d) => [d.id, d]));
+    return readings.map((r) => {
+      const d = byId.get(r.deviceId);
+      if (!d) return r;
+      const o1 = Number.isFinite(d.temp1OffsetC ?? NaN) ? (d.temp1OffsetC as number) : 0;
+      const o2 = Number.isFinite(d.temp2OffsetC ?? NaN) ? (d.temp2OffsetC as number) : 0;
+      const o3 = Number.isFinite(d.temp3OffsetC ?? NaN) ? (d.temp3OffsetC as number) : 0;
+      let t1 = r.temperatureC;
+      let t2 = r.temp2C ?? null;
+      let t3 = r.temp3C ?? null;
+      if (r.temp1RawC != null && Number.isFinite(r.temp1RawC)) {
+        t1 = r.temp1RawC + o1;
       }
-      if (data?.length) rows.push(...data);
-    }
+      if (r.temp2RawC != null && Number.isFinite(r.temp2RawC)) {
+        t2 = r.temp2RawC + o2;
+      }
+      if (r.temp3RawC != null && Number.isFinite(r.temp3RawC)) {
+        t3 = r.temp3RawC + o3;
+      }
+      return { ...r, temperatureC: t1, temp2C: t2, temp3C: t3 };
+    });
+  }
 
-    if (!rows.length) return;
-
-    const cloudReadings: TemperatureReading[] = rows.map((r) => ({
-      deviceId: r['device_id'] as string,
-      at: r['created_at'] as string,
-      temperatureC: r['temp1_c'] as number,
-      temp2C:
-        typeof r['temp2_c'] === 'number' && !Number.isNaN(r['temp2_c'] as number)
-          ? (r['temp2_c'] as number)
-          : null,
-      temp3C:
-        typeof r['temp3_c'] === 'number' && !Number.isNaN(r['temp3_c'] as number)
-          ? (r['temp3_c'] as number)
-          : null,
-      currentA:
-        typeof r['current_a'] === 'number' && !Number.isNaN(r['current_a'] as number)
-          ? (r['current_a'] as number)
-          : null,
-      powerW:
-        typeof r['power_w'] === 'number' && !Number.isNaN(r['power_w'] as number)
-          ? (r['power_w'] as number)
-          : null,
-      press1Bar:
-        typeof r['press1_bar'] === 'number' && !Number.isNaN(r['press1_bar'] as number)
-          ? (r['press1_bar'] as number)
-          : null,
-      press2Bar:
-        typeof r['press2_bar'] === 'number' && !Number.isNaN(r['press2_bar'] as number)
-          ? (r['press2_bar'] as number)
-          : null,
-    }));
-
-    cloudReadings.sort(
-      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
-    );
-
-    const localReadings = this.readingsSnapshot.filter((r) => !this.isUuid(r.deviceId));
-    this.persistReadings([...localReadings, ...cloudReadings]);
-
-    const latest = new Map<string, TemperatureReading>();
-    for (let i = cloudReadings.length - 1; i >= 0; i--) {
-      const r = cloudReadings[i];
-      if (!latest.has(r.deviceId)) latest.set(r.deviceId, r);
-    }
-
+  private updateDeviceSnapshotsFromReadings(allReadings: TemperatureReading[]): void {
     const nowMs = Date.now();
     const offlineAfterMs =
       typeof environment.deviceOfflineAfterMs === 'number' && environment.deviceOfflineAfterMs > 0
         ? environment.deviceOfflineAfterMs
         : 90000;
+
+    const latest = new Map<string, TemperatureReading>();
+    const sorted = [...allReadings].sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+    );
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const r = sorted[i];
+      if (!this.isUuid(r.deviceId)) continue;
+      if (!latest.has(r.deviceId)) latest.set(r.deviceId, r);
+    }
 
     const updated = this.snapshot.map((d) => {
       const r = latest.get(d.id);
@@ -948,6 +978,96 @@ export class DeviceStoreService {
       };
     });
     this.persistDevices(updated);
+  }
+
+  private recomputeReadingsDisplayTemps(): void {
+    const applied = this.applyOffsetsToReadings(this.readingsSnapshot, this.snapshot);
+    this.persistReadings(applied);
+    this.updateDeviceSnapshotsFromReadings(applied);
+  }
+
+  private async refreshReadingsFromCloud(): Promise<void> {
+    if (!this.isCloudSyncEnabled()) return;
+    const ids = this.snapshot.filter((d) => this.isUuid(d.id)).map((d) => d.id);
+    if (!ids.length) return;
+
+    const selectCols =
+      'device_id, created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w, press1_bar, press2_bar';
+    const rows: Record<string, unknown>[] = [];
+
+    for (const deviceId of ids) {
+      const { data, error } = await this.auth.client
+        .from('device_readings')
+        .select(selectCols)
+        .eq('device_id', deviceId)
+        .order('created_at', { ascending: false })
+        .limit(CLOUD_READINGS_PER_DEVICE);
+
+      if (error) {
+        console.warn('Supabase readings:', error.message);
+        continue;
+      }
+      if (data?.length) rows.push(...data);
+    }
+
+    if (!rows.length) return;
+
+    const cloudReadings: TemperatureReading[] = rows.map((r) => {
+      const t1Raw =
+        typeof r['temp1_raw_c'] === 'number' && !Number.isNaN(r['temp1_raw_c'] as number)
+          ? (r['temp1_raw_c'] as number)
+          : null;
+      const t2Raw =
+        typeof r['temp2_raw_c'] === 'number' && !Number.isNaN(r['temp2_raw_c'] as number)
+          ? (r['temp2_raw_c'] as number)
+          : null;
+      const t3Raw =
+        typeof r['temp3_raw_c'] === 'number' && !Number.isNaN(r['temp3_raw_c'] as number)
+          ? (r['temp3_raw_c'] as number)
+          : null;
+      return {
+        deviceId: r['device_id'] as string,
+        at: r['created_at'] as string,
+        temperatureC: r['temp1_c'] as number,
+        temp1RawC: t1Raw,
+        temp2RawC: t2Raw,
+        temp3RawC: t3Raw,
+        temp2C:
+          typeof r['temp2_c'] === 'number' && !Number.isNaN(r['temp2_c'] as number)
+            ? (r['temp2_c'] as number)
+            : null,
+        temp3C:
+          typeof r['temp3_c'] === 'number' && !Number.isNaN(r['temp3_c'] as number)
+            ? (r['temp3_c'] as number)
+            : null,
+        currentA:
+          typeof r['current_a'] === 'number' && !Number.isNaN(r['current_a'] as number)
+            ? (r['current_a'] as number)
+            : null,
+        powerW:
+          typeof r['power_w'] === 'number' && !Number.isNaN(r['power_w'] as number)
+            ? (r['power_w'] as number)
+            : null,
+        press1Bar:
+          typeof r['press1_bar'] === 'number' && !Number.isNaN(r['press1_bar'] as number)
+            ? (r['press1_bar'] as number)
+            : null,
+        press2Bar:
+          typeof r['press2_bar'] === 'number' && !Number.isNaN(r['press2_bar'] as number)
+            ? (r['press2_bar'] as number)
+            : null,
+      };
+    });
+
+    cloudReadings.sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+    );
+
+    const localReadings = this.readingsSnapshot.filter((r) => !this.isUuid(r.deviceId));
+    const merged = [...localReadings, ...cloudReadings];
+    const applied = this.applyOffsetsToReadings(merged, this.snapshot);
+    this.persistReadings(applied);
+    this.updateDeviceSnapshotsFromReadings(applied);
   }
 
   setDevices(list: DashboardDevice[]): void {
@@ -1131,18 +1251,67 @@ export class DeviceStoreService {
     input: DeviceTempCalibrationInput
   ): Promise<{ cloudError?: string }> {
     let cloudError: string | undefined;
+    const dev = this.snapshot.find((d) => d.id === id);
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
-      const { error } = await this.auth.client
+      const nowIso = new Date().toISOString();
+      // Si ya hay fila: solo offsets (no pisar min/máx con null). Si no hay fila: insert con defaults.
+      const { data: existing, error: selErr } = await this.auth.client
         .from('device_thresholds')
-        .update({
+        .select('device_id')
+        .eq('device_id', id)
+        .maybeSingle();
+
+      if (selErr) {
+        cloudError = selErr.message;
+      } else if (existing) {
+        const { error } = await this.auth.client
+          .from('device_thresholds')
+          .update({
+            temp1_offset_c: input.temp1OffsetC,
+            temp2_offset_c: input.temp2OffsetC,
+            temp3_offset_c: input.temp3OffsetC,
+            updated_at: nowIso,
+          })
+          .eq('device_id', id);
+        if (error) {
+          cloudError = error.message;
+        }
+      } else {
+        const insertPayload = {
+          device_id: id,
+          notifications_enabled: dev?.alertsEnabled !== false,
+          temp1_min_c: dev?.tempLowC ?? null,
+          temp1_max_c: dev?.tempHighC ?? null,
+          temp_push_cooldown_ms: dev?.tempPushCooldownMs ?? 15 * 60 * 1000,
           temp1_offset_c: input.temp1OffsetC,
           temp2_offset_c: input.temp2OffsetC,
           temp3_offset_c: input.temp3OffsetC,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('device_id', id);
-      if (error) {
-        cloudError = error.message;
+          updated_at: nowIso,
+        };
+        const { error: insErr } = await this.auth.client
+          .from('device_thresholds')
+          .insert(insertPayload);
+        if (insErr) {
+          const dup =
+            (insErr as { code?: string }).code === '23505' ||
+            /duplicate|unique/i.test(insErr.message ?? '');
+          if (dup) {
+            const { error: upErr } = await this.auth.client
+              .from('device_thresholds')
+              .update({
+                temp1_offset_c: input.temp1OffsetC,
+                temp2_offset_c: input.temp2OffsetC,
+                temp3_offset_c: input.temp3OffsetC,
+                updated_at: nowIso,
+              })
+              .eq('device_id', id);
+            if (upErr) {
+              cloudError = upErr.message;
+            }
+          } else {
+            cloudError = insErr.message;
+          }
+        }
       }
     }
     this.persistDevices(
@@ -1157,6 +1326,7 @@ export class DeviceStoreService {
           : d
       )
     );
+    this.recomputeReadingsDisplayTemps();
     return { cloudError };
   }
 
@@ -1189,23 +1359,13 @@ export class DeviceStoreService {
     if (!device) return;
     const at = input.at ?? new Date().toISOString();
     const label = this.formatUpdatedLabel(at);
-    this.persistDevices(
-      this.snapshot.map((d) =>
-        d.id === input.deviceId
-          ? {
-              ...d,
-              temperatureC: input.temp1C,
-              temperature2C: input.temp2C ?? null,
-              online: true,
-              updatedAtLabel: label,
-            }
-          : d
-      )
-    );
     const reading: TemperatureReading = {
       deviceId: input.deviceId,
       at,
       temperatureC: input.temp1C,
+      temp1RawC: input.temp1C,
+      temp2RawC: input.temp2C ?? null,
+      temp3RawC: input.temp3C ?? null,
       temp2C: input.temp2C ?? null,
       temp3C: input.temp3C ?? null,
       currentA: input.currentA ?? null,
@@ -1213,7 +1373,21 @@ export class DeviceStoreService {
       press1Bar: input.press1Bar ?? null,
       press2Bar: input.press2Bar ?? null,
     };
-    this.persistReadings([...this.readingsSnapshot, reading]);
+    const [applied] = this.applyOffsetsToReadings([reading], this.snapshot);
+    this.persistDevices(
+      this.snapshot.map((d) =>
+        d.id === input.deviceId
+          ? {
+              ...d,
+              temperatureC: applied.temperatureC,
+              temperature2C: applied.temp2C ?? null,
+              online: true,
+              updatedAtLabel: label,
+            }
+          : d
+      )
+    );
+    this.persistReadings([...this.readingsSnapshot, applied]);
   }
 
   private addDeviceFromFormLocal(

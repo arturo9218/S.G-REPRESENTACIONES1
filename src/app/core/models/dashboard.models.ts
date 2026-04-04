@@ -42,8 +42,12 @@ export interface DashboardDevice {
 export interface TemperatureReading {
   deviceId: string;
   at: string;
-  /** Temperatura principal usada en gráfico y alertas */
+  /** Temperatura principal usada en gráfico y alertas (bruto + offset actual del dispositivo si hay raw) */
   temperatureC: number;
+  /** Bruto del ESP antes de corrección (si existe en DB / ingesta); si falta, temperatureC es el valor guardado tal cual */
+  temp1RawC?: number | null;
+  temp2RawC?: number | null;
+  temp3RawC?: number | null;
   /** Canales opcionales extras */
   temp2C?: number | null;
   temp3C?: number | null;

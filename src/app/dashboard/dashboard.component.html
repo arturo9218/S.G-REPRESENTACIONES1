@@ -8,7 +8,7 @@
       <button
         type="button"
         class="shell__nav-item"
-        [class.shell__nav-item--active]="mobileNavSection === 'dashboard'"
+        [class.shell__nav-item--active]="shellRoute === 'dashboard'"
         (click)="scrollToSection('dashboard')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -20,7 +20,7 @@
       <button
         type="button"
         class="shell__nav-item"
-        [class.shell__nav-item--active]="mobileNavSection === 'devices'"
+        [class.shell__nav-item--active]="shellRoute === 'devices'"
         (click)="scrollToSection('devices')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -32,7 +32,7 @@
       <button
         type="button"
         class="shell__nav-item"
-        [class.shell__nav-item--active]="mobileNavSection === 'alerts'"
+        [class.shell__nav-item--active]="shellRoute === 'alerts'"
         (click)="scrollToSection('alerts')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -44,7 +44,7 @@
       <button
         type="button"
         class="shell__nav-item"
-        [class.shell__nav-item--active]="mobileNavSection === 'settings'"
+        [class.shell__nav-item--active]="shellRoute === 'settings'"
         (click)="scrollToSection('settings')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -104,6 +104,7 @@
     </header>
 
     <div class="shell__content" *ngIf="hasDevices; else emptyState">
+      <ng-container *ngIf="shellRoute !== 'settings'">
       <section id="section-kpi" class="kpi-row" aria-label="Resumen">
         <article class="kpi-card">
           <div class="kpi-card__icon kpi-card__icon--slate">
@@ -152,8 +153,8 @@
         </article>
       </section>
 
-      <div class="grid-main">
-        <div class="grid-main__left">
+      <div class="grid-main" [class.grid-main--alerts-only]="shellRoute === 'alerts'">
+        <div class="grid-main__left" *ngIf="shellRoute === 'dashboard' || shellRoute === 'devices'">
           <article
             id="section-chart"
             class="card card--chart"
@@ -495,7 +496,11 @@
         </div>
 
         <aside class="grid-main__right">
-          <article id="section-alerts" class="card card--alerts-panel">
+          <article
+            id="section-alerts"
+            class="card card--alerts-panel"
+            *ngIf="shellRoute === 'dashboard' || shellRoute === 'alerts'"
+          >
             <h2 class="card__title card__title--sm">Alertas activas</h2>
             <ul class="alert-list" *ngIf="activeAlerts.length; else noAlerts">
               <li class="alert-item" *ngFor="let al of activeAlerts" [class.alert-item--critical]="al.severity === 'critical'">
@@ -542,6 +547,52 @@
             </ng-template>
           </article>
 
+          <article class="card" *ngIf="shellRoute === 'dashboard' || shellRoute === 'alerts'">
+            <h2 class="card__title card__title--sm">Actividad reciente</h2>
+            <ul class="activity-list">
+              <li class="activity-item" *ngFor="let a of activities">
+                <span class="activity-item__dot activity-item__dot--{{ a.accent }}"></span>
+                <div class="activity-item__body">
+                  <p class="activity-item__name">{{ a.deviceName }}</p>
+                  <p class="activity-item__sub">Dispositivo · {{ a.online ? 'Online' : 'Offline' }}</p>
+                </div>
+                <span class="activity-item__time">{{ a.timeLabel }}</span>
+              </li>
+            </ul>
+          </article>
+
+        </aside>
+      </div>
+      </ng-container>
+
+      <ng-container *ngIf="shellRoute === 'settings'">
+        <div class="settings-page">
+          <h1 class="settings-page__title">Configuración</h1>
+          <article class="card settings-page__device-pick">
+            <h2 class="card__title card__title--sm">Dispositivo a configurar</h2>
+            <p class="card__hint card__hint--tight">
+              Umbrales, nombres y corrección son <strong>por equipo</strong>. Elegí acá cuál editás; no hace falta que esté online para guardar (los cambios se aplican cuando vuelva a enviar datos).
+            </p>
+            <label class="notify-panel__field notify-panel__field--full">
+              <span>Equipo</span>
+              <select
+                class="notify-panel__select"
+                [ngModel]="selectedDeviceId"
+                (ngModelChange)="selectDevice($event)"
+                name="settings-device-pick"
+              >
+                <option *ngFor="let d of devices" [ngValue]="d.id">
+                  {{ d.name }} — {{ d.online ? 'Online' : 'Sin conexión' }}
+                </option>
+              </select>
+            </label>
+          </article>
+          <div class="settings-page__stack">
+            <ng-container *ngTemplateOutlet="settingsPanelsContent"></ng-container>
+          </div>
+        </div>
+      </ng-container>
+      <ng-template #settingsPanelsContent>
           <article class="card card--sensor-labels" *ngIf="selectedDevice">
             <h2 class="card__title card__title--sm">Nombres de sensores</h2>
             <p class="card__hint card__hint--tight">
@@ -591,8 +642,7 @@
           <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync">
             <h2 class="card__title card__title--sm">Corrección de temperatura (sensor)</h2>
             <p class="card__hint card__hint--tight">
-              Sumás o restás grados al valor que manda el ESP antes de guardarlo en la nube. Ej.: si marca 2 °C de más, poné
-              <strong>-2</strong>. No hace falta cambiar el firmware.
+              Sumás o restás grados al valor que manda el ESP <strong>al guardar cada lectura en la nube</strong> (la función de ingesta). El número grande de la tarjeta es ese valor ya corregido; tras cambiar la corrección, el cambio se ve cuando llega la <strong>próxima</strong> lectura del ESP. Ej.: si marca 2 °C de más, poné <strong>-2</strong>.
             </p>
             <div class="notify-panel notify-panel__grid">
               <label class="notify-panel__field">
@@ -648,7 +698,7 @@
 
           <article id="section-settings" class="card">
             <h2 class="card__title card__title--sm">Notificaciones temperatura</h2>
-            <div class="notify-panel" *ngIf="selectedDevice as sd; else noDeviceSelected">
+            <div class="notify-panel" *ngIf="selectedDevice as sd; else noDeviceSelectedSettings">
               <p class="notify-panel__device">{{ sd.name }}</p>
               <label class="notify-panel__toggle">
                 <input type="checkbox" [(ngModel)]="alertsEnabledForm" (ngModelChange)="onNotificationFormChange()" />
@@ -686,15 +736,17 @@
                 <label class="notify-panel__field">
                   <span>Retardo alarma (min)</span>
                   <input
-                    type="number"
-                    min="1"
-                    max="240"
-                    step="1"
+                    type="text"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
                     [(ngModel)]="tempPushDelayMinForm"
                     (ngModelChange)="onNotificationFormChange()"
                     [disabled]="!alertsEnabledForm"
                     placeholder="15"
                     name="temp-threshold-delay"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
                   />
                 </label>
               </div>
@@ -717,7 +769,7 @@
                 {{ notificationSettingsSaving ? 'Guardando…' : 'Guardar umbrales' }}
               </button>
             </div>
-            <ng-template #noDeviceSelected>
+            <ng-template #noDeviceSelectedSettings>
               <p class="card__empty">Seleccioná un dispositivo.</p>
             </ng-template>
           </article>
@@ -727,7 +779,7 @@
             <div class="notify-panel">
               <p class="notify-panel__hint">
                 Avisos del sistema (Web Push) aunque la app esté en segundo plano o cerrada: umbrales de temperatura y equipo sin datos.
-                En Chrome, Edge y Android conviene aceptar “Notificaciones”; en iPhone, agregar la PWA a inicio y permisos recientes.
+                Tenés que pulsar “Activar en este navegador” <strong>en cada dispositivo</strong> (PC y celular por separado). En Android/Chrome aceptá notificaciones del sitio; en iPhone (iOS 16.4+), instalá la PWA en inicio y activá avisos ahí.
               </p>
               <p class="notify-panel__hint" *ngIf="webPushUiState === 'loading'">Comprobando soporte…</p>
               <p class="notify-panel__hint" *ngIf="webPushUiState === 'unsupported'">
@@ -790,23 +842,7 @@
               </button>
             </div>
           </article>
-
-          <article class="card">
-            <h2 class="card__title card__title--sm">Actividad reciente</h2>
-            <ul class="activity-list">
-              <li class="activity-item" *ngFor="let a of activities">
-                <span class="activity-item__dot activity-item__dot--{{ a.accent }}"></span>
-                <div class="activity-item__body">
-                  <p class="activity-item__name">{{ a.deviceName }}</p>
-                  <p class="activity-item__sub">Dispositivo · {{ a.online ? 'Online' : 'Offline' }}</p>
-                </div>
-                <span class="activity-item__time">{{ a.timeLabel }}</span>
-              </li>
-            </ul>
-          </article>
-
-        </aside>
-      </div>
+      </ng-template>
     </div>
 
     <ng-template #emptyState>
@@ -827,7 +863,7 @@
       <button
         type="button"
         class="mobile-nav__btn"
-        [class.mobile-nav__btn--active]="mobileNavSection === 'dashboard'"
+        [class.mobile-nav__btn--active]="shellRoute === 'dashboard'"
         (click)="scrollToSection('dashboard')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -839,7 +875,7 @@
       <button
         type="button"
         class="mobile-nav__btn"
-        [class.mobile-nav__btn--active]="mobileNavSection === 'devices'"
+        [class.mobile-nav__btn--active]="shellRoute === 'devices'"
         (click)="scrollToSection('devices')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -851,7 +887,7 @@
       <button
         type="button"
         class="mobile-nav__btn"
-        [class.mobile-nav__btn--active]="mobileNavSection === 'alerts'"
+        [class.mobile-nav__btn--active]="shellRoute === 'alerts'"
         (click)="scrollToSection('alerts')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -863,7 +899,7 @@
       <button
         type="button"
         class="mobile-nav__btn"
-        [class.mobile-nav__btn--active]="mobileNavSection === 'settings'"
+        [class.mobile-nav__btn--active]="shellRoute === 'settings'"
         (click)="scrollToSection('settings')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
