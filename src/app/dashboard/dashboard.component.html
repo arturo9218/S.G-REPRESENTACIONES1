@@ -588,6 +588,64 @@
             </div>
           </article>
 
+          <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync">
+            <h2 class="card__title card__title--sm">Corrección de temperatura (sensor)</h2>
+            <p class="card__hint card__hint--tight">
+              Sumás o restás grados al valor que manda el ESP antes de guardarlo en la nube. Ej.: si marca 2 °C de más, poné
+              <strong>-2</strong>. No hace falta cambiar el firmware.
+            </p>
+            <div class="notify-panel notify-panel__grid">
+              <label class="notify-panel__field">
+                <span>Sensor 1 (°C)</span>
+                <input
+                  type="text"
+                  [(ngModel)]="temp1OffsetForm"
+                  (ngModelChange)="onCalibrationFormChange()"
+                  placeholder="0"
+                  name="temp-offset-1"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="notify-panel__field">
+                <span>Sensor 2 (°C)</span>
+                <input
+                  type="text"
+                  [(ngModel)]="temp2OffsetForm"
+                  (ngModelChange)="onCalibrationFormChange()"
+                  placeholder="0"
+                  name="temp-offset-2"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="notify-panel__field">
+                <span>Sensor 3 (°C)</span>
+                <input
+                  type="text"
+                  [(ngModel)]="temp3OffsetForm"
+                  (ngModelChange)="onCalibrationFormChange()"
+                  placeholder="0"
+                  name="temp-offset-3"
+                  autocomplete="off"
+                />
+              </label>
+            </div>
+            <p
+              class="sensor-labels-feedback"
+              *ngIf="calibrationFeedback && !calibrationSaving"
+              [class.sensor-labels-feedback--warn]="calibrationFeedback.includes('No se pudo') || calibrationFeedback.includes('Ejecutá')"
+            >
+              {{ calibrationFeedback }}
+            </p>
+            <button
+              type="button"
+              class="btn btn--primary notify-panel__save"
+              [disabled]="calibrationSaving"
+              (click)="saveTempCalibration()"
+            >
+              {{ calibrationSaving ? 'Guardando…' : 'Guardar corrección' }}
+            </button>
+          </article>
+
           <article id="section-settings" class="card">
             <h2 class="card__title card__title--sm">Notificaciones temperatura</h2>
             <div class="notify-panel" *ngIf="selectedDevice as sd; else noDeviceSelected">
@@ -643,7 +701,21 @@
               <p class="notify-panel__hint" *ngIf="!alertsEnabledForm">
                 Sin alertas para este dispositivo: no suena el pitido, no aparecen en el panel ni avisos del navegador (tras guardar).
               </p>
-              <button type="button" class="btn btn--primary notify-panel__save" (click)="saveNotificationSettings()">Guardar umbrales</button>
+              <p
+                class="sensor-labels-feedback"
+                *ngIf="notificationSettingsFeedback && !notificationSettingsSaving"
+                [class.sensor-labels-feedback--warn]="notificationSettingsFeedbackIsError"
+              >
+                {{ notificationSettingsFeedback }}
+              </p>
+              <button
+                type="button"
+                class="btn btn--primary notify-panel__save"
+                [disabled]="notificationSettingsSaving"
+                (click)="saveNotificationSettings()"
+              >
+                {{ notificationSettingsSaving ? 'Guardando…' : 'Guardar umbrales' }}
+              </button>
             </div>
             <ng-template #noDeviceSelected>
               <p class="card__empty">Seleccioná un dispositivo.</p>

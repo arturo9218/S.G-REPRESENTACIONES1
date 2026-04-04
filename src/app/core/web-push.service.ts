@@ -82,7 +82,7 @@ export class WebPushService {
       return {
         ok: true,
         message:
-          'Activado. Con la app en segundo plano o la pestaña cerrada, el sistema puede avisarte (Chrome/Edge/Android; iPhone: PWA en inicio y permisos).',
+          'Activado. En Supabase (secrets de Edge Functions) tenés que tener el mismo par VAPID que en Vercel: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y VAPID_SUBJECT (mailto:tu@email). Si no coinciden, no llega ningún push.',
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

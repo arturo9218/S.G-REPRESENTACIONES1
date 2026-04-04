@@ -108,10 +108,14 @@ Deno.serve(async (req) => {
       tag: `offline-${d.id}`,
     });
     offlinePushes += r.sent;
-    await supabase
-      .from('device_thresholds')
-      .update({ last_push_offline_at: new Date().toISOString() })
-      .eq('device_id', d.id);
+    if (r.sent > 0) {
+      await supabase
+        .from('device_thresholds')
+        .update({ last_push_offline_at: new Date().toISOString() })
+        .eq('device_id', d.id);
+    } else {
+      console.warn('[check-offline-push] offline push no enviado:', d.id, r);
+    }
   }
 
   return new Response(JSON.stringify({ ok: true, offlinePushes }), {

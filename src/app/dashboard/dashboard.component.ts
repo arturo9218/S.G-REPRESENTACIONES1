@@ -3,7 +3,7 @@ import { FormBuilder, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
-import { DeviceStoreService } from '../core/device-store.service';
+import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
 import {
   ActivityItem,
   AlarmSoundPreset,
@@ -38,6 +38,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
   tempLowForm = '';
   tempHighForm = '';
   tempPushDelayMinForm = '15';
+  /** Suma en °C al valor del ESP (corrección por sensor); se aplica en la nube al guardar lecturas. */
+  temp1OffsetForm = '0';
+  temp2OffsetForm = '0';
+  temp3OffsetForm = '0';
+  calibrationDirty = false;
+  calibrationSaving = false;
+  calibrationFeedback = '';
   sensor1LabelForm = '';
   sensor2LabelForm = '';
   sensorLabelsDirty = false;
@@ -49,6 +56,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   webPushFeedbackIsError = false;
   sensorLabelsSaving = false;
   sensorLabelsFeedback = '';
+  notificationSettingsSaving = false;
+  notificationSettingsFeedback = '';
+  notificationSettingsFeedbackIsError = false;
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
   private audioCtx: AudioContext | null = null;
@@ -937,25 +947,68 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.notificationSettingsDirty = true;
   }
 
+  onCalibrationFormChange(): void {
+    this.calibrationDirty = true;
+  }
+
+  async saveTempCalibration(): Promise<void> {
+    const device = this.selectedDevice;
+    if (!device) return;
+    this.calibrationSaving = true;
+    this.calibrationFeedback = '';
+    const input: DeviceTempCalibrationInput = {
+      temp1OffsetC: this.parseOffsetValue(this.temp1OffsetForm),
+      temp2OffsetC: this.parseOffsetValue(this.temp2OffsetForm),
+      temp3OffsetC: this.parseOffsetValue(this.temp3OffsetForm),
+    };
+    const { cloudError } = await this.deviceStore.updateDeviceTempCalibration(device.id, input);
+    this.calibrationSaving = false;
+    this.calibrationDirty = false;
+    if (cloudError) {
+      const needsCol = cloudError.includes('temp1_offset') || cloudError.includes('column');
+      this.calibrationFeedback = needsCol
+        ? 'Ejecutá en Supabase el SQL: FRONTEND/supabase/sql/007_temp_calibration_offsets.sql'
+        : `No se pudo guardar en la nube: ${cloudError}`;
+    } else {
+      this.calibrationFeedback = 'Corrección guardada. Las próximas lecturas del ESP se guardarán ya ajustadas.';
+    }
+    window.setTimeout(() => {
+      this.calibrationFeedback = '';
+    }, 6000);
+  }
+
   async saveNotificationSettings(): Promise<void> {
     const device = this.selectedDevice;
     if (!device) return;
+    this.notificationSettingsFeedback = '';
+    this.notificationSettingsFeedbackIsError = false;
+
     if (this.alertsEnabledForm && typeof window !== 'undefined' && 'Notification' in window) {
       if (Notification.permission === 'default') {
         void Notification.requestPermission();
       }
     }
     if (!this.alertsEnabledForm) {
-      const result = await this.deviceStore.updateDeviceNotificationConfig(device.id, {
-        alertsEnabled: false,
-        tempLowC: null,
-        tempHighC: null,
-        tempPushCooldownMs: this.parseDelayMinutesToMs(this.tempPushDelayMinForm),
-      });
-      if (result.cloudError) {
-        alert(`Guardado en este equipo. No se pudo guardar en la nube: ${result.cloudError}`);
+      this.notificationSettingsSaving = true;
+      try {
+        const result = await this.deviceStore.updateDeviceNotificationConfig(device.id, {
+          alertsEnabled: false,
+          tempLowC: null,
+          tempHighC: null,
+          tempPushCooldownMs: this.parseDelayMinutesToMs(this.tempPushDelayMinForm),
+        });
+        if (result.cloudError) {
+          this.notificationSettingsFeedbackIsError = true;
+          this.notificationSettingsFeedback = `Guardado en este equipo. No se pudo en la nube: ${result.cloudError}`;
+        } else {
+          this.notificationSettingsFeedback =
+            'Umbrales guardados: notificaciones desactivadas para este dispositivo.';
+        }
+      } finally {
+        this.notificationSettingsSaving = false;
       }
       this.notificationSettingsDirty = false;
+      this.scheduleNotificationFeedbackClear();
       return;
     }
 
@@ -963,20 +1016,38 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const high = this.parseTempValue(this.tempHighForm);
     const delayMs = this.parseDelayMinutesToMs(this.tempPushDelayMinForm);
     if (low != null && high != null && low > high) {
-      alert('El umbral mínimo no puede ser mayor al máximo.');
+      this.notificationSettingsFeedbackIsError = true;
+      this.notificationSettingsFeedback = 'El umbral mínimo no puede ser mayor al máximo.';
+      this.scheduleNotificationFeedbackClear();
       return;
     }
 
-    const result = await this.deviceStore.updateDeviceNotificationConfig(device.id, {
-      alertsEnabled: true,
-      tempLowC: low,
-      tempHighC: high,
-      tempPushCooldownMs: delayMs,
-    });
-    if (result.cloudError) {
-      alert(`Guardado en este equipo. No se pudo guardar en la nube: ${result.cloudError}`);
+    this.notificationSettingsSaving = true;
+    try {
+      const result = await this.deviceStore.updateDeviceNotificationConfig(device.id, {
+        alertsEnabled: true,
+        tempLowC: low,
+        tempHighC: high,
+        tempPushCooldownMs: delayMs,
+      });
+      if (result.cloudError) {
+        this.notificationSettingsFeedbackIsError = true;
+        this.notificationSettingsFeedback = `Guardado en este equipo. No se pudo en la nube: ${result.cloudError}`;
+      } else {
+        this.notificationSettingsFeedback =
+          'Umbrales guardados correctamente (mín., máx., retardo y avisos).';
+      }
+    } finally {
+      this.notificationSettingsSaving = false;
     }
     this.notificationSettingsDirty = false;
+    this.scheduleNotificationFeedbackClear();
+  }
+
+  private scheduleNotificationFeedbackClear(): void {
+    window.setTimeout(() => {
+      this.notificationSettingsFeedback = '';
+    }, 6000);
   }
 
   async refreshWebPushUi(): Promise<void> {
@@ -1547,6 +1618,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.tempLowForm = '';
       this.tempHighForm = '';
       this.tempPushDelayMinForm = '15';
+      this.temp1OffsetForm = '0';
+      this.temp2OffsetForm = '0';
+      this.temp3OffsetForm = '0';
+      this.calibrationDirty = false;
       this.sensor1LabelForm = '';
       this.sensor2LabelForm = '';
       this.sensorLabelsDirty = false;
@@ -1569,6 +1644,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.sensor1LabelForm = device.sensor1Label?.trim() || 'Sensor 1';
       this.sensor2LabelForm = device.sensor2Label?.trim() || 'Sensor 2';
     }
+    if (!this.calibrationDirty) {
+      this.temp1OffsetForm =
+        device.temp1OffsetC == null || Number.isNaN(device.temp1OffsetC)
+          ? '0'
+          : String(device.temp1OffsetC);
+      this.temp2OffsetForm =
+        device.temp2OffsetC == null || Number.isNaN(device.temp2OffsetC)
+          ? '0'
+          : String(device.temp2OffsetC);
+      this.temp3OffsetForm =
+        device.temp3OffsetC == null || Number.isNaN(device.temp3OffsetC)
+          ? '0'
+          : String(device.temp3OffsetC);
+    }
   }
 
   private parseTempValue(value: string): number | null {
@@ -1576,6 +1665,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!clean) return null;
     const n = Number.parseFloat(clean);
     return Number.isNaN(n) ? null : n;
+  }
+
+  /** Offset en °C (puede ser negativo). Vacío = 0. */
+  private parseOffsetValue(value: string): number {
+    const clean = value.trim().replace(',', '.');
+    if (!clean) return 0;
+    const n = Number.parseFloat(clean);
+    return Number.isNaN(n) ? 0 : n;
   }
 
   private parseDelayMinutesToMs(value: string): number {

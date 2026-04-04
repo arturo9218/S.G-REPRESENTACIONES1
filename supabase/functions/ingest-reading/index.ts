@@ -91,12 +91,36 @@ Deno.serve(async (req) => {
       });
     }
 
+    const { data: th } = await supabase
+      .from('device_thresholds')
+      .select(
+        'notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms, last_push_temp_breach_at, temp1_offset_c, temp2_offset_c, temp3_offset_c'
+      )
+      .eq('device_id', device.id)
+      .maybeSingle();
+
+    const num = (v: unknown): number =>
+      typeof v === 'number' && Number.isFinite(v) ? v : 0;
+    const o1 = num(th?.temp1_offset_c);
+    const o2 = num(th?.temp2_offset_c);
+    const o3 = num(th?.temp3_offset_c);
+
+    const temp1Corrected = payload.temp1_c + o1;
+    const temp2Corrected =
+      payload.temp2_c == null || Number.isNaN(payload.temp2_c as number)
+        ? null
+        : (payload.temp2_c as number) + o2;
+    const temp3Corrected =
+      payload.temp3_c == null || Number.isNaN(payload.temp3_c as number)
+        ? null
+        : (payload.temp3_c as number) + o3;
+
     const { error: insErr } = await supabase.from('device_readings').insert({
       device_id: device.id,
       created_at: payload.sentAt ?? new Date().toISOString(),
-      temp1_c: payload.temp1_c,
-      temp2_c: payload.temp2_c ?? null,
-      temp3_c: payload.temp3_c ?? null,
+      temp1_c: temp1Corrected,
+      temp2_c: temp2Corrected,
+      temp3_c: temp3Corrected,
       current_a: payload.current_a ?? null,
       power_w: payload.power_w ?? null,
       press1_bar: payload.press1_bar ?? null,
@@ -110,16 +134,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: th } = await supabase
-      .from('device_thresholds')
-      .select(
-        'notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms, last_push_temp_breach_at'
-      )
-      .eq('device_id', device.id)
-      .maybeSingle();
+    /** Diagnóstico push (útil si no llegan notificaciones); no afecta al ESP. */
+    let pushDiag: { sent: number; skipped?: string; lastError?: string } | undefined;
 
     if (th?.notifications_enabled) {
-      const t = payload.temp1_c;
+      const t = temp1Corrected;
       let breach = false;
       let msg = '';
       if (th.temp1_min_c != null && t < th.temp1_min_c) {
@@ -142,21 +161,32 @@ Deno.serve(async (req) => {
         if (Date.now() - last > configuredCooldown) {
           const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
           const when = formatEsArDateTime(new Date());
-          await sendPushToUser(supabase, device.owner_user_id, {
+          const pushResult = await sendPushToUser(supabase, device.owner_user_id, {
             title: `${deviceName}: alarma de temperatura`,
             body: `${msg}\nDetectado: ${when}`,
             data: { type: 'temp_breach', deviceId: device.id },
             tag: `temp-${device.id}`,
           });
-          await supabase
-            .from('device_thresholds')
-            .update({ last_push_temp_breach_at: new Date().toISOString() })
-            .eq('device_id', device.id);
+          pushDiag = {
+            sent: pushResult.sent,
+            skipped: pushResult.skipped,
+            lastError: pushResult.lastError,
+          };
+          // Solo aplicar cooldown si al menos un push llegó al navegador (evita “silencio” + bloqueo 15–30 min).
+          if (pushResult.sent > 0) {
+            await supabase
+              .from('device_thresholds')
+              .update({ last_push_temp_breach_at: new Date().toISOString() })
+              .eq('device_id', device.id);
+          } else {
+            console.warn('[ingest-reading] alarma temp sin push enviado:', pushResult);
+          }
         }
       }
     }
 
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(
+      JSON.stringify(pushDiag ? { ok: true, push: pushDiag } : { ok: true }),
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

@@ -32,6 +32,10 @@ export interface DashboardDevice {
   /** Etiquetas mostradas para temp1 / temp2 (Supabase + localStorage) */
   sensor1Label?: string;
   sensor2Label?: string;
+  /** Suma en °C al valor crudo del ESP (corrección de sensor); default 0 */
+  temp1OffsetC?: number;
+  temp2OffsetC?: number;
+  temp3OffsetC?: number;
 }
 
 /** Una lectura guardada para historial y gráficos */

@@ -77,6 +77,13 @@ export interface DeviceNotificationConfigInput {
   tempPushCooldownMs: number | null;
 }
 
+/** Corrección de temperatura (°C que se suman al valor del ESP antes de guardar; la aplica ingest-reading). */
+export interface DeviceTempCalibrationInput {
+  temp1OffsetC: number;
+  temp2OffsetC: number;
+  temp3OffsetC: number;
+}
+
 export interface TelemetryInput {
   deviceId: string;
   temp1C: number;
@@ -200,6 +207,9 @@ export class DeviceStoreService {
         temp1_min_c: 2,
         temp1_max_c: 8,
         temp_push_cooldown_ms: 15 * 60 * 1000,
+        temp1_offset_c: 0,
+        temp2_offset_c: 0,
+        temp3_offset_c: 0,
         power_max_w: 350,
         press1_min_bar: 1.8,
         press1_max_bar: 2.8,
@@ -227,6 +237,9 @@ export class DeviceStoreService {
         deviceToken,
         sensor1Label: DEFAULT_SENSOR_1_LABEL,
         sensor2Label: DEFAULT_SENSOR_2_LABEL,
+        temp1OffsetC: 0,
+        temp2OffsetC: 0,
+        temp3OffsetC: 0,
       };
 
       this.persistDevices([...this.snapshot.filter((d) => d.id !== id), device]);
@@ -753,16 +766,28 @@ export class DeviceStoreService {
     const ids = data.map((r) => r.id as string);
     const thresholdsByDevice = new Map<
       string,
-      { enabled: boolean; low: number | null; high: number | null; cooldownMs: number | null }
+      {
+        enabled: boolean;
+        low: number | null;
+        high: number | null;
+        cooldownMs: number | null;
+        o1: number;
+        o2: number;
+        o3: number;
+      }
     >();
     if (ids.length) {
       const { data: thData } = await this.auth.client
         .from('device_thresholds')
-        .select('device_id, notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms')
+        .select(
+          'device_id, notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms, temp1_offset_c, temp2_offset_c, temp3_offset_c'
+        )
         .in('device_id', ids);
       for (const th of (thData ?? []) as Record<string, unknown>[]) {
         const did = th['device_id'];
         if (typeof did !== 'string') continue;
+        const off = (k: string) =>
+          typeof th[k] === 'number' && !Number.isNaN(th[k] as number) ? (th[k] as number) : 0;
         thresholdsByDevice.set(did, {
           enabled: th['notifications_enabled'] !== false,
           low:
@@ -778,6 +803,9 @@ export class DeviceStoreService {
             !Number.isNaN(th['temp_push_cooldown_ms'] as number)
               ? Math.max(60 * 1000, Math.round(th['temp_push_cooldown_ms'] as number))
               : null,
+          o1: off('temp1_offset_c'),
+          o2: off('temp2_offset_c'),
+          o3: off('temp3_offset_c'),
         });
       }
     }
@@ -815,6 +843,9 @@ export class DeviceStoreService {
           typeof s2 === 'string' && s2.trim()
             ? s2.trim()
             : prev?.sensor2Label ?? DEFAULT_SENSOR_2_LABEL,
+        temp1OffsetC: th?.o1 ?? prev?.temp1OffsetC ?? 0,
+        temp2OffsetC: th?.o2 ?? prev?.temp2OffsetC ?? 0,
+        temp3OffsetC: th?.o3 ?? prev?.temp3OffsetC ?? 0,
       };
     });
 
@@ -1061,6 +1092,7 @@ export class DeviceStoreService {
     const high = input.tempHighC;
     let cloudError: string | undefined;
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
+      const nowIso = new Date().toISOString();
       const { error } = await this.auth.client
         .from('device_thresholds')
         .upsert(
@@ -1070,6 +1102,7 @@ export class DeviceStoreService {
             temp1_min_c: low,
             temp1_max_c: high,
             temp_push_cooldown_ms: input.tempPushCooldownMs,
+            updated_at: nowIso,
           },
           { onConflict: 'device_id' }
         );
@@ -1086,6 +1119,40 @@ export class DeviceStoreService {
               tempLowC: low,
               tempHighC: high,
               tempPushCooldownMs: input.tempPushCooldownMs,
+            }
+          : d
+      )
+    );
+    return { cloudError };
+  }
+
+  async updateDeviceTempCalibration(
+    id: string,
+    input: DeviceTempCalibrationInput
+  ): Promise<{ cloudError?: string }> {
+    let cloudError: string | undefined;
+    if (this.isCloudSyncEnabled() && this.isUuid(id)) {
+      const { error } = await this.auth.client
+        .from('device_thresholds')
+        .update({
+          temp1_offset_c: input.temp1OffsetC,
+          temp2_offset_c: input.temp2OffsetC,
+          temp3_offset_c: input.temp3OffsetC,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('device_id', id);
+      if (error) {
+        cloudError = error.message;
+      }
+    }
+    this.persistDevices(
+      this.snapshot.map((d) =>
+        d.id === id
+          ? {
+              ...d,
+              temp1OffsetC: input.temp1OffsetC,
+              temp2OffsetC: input.temp2OffsetC,
+              temp3OffsetC: input.temp3OffsetC,
             }
           : d
       )

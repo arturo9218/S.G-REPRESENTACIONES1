@@ -25,11 +25,12 @@ export async function sendPushToUser(
   supabase: SupabaseClient,
   userId: string,
   payload: PushPayload
-): Promise<{ sent: number; skipped?: string }> {
+): Promise<{ sent: number; skipped?: string; lastError?: string }> {
   const publicKey = Deno.env.get('VAPID_PUBLIC_KEY')?.trim();
   const privateKey = Deno.env.get('VAPID_PRIVATE_KEY')?.trim();
   const subject = Deno.env.get('VAPID_SUBJECT')?.trim() ?? 'mailto:noreply@example.com';
   if (!publicKey || !privateKey) {
+    console.warn('[send-web-push] VAPID_PUBLIC_KEY o VAPID_PRIVATE_KEY faltan en secrets de la función');
     return { sent: 0, skipped: 'vapid_not_configured' };
   }
 
@@ -41,7 +42,13 @@ export async function sendPushToUser(
     .eq('user_id', userId);
 
   if (error || !subs?.length) {
-    return { sent: 0, skipped: error?.message ?? 'no_subscriptions' };
+    const sk = error?.message ?? 'no_subscriptions';
+    if (sk === 'no_subscriptions') {
+      console.warn('[send-web-push] Sin filas en push_subscriptions para user_id=', userId);
+    } else {
+      console.warn('[send-web-push] Error leyendo suscripciones:', sk);
+    }
+    return { sent: 0, skipped: sk };
   }
 
   // Formato que espera @angular/service-worker (ngsw-worker.js → handlePush).
@@ -71,6 +78,7 @@ export async function sendPushToUser(
   });
 
   let sent = 0;
+  let lastError = '';
   for (const s of subs) {
     try {
       await webPush.sendNotification(
@@ -84,10 +92,16 @@ export async function sendPushToUser(
       sent++;
     } catch (e: unknown) {
       const status = (e as { statusCode?: number })?.statusCode;
+      const errBody = (e as { body?: string })?.body ?? '';
+      lastError = `http_${status ?? 'unknown'}${errBody ? ` ${errBody.slice(0, 120)}` : ''}`;
+      console.warn('[send-web-push] sendNotification falló:', lastError);
       if (status === 404 || status === 410) {
         await supabase.from('push_subscriptions').delete().eq('endpoint', s.endpoint);
       }
     }
   }
-  return { sent };
+  if (sent === 0 && subs.length && !lastError) {
+    lastError = 'all_endpoints_failed';
+  }
+  return { sent, lastError: lastError || undefined };
 }

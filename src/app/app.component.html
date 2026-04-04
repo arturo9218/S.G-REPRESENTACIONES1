@@ -1,1 +1,10 @@
+<div class="app-update-banner" *ngIf="updateAvailable" role="status">
+  <span class="app-update-banner__text">Hay una versión nueva. Actualizá para ver los últimos cambios.</span>
+  <div class="app-update-banner__actions">
+    <button type="button" class="app-update-banner__btn app-update-banner__btn--primary" (click)="activateNewVersion()">
+      Actualizar ahora
+    </button>
+    <button type="button" class="app-update-banner__btn" (click)="dismissUpdatePrompt()">Más tarde</button>
+  </div>
+</div>
 <router-outlet></router-outlet>
