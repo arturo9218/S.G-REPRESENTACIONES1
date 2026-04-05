@@ -734,7 +734,7 @@
                   />
                 </label>
                 <label class="notify-panel__field">
-                  <span>Retardo alarma (min)</span>
+                  <span>Retardo: temperatura (min)</span>
                   <input
                     type="text"
                     inputmode="numeric"
@@ -749,7 +749,26 @@
                     spellcheck="false"
                   />
                 </label>
+                <label class="notify-panel__field">
+                  <span>Retardo: desconectado (min)</span>
+                  <input
+                    type="text"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    [(ngModel)]="offlinePushDelayMinForm"
+                    (ngModelChange)="onNotificationFormChange()"
+                    [disabled]="!alertsEnabledForm"
+                    placeholder="15"
+                    name="offline-threshold-delay"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                  />
+                </label>
               </div>
+              <p class="notify-panel__hint" *ngIf="alertsEnabledForm">
+                Retardo temperatura: entre avisos si el °C está fuera de rango. Retardo desconectado: entre avisos si no hay datos del equipo. Podés usar valores distintos.
+              </p>
               <p class="notify-panel__hint" *ngIf="!alertsEnabledForm">
                 Sin alertas para este dispositivo: no suena el pitido, no aparecen en el panel ni avisos del navegador (tras guardar).
               </p>

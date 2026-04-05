@@ -4,9 +4,14 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 export interface PushPayload {
   title: string;
   body: string;
+  /** Metadatos (type, deviceId, …); se fusionan con onActionClick para el SW de Angular */
   data?: Record<string, string>;
   /** Agrupa/sustituye notificaciones del mismo tag en el sistema */
   tag?: string;
+  /** Ruta relativa al origen (ej. /alertas?deviceId=…). El SW de Angular usa data.onActionClick */
+  navigate?: string;
+  /** Prioriza la alerta en el sistema (recomendado para alarmas) */
+  requireInteraction?: boolean;
 }
 
 /** TTL del mensaje en la red push (segundos). Antes 120s: en segundo plano a veces expiraba antes de entregar. */
@@ -60,6 +65,7 @@ export async function sendPushToUser(
     vibrate: [200, 100, 200],
     renotify: Boolean(payload.tag),
     silent: false,
+    requireInteraction: payload.requireInteraction !== false,
   };
   if (payload.tag) {
     notif.tag = payload.tag;
@@ -68,8 +74,25 @@ export async function sendPushToUser(
     notif.icon = `${base}/assets/icons/icon-192.svg`;
     notif.badge = `${base}/favicon.ico`;
   }
+  const dataMerged: Record<string, unknown> = {};
   if (payload.data && Object.keys(payload.data).length) {
-    notif.data = payload.data;
+    for (const [k, v] of Object.entries(payload.data)) {
+      dataMerged[k] = v;
+    }
+  }
+  if (payload.navigate?.trim()) {
+    const url = payload.navigate.trim().startsWith('/')
+      ? payload.navigate.trim()
+      : `/${payload.navigate.trim()}`;
+    dataMerged.onActionClick = {
+      default: {
+        operation: 'navigateLastFocusedOrOpen',
+        url,
+      },
+    };
+  }
+  if (Object.keys(dataMerged).length) {
+    notif.data = dataMerged;
   }
 
   const body = JSON.stringify({

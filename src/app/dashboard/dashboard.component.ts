@@ -1,7 +1,7 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormBuilder, Validators } from '@angular/forms';
-import { NavigationEnd, Router } from '@angular/router';
-import { Subscription } from 'rxjs';
+import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
+import { combineLatest, Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { AuthService } from '../core/auth.service';
 import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
@@ -10,6 +10,7 @@ import {
   AlarmSoundPreset,
   ChartStylePreset,
   DashboardAlert,
+  DashboardAlertKind,
   DashboardDevice,
   HistoryListItem,
   TemperatureReading,
@@ -39,6 +40,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   tempLowForm = '';
   tempHighForm = '';
   tempPushDelayMinForm = '15';
+  /** Retardo entre avisos de “desconectado” (min), independiente del de temperatura */
+  offlinePushDelayMinForm = '15';
   /** Suma en °C al valor del ESP (corrección por sensor); se aplica en la nube al guardar lecturas. */
   temp1OffsetForm = '0';
   temp2OffsetForm = '0';
@@ -67,6 +70,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
   private routerSub: Subscription | null = null;
+  private routeQuerySub: Subscription | null = null;
+  /** Evita que queryParamMap pise la selección mientras actualizamos la URL desde el picker */
+  private skipQueryParamDeviceSync = false;
   private audioCtx: AudioContext | null = null;
   private unlockAudioHandler: (() => void) | null = null;
 
@@ -101,6 +107,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   alarmEventsCount = 0;
   private lastActiveAlertIds = new Set<string>();
   private lastAlarmToneAtMs = 0;
+  /** Primera pasada: persistir snapshot sin sonar (evita pitido al recargar con las mismas alertas). */
+  private panelAlarmSnapshotInitialized = false;
+  private readonly panelAlertIdsStorageKey = 'sg_panel_alert_ids_v1';
+  /** Último pitido del panel (ms); respeta el retardo entre alertas al reabrir la app */
+  private readonly panelLastAlarmToneAtStorageKey = 'sg_panel_last_alarm_tone_at_v1';
   private readonly alarmsCountStorageKey = 'sg_alarms_count_v1';
   private readonly alarmSoundStorageKey = 'sg_alarm_sound_v1';
 
@@ -130,6 +141,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     private readonly fb: FormBuilder,
     private readonly auth: AuthService,
     private readonly router: Router,
+    private readonly route: ActivatedRoute,
     private readonly deviceStore: DeviceStoreService,
     private readonly webPush: WebPushService
   ) {
@@ -150,14 +162,26 @@ export class DashboardComponent implements OnInit, OnDestroy {
     void this.refreshWebPushUi();
     this.setupAlarmAudioUnlock();
     this.alarmEventsCount = this.loadAlarmEventsCount();
-    this.subDev = this.deviceStore.devices$.subscribe((list) => {
-      this.devices = list;
-      if (!this.selectedDeviceId && list.length > 0) {
-        this.selectDevice(list[0].id);
+    this.routeQuerySub = combineLatest([
+      this.deviceStore.devices$,
+      this.route.queryParamMap,
+    ]).subscribe(([list, params]) => {
+      if (this.skipQueryParamDeviceSync) {
         return;
       }
+      const did = params.get('deviceId');
+      if (did && list.some((d) => d.id === did)) {
+        if (this.selectedDeviceId !== did) {
+          this.selectDevice(did, false);
+        }
+      } else if (!this.selectedDeviceId && list.length > 0) {
+        this.selectDevice(list[0].id, false);
+      }
+    });
+    this.subDev = this.deviceStore.devices$.subscribe((list) => {
+      this.devices = list;
       if (this.selectedDeviceId && !list.some((d) => d.id === this.selectedDeviceId)) {
-        this.selectDevice(list[0]?.id ?? null);
+        this.selectDevice(list[0]?.id ?? null, false);
         return;
       }
       this.syncNotificationFormWithSelected();
@@ -182,6 +206,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subDev?.unsubscribe();
     this.subRead?.unsubscribe();
     this.routerSub?.unsubscribe();
+    this.routeQuerySub?.unsubscribe();
   }
 
   private syncShellRoute(): void {
@@ -915,7 +940,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
       alerts: '/alertas',
       settings: '/configuracion',
     };
-    void this.router.navigate([paths[section]]);
+    const path = paths[section];
+    void this.router.navigate([path], {
+      queryParams: this.selectedDeviceId ? { deviceId: this.selectedDeviceId } : { deviceId: null },
+      replaceUrl: true,
+    });
   }
 
   openChartInNewTab(e?: Event): void {
@@ -930,12 +959,27 @@ export class DashboardComponent implements OnInit, OnDestroy {
     window.open(absoluteUrl, '_blank', 'noopener,noreferrer');
   }
 
-  selectDevice(deviceId: string | null): void {
+  selectDevice(deviceId: string | null, syncQueryToUrl = true): void {
     this.selectedDeviceId = deviceId;
     this.sensorLabelsDirty = false;
     this.notificationSettingsDirty = false;
     this.syncNotificationFormWithSelected();
     this.syncPdfExportDateDefaults();
+    if (syncQueryToUrl) {
+      const path = this.router.url.split('?')[0];
+      const shellPaths = ['/dashboard', '/dispositivos', '/alertas', '/configuracion'];
+      if (shellPaths.includes(path)) {
+        this.skipQueryParamDeviceSync = true;
+        void this.router
+          .navigate([path], {
+            queryParams: deviceId ? { deviceId } : { deviceId: null },
+            replaceUrl: true,
+          })
+          .finally(() => {
+            this.skipQueryParamDeviceSync = false;
+          });
+      }
+    }
   }
 
   onSensorLabelsInput(): void {
@@ -1042,6 +1086,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           tempLowC: null,
           tempHighC: null,
           tempPushCooldownMs: this.parseDelayMinutesToMs(this.tempPushDelayMinForm),
+          offlinePushCooldownMs: this.parseDelayMinutesToMs(this.offlinePushDelayMinForm),
         });
         if (result.cloudError) {
           this.notificationSettingsFeedbackIsError = true;
@@ -1065,10 +1110,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     let low: number | null;
     let high: number | null;
     let delayMs: number;
+    let offlineDelayMs: number;
     try {
       low = this.parseTempValue(this.tempLowForm);
       high = this.parseTempValue(this.tempHighForm);
       delayMs = this.parseDelayMinutesToMs(this.tempPushDelayMinForm);
+      offlineDelayMs = this.parseDelayMinutesToMs(this.offlinePushDelayMinForm);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.notificationSettingsFeedbackIsError = true;
@@ -1090,6 +1137,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         tempLowC: low,
         tempHighC: high,
         tempPushCooldownMs: delayMs,
+        offlinePushCooldownMs: offlineDelayMs,
       });
       if (result.cloudError) {
         this.notificationSettingsFeedbackIsError = true;
@@ -1683,6 +1731,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.tempLowForm = '';
       this.tempHighForm = '';
       this.tempPushDelayMinForm = '15';
+      this.offlinePushDelayMinForm = '15';
       this.temp1OffsetForm = '0';
       this.temp2OffsetForm = '0';
       this.temp3OffsetForm = '0';
@@ -1705,6 +1754,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.tempPushDelayMinForm = String(
           this.cooldownMsToMinutes(device.tempPushCooldownMs ?? 15 * 60 * 1000)
         );
+        const offlineMs =
+          device.offlinePushCooldownMs ??
+          device.tempPushCooldownMs ??
+          15 * 60 * 1000;
+        this.offlinePushDelayMinForm = String(this.cooldownMsToMinutes(offlineMs));
       } finally {
         this.syncingNotificationFormFromDevice = false;
       }
@@ -1764,6 +1818,39 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   private updateAlarmAccumulator(): void {
     const current = new Set(this.activeAlerts.map((a) => a.id));
+
+    if (!this.panelAlarmSnapshotInitialized) {
+      this.panelAlarmSnapshotInitialized = true;
+      try {
+        const raw = localStorage.getItem(this.panelAlertIdsStorageKey);
+        if (raw) {
+          const arr = JSON.parse(raw) as unknown;
+          if (Array.isArray(arr)) {
+            this.lastActiveAlertIds = new Set(arr.filter((x) => typeof x === 'string'));
+            this.lastAlarmToneAtMs = this.loadPersistedLastAlarmToneAtOrNow();
+          } else {
+            this.lastActiveAlertIds = new Set(current);
+            this.lastAlarmToneAtMs = Date.now();
+            this.persistLastAlarmToneAtMs(this.lastAlarmToneAtMs);
+            this.persistPanelAlertIdsSnapshot(current);
+            return;
+          }
+        } else {
+          this.lastActiveAlertIds = new Set(current);
+          this.lastAlarmToneAtMs = Date.now();
+          this.persistLastAlarmToneAtMs(this.lastAlarmToneAtMs);
+          this.persistPanelAlertIdsSnapshot(current);
+          return;
+        }
+      } catch {
+        this.lastActiveAlertIds = new Set(current);
+        this.lastAlarmToneAtMs = Date.now();
+        this.persistLastAlarmToneAtMs(this.lastAlarmToneAtMs);
+        this.persistPanelAlertIdsSnapshot(current);
+        return;
+      }
+    }
+
     const newIds: string[] = [];
     for (const id of current) {
       if (!this.lastActiveAlertIds.has(id)) newIds.push(id);
@@ -1774,16 +1861,95 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.playAlarmTone();
       this.tryBrowserNotification(newIds);
     }
-    // Si hay alertas activas sostenidas, repetir sonido con cooldown
-    // para no sonar solo una vez.
     if (current.size > 0) {
       const now = Date.now();
-      const cooldownMs = 20000;
+      const cooldownMs = this.panelAlarmRepeatCooldownMs();
       if (now - this.lastAlarmToneAtMs >= cooldownMs) {
         this.playAlarmTone();
       }
     }
     this.lastActiveAlertIds = current;
+    this.persistPanelAlertIdsSnapshot(current);
+  }
+
+  /** Retardo de pitido/notificación según tipo de alerta (temp vs desconectado). */
+  private panelAlarmCooldownMsForDeviceAndKind(
+    deviceId: string | null,
+    kind: DashboardAlertKind
+  ): number {
+    const minMs = 60 * 1000;
+    const defaultMs = 15 * 60 * 1000;
+    if (!deviceId) return defaultMs;
+    const dev = this.devices.find((x) => x.id === deviceId);
+    if (!dev) return defaultMs;
+    if (kind === 'offline') {
+      const offMs = dev.offlinePushCooldownMs;
+      if (typeof offMs === 'number' && Number.isFinite(offMs) && offMs > 0) {
+        return Math.max(minMs, offMs);
+      }
+      const tms = dev.tempPushCooldownMs;
+      if (typeof tms === 'number' && Number.isFinite(tms) && tms > 0) {
+        return Math.max(minMs, tms);
+      }
+      return defaultMs;
+    }
+    const tms = dev.tempPushCooldownMs;
+    if (typeof tms === 'number' && Number.isFinite(tms) && tms > 0) {
+      return Math.max(minMs, tms);
+    }
+    return defaultMs;
+  }
+
+  /** El intervalo más largo entre pitidos mientras sigue alguna alerta (varias alertas ⇒ el mayor retardo). */
+  private panelAlarmRepeatCooldownMs(): number {
+    const defaultMs = 15 * 60 * 1000;
+    let maxCd = 0;
+    for (const a of this.activeAlerts) {
+      const did = this.deviceIdFromAlertId(a.id);
+      const cd = this.panelAlarmCooldownMsForDeviceAndKind(did, a.kind);
+      maxCd = Math.max(maxCd, cd);
+    }
+    return maxCd > 0 ? maxCd : defaultMs;
+  }
+
+  private deviceIdFromAlertId(alertId: string): string | null {
+    if (alertId.endsWith('-offline')) return alertId.slice(0, -'-offline'.length);
+    if (alertId.endsWith('-crit')) return alertId.slice(0, -'-crit'.length);
+    if (alertId.endsWith('-low')) return alertId.slice(0, -'-low'.length);
+    return null;
+  }
+
+  private persistPanelAlertIdsSnapshot(current: Set<string>): void {
+    try {
+      localStorage.setItem(this.panelAlertIdsStorageKey, JSON.stringify([...current]));
+    } catch {
+      /* */
+    }
+  }
+
+  /** Evita lastAlarmToneAtMs=0: si no hay marca, el retardo parece “cumplido” y suena al abrir la app */
+  private loadPersistedLastAlarmToneAtOrNow(): number {
+    try {
+      const raw = localStorage.getItem(this.panelLastAlarmToneAtStorageKey);
+      if (!raw) {
+        return Date.now();
+      }
+      const n = Number.parseInt(raw, 10);
+      if (!Number.isFinite(n) || n <= 0 || n > Date.now()) {
+        return Date.now();
+      }
+      return n;
+    } catch {
+      return Date.now();
+    }
+  }
+
+  private persistLastAlarmToneAtMs(ms: number): void {
+    try {
+      localStorage.setItem(this.panelLastAlarmToneAtStorageKey, String(ms));
+    } catch {
+      /* */
+    }
   }
 
   private loadAlarmEventsCount(): number {
@@ -1814,9 +1980,22 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (Notification.permission !== 'granted') return;
     const byId = new Map(this.activeAlerts.map((a) => [a.id, a]));
-    for (const id of newAlertIds) {
-      const al = byId.get(id);
+    for (const alertId of newAlertIds) {
+      const al = byId.get(alertId);
       if (!al) continue;
+      const did = this.deviceIdFromAlertId(alertId);
+      const cooldownMs = this.panelAlarmCooldownMsForDeviceAndKind(did, al.kind);
+      try {
+        const key = `sg_browser_notif_${alertId}`;
+        const raw = sessionStorage.getItem(key);
+        const last = raw ? Number.parseInt(raw, 10) : 0;
+        if (Number.isFinite(last) && last > 0 && Date.now() - last < cooldownMs) {
+          continue;
+        }
+        sessionStorage.setItem(key, String(Date.now()));
+      } catch {
+        /* seguir: no bloquear notificación */
+      }
       let title = 'Alarma';
       if (al.kind === 'offline') {
         title = `${al.deviceName}: desconectado`;
@@ -1954,6 +2133,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const alarmCtx = this.pickAlarmContext();
       this.scheduleAlarmPattern(ctx, this.alarmSoundPreset, alarmCtx);
       this.lastAlarmToneAtMs = Date.now();
+      this.persistLastAlarmToneAtMs(this.lastAlarmToneAtMs);
     } catch {
       // no-op
     }

@@ -25,6 +25,8 @@ export interface DashboardDevice {
   tempHighC?: number | null;
   /** Retardo entre alertas push de temperatura para este equipo (ms) */
   tempPushCooldownMs?: number | null;
+  /** Retardo entre avisos de “desconectado” (ms); independiente del de temperatura */
+  offlinePushCooldownMs?: number | null;
   /** Creado en Supabase; lecturas vienen de la nube */
   cloudSynced?: boolean;
   /** Código de 6 dígitos para WiFiManager api_key (solo en este navegador tras el alta) */

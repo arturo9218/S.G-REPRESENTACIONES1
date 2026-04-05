@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
 
     const { data: device, error: devErr } = await supabase
       .from('devices')
-      .select('id, device_token_hash, active, owner_user_id, name')
+      .select('id, device_token_hash, active, owner_user_id, name, sensor_1_label')
       .eq('module_id', moduleId)
       .single();
 
@@ -148,15 +148,19 @@ Deno.serve(async (req) => {
 
     if (th?.notifications_enabled) {
       const t = temp1Corrected;
+      const sensorLabel =
+        typeof device.sensor_1_label === 'string' && device.sensor_1_label.trim()
+          ? device.sensor_1_label.trim()
+          : 'Cámara 1';
       let breach = false;
       let msg = '';
       if (th.temp1_min_c != null && t < th.temp1_min_c) {
         breach = true;
-        msg = `Temperatura ${t.toFixed(1)} °C por debajo del mínimo (${th.temp1_min_c} °C).`;
+        msg = `${sensorLabel}: ${t.toFixed(1)} °C, por debajo del mínimo configurado (${th.temp1_min_c} °C).`;
       }
       if (th.temp1_max_c != null && t > th.temp1_max_c) {
         breach = true;
-        msg = `Temperatura ${t.toFixed(1)} °C por encima del máximo (${th.temp1_max_c} °C).`;
+        msg = `${sensorLabel}: ${t.toFixed(1)} °C, por encima del máximo configurado (${th.temp1_max_c} °C).`;
       }
       if (breach && device.owner_user_id) {
         const last = th.last_push_temp_breach_at
@@ -171,10 +175,12 @@ Deno.serve(async (req) => {
           const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
           const when = formatEsArDateTime(new Date());
           const pushResult = await sendPushToUser(supabase, device.owner_user_id, {
-            title: `${deviceName}: alarma de temperatura`,
+            title: `${deviceName} · ${sensorLabel}: superó el umbral`,
             body: `${msg}\nDetectado: ${when}`,
             data: { type: 'temp_breach', deviceId: device.id },
             tag: `temp-${device.id}`,
+            navigate: `/alertas?deviceId=${encodeURIComponent(device.id)}`,
+            requireInteraction: true,
           });
           pushDiag = {
             sent: pushResult.sent,

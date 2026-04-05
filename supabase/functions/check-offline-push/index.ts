@@ -13,7 +13,8 @@ const corsHeaders = {
 
 /** Sin lecturas nuevas por este tiempo ⇒ se considera desconectado para el push. */
 const OFFLINE_AFTER_MS = 10 * 60 * 1000;
-const OFFLINE_PUSH_COOLDOWN_MS = 30 * 60 * 1000;
+const MIN_PUSH_COOLDOWN_MS = 60 * 1000;
+const DEFAULT_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -59,7 +60,9 @@ Deno.serve(async (req) => {
 
   const { data: devs, error: devErr } = await supabase
     .from('devices')
-    .select('id, owner_user_id, name, device_thresholds(notifications_enabled, last_push_offline_at)')
+    .select(
+      'id, owner_user_id, name, device_thresholds(notifications_enabled, last_push_offline_at, temp_push_cooldown_ms, offline_push_cooldown_ms)'
+    )
     .eq('active', true);
 
   if (devErr) {
@@ -77,14 +80,31 @@ Deno.serve(async (req) => {
       | {
           notifications_enabled?: boolean;
           last_push_offline_at?: string | null;
+          temp_push_cooldown_ms?: number | null;
+          offline_push_cooldown_ms?: number | null;
         }
       | {
           notifications_enabled?: boolean;
           last_push_offline_at?: string | null;
+          temp_push_cooldown_ms?: number | null;
+          offline_push_cooldown_ms?: number | null;
         }[]
       | null;
     const th = Array.isArray(rawTh) ? rawTh[0] : rawTh;
     if (!th?.notifications_enabled || !d.owner_user_id) continue;
+
+    const offlineRaw = th.offline_push_cooldown_ms;
+    const tempRaw = th.temp_push_cooldown_ms;
+    const chosenMs =
+      typeof offlineRaw === 'number' && Number.isFinite(offlineRaw) && offlineRaw > 0
+        ? offlineRaw
+        : typeof tempRaw === 'number' && Number.isFinite(tempRaw) && tempRaw > 0
+          ? tempRaw
+          : null;
+    const offlinePushCooldownMs =
+      chosenMs != null
+        ? Math.max(MIN_PUSH_COOLDOWN_MS, Math.round(chosenMs))
+        : DEFAULT_PUSH_COOLDOWN_MS;
 
     const lastAt = lastByDevice.get(d.id);
     if (lastAt == null) continue;
@@ -94,7 +114,7 @@ Deno.serve(async (req) => {
     const lastPush = th.last_push_offline_at
       ? new Date(th.last_push_offline_at).getTime()
       : 0;
-    if (now - lastPush <= OFFLINE_PUSH_COOLDOWN_MS) continue;
+    if (now - lastPush <= offlinePushCooldownMs) continue;
 
     const name = typeof d.name === 'string' ? d.name : 'Dispositivo';
     const lastReadingAt = new Date(lastAt);
@@ -106,6 +126,8 @@ Deno.serve(async (req) => {
         `Aviso: ${formatEsArDateTime(avisoAt)}.`,
       data: { type: 'offline', deviceId: d.id },
       tag: `offline-${d.id}`,
+      navigate: `/alertas?deviceId=${encodeURIComponent(d.id as string)}`,
+      requireInteraction: true,
     });
     offlinePushes += r.sent;
     if (r.sent > 0) {

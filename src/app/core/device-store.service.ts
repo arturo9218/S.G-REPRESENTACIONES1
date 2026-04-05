@@ -75,6 +75,7 @@ export interface DeviceNotificationConfigInput {
   tempLowC: number | null;
   tempHighC: number | null;
   tempPushCooldownMs: number | null;
+  offlinePushCooldownMs: number | null;
 }
 
 /** Corrección de temperatura (°C que se suman al valor del ESP antes de guardar; la aplica ingest-reading). */
@@ -213,6 +214,7 @@ export class DeviceStoreService {
         temp1_min_c: 2,
         temp1_max_c: 8,
         temp_push_cooldown_ms: 15 * 60 * 1000,
+        offline_push_cooldown_ms: 15 * 60 * 1000,
         temp1_offset_c: 0,
         temp2_offset_c: 0,
         temp3_offset_c: 0,
@@ -246,6 +248,8 @@ export class DeviceStoreService {
         temp1OffsetC: 0,
         temp2OffsetC: 0,
         temp3OffsetC: 0,
+        tempPushCooldownMs: 15 * 60 * 1000,
+        offlinePushCooldownMs: 15 * 60 * 1000,
       };
 
       this.persistDevices([...this.snapshot.filter((d) => d.id !== id), device]);
@@ -828,6 +832,7 @@ export class DeviceStoreService {
         low: number | null;
         high: number | null;
         cooldownMs: number | null;
+        offlineCooldownMs: number | null;
         o1: number;
         o2: number;
         o3: number;
@@ -837,7 +842,7 @@ export class DeviceStoreService {
       const { data: thData } = await this.auth.client
         .from('device_thresholds')
         .select(
-          'device_id, notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms, temp1_offset_c, temp2_offset_c, temp3_offset_c'
+          'device_id, notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms, offline_push_cooldown_ms, temp1_offset_c, temp2_offset_c, temp3_offset_c'
         )
         .in('device_id', ids);
       for (const th of (thData ?? []) as Record<string, unknown>[]) {
@@ -859,6 +864,11 @@ export class DeviceStoreService {
             typeof th['temp_push_cooldown_ms'] === 'number' &&
             !Number.isNaN(th['temp_push_cooldown_ms'] as number)
               ? Math.max(60 * 1000, Math.round(th['temp_push_cooldown_ms'] as number))
+              : null,
+          offlineCooldownMs:
+            typeof th['offline_push_cooldown_ms'] === 'number' &&
+            !Number.isNaN(th['offline_push_cooldown_ms'] as number)
+              ? Math.max(60 * 1000, Math.round(th['offline_push_cooldown_ms'] as number))
               : null,
           o1: off('temp1_offset_c'),
           o2: off('temp2_offset_c'),
@@ -890,6 +900,12 @@ export class DeviceStoreService {
         tempLowC: th?.low ?? (prev?.tempLowC ?? 2),
         tempHighC: th?.high ?? (prev?.tempHighC ?? 8),
         tempPushCooldownMs: th?.cooldownMs ?? (prev?.tempPushCooldownMs ?? 15 * 60 * 1000),
+        offlinePushCooldownMs:
+          th?.offlineCooldownMs ??
+          th?.cooldownMs ??
+          prev?.offlinePushCooldownMs ??
+          prev?.tempPushCooldownMs ??
+          15 * 60 * 1000,
         cloudSynced: true,
         deviceToken: tokens[rid] ?? prev?.deviceToken,
         sensor1Label:
@@ -1213,7 +1229,7 @@ export class DeviceStoreService {
     let cloudError: string | undefined;
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
       const nowIso = new Date().toISOString();
-      const { error } = await this.auth.client
+        const { error } = await this.auth.client
         .from('device_thresholds')
         .upsert(
           {
@@ -1222,6 +1238,7 @@ export class DeviceStoreService {
             temp1_min_c: low,
             temp1_max_c: high,
             temp_push_cooldown_ms: input.tempPushCooldownMs,
+            offline_push_cooldown_ms: input.offlinePushCooldownMs,
             updated_at: nowIso,
           },
           { onConflict: 'device_id' }
@@ -1239,6 +1256,7 @@ export class DeviceStoreService {
               tempLowC: low,
               tempHighC: high,
               tempPushCooldownMs: input.tempPushCooldownMs,
+              offlinePushCooldownMs: input.offlinePushCooldownMs,
             }
           : d
       )
@@ -1283,6 +1301,8 @@ export class DeviceStoreService {
           temp1_min_c: dev?.tempLowC ?? null,
           temp1_max_c: dev?.tempHighC ?? null,
           temp_push_cooldown_ms: dev?.tempPushCooldownMs ?? 15 * 60 * 1000,
+          offline_push_cooldown_ms:
+            dev?.offlinePushCooldownMs ?? dev?.tempPushCooldownMs ?? 15 * 60 * 1000,
           temp1_offset_c: input.temp1OffsetC,
           temp2_offset_c: input.temp2OffsetC,
           temp3_offset_c: input.temp3OffsetC,

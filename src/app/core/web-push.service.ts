@@ -14,6 +14,17 @@ function uint8ToBase64(buf: ArrayBuffer | null): string {
   return btoa(binary);
 }
 
+function formatPushSubscribeError(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes('push service error') || lower.includes('registration failed')) {
+    return (
+      `${raw} — Probá: abrir el sitio en Chrome o Safari (no dentro de WhatsApp/Instagram). ` +
+      'En iPhone: añadí la PWA a inicio. Verificá que en Vercel esté VAPID_PUBLIC_KEY y coincida con Supabase (mismo par que VAPID_PRIVATE_KEY).'
+    );
+  }
+  return raw;
+}
+
 export type WebPushUiState = 'loading' | 'unsupported' | 'none' | 'active';
 
 @Injectable({
@@ -104,7 +115,7 @@ export class WebPushService {
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return { ok: false, message: msg };
+      return { ok: false, message: formatPushSubscribeError(msg) };
     }
   }
 
