@@ -173,6 +173,17 @@
             </select>
           </label>
           <div class="chart-head__hint">Actualización ~{{ (environment.readingsPollIntervalMs || 5000) / 1000 }}s</div>
+          <span class="chart-head__zoom-hint" *ngIf="hasChartData">
+            Rueda: zoom · Doble clic en el gráfico: todo el rango
+          </span>
+          <button
+            type="button"
+            class="btn btn--ghost chart-zoom-reset"
+            *ngIf="hasChartData && chartZoomIsActive"
+            (click)="resetChartZoom()"
+          >
+            Ver todo el rango
+          </button>
           <button
             type="button"
             class="btn btn--ghost chart-pdf-btn"
@@ -205,7 +216,13 @@
           </div>
         </div>
 
-        <div class="chart__svg-wrap" (mousemove)="onChartMouseMove($event)" (mouseleave)="onChartMouseLeave()">
+        <div
+          class="chart__svg-wrap"
+          #chartSvgWrap
+          (mousemove)="onChartMouseMove($event)"
+          (mouseleave)="onChartMouseLeave()"
+          (dblclick)="resetChartZoom()"
+        >
           <svg class="chart__svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             <defs>
               <linearGradient id="chartFillS1" x1="0" y1="0" x2="0" y2="1">

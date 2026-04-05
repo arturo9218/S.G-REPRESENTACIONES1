@@ -1,4 +1,11 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import {
+  AfterViewInit,
+  Component,
+  ElementRef,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+} from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
@@ -18,7 +25,7 @@ type AnalysisChannel = 'temp1' | 'temp2' | 'both' | 'current';
   templateUrl: './chart-analysis.component.html',
   styleUrls: ['./chart-analysis.component.scss'],
 })
-export class ChartAnalysisComponent implements OnInit, OnDestroy {
+export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit {
   readonly environment = environment;
 
   devices: DashboardDevice[] = [];
@@ -77,6 +84,16 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   private readonly trendDrawPointCap = 420;
 
   private readonly pdfTableMaxRows = 4000;
+
+  /**
+   * Zoom horizontal sobre la serie cargada: 0–1 = fracción del rango temporal [primera, última lectura].
+   * La escala Y usa solo los puntos visibles para mayor “precisión tipo regla”.
+   */
+  chartZoomLo = 0;
+  chartZoomHi = 1;
+
+  @ViewChild('chartSvgWrap') chartSvgWrap?: ElementRef<HTMLElement>;
+  private chartWheelCleanup?: () => void;
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -137,13 +154,28 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     }, 1200);
   }
 
+  ngAfterViewInit(): void {
+    queueMicrotask(() => this.attachChartWheelListener());
+    window.setTimeout(() => this.attachChartWheelListener(), 400);
+  }
+
   ngOnDestroy(): void {
+    this.chartWheelCleanup?.();
+    this.chartWheelCleanup = undefined;
     if (this.remoteLoadTimer != null) {
       clearTimeout(this.remoteLoadTimer);
       this.remoteLoadTimer = null;
     }
     this.subDev?.unsubscribe();
     this.subRead?.unsubscribe();
+  }
+
+  private attachChartWheelListener(): void {
+    const el = this.chartSvgWrap?.nativeElement;
+    if (!el) return;
+    const fn = (e: WheelEvent) => this.onChartWheel(e);
+    el.addEventListener('wheel', fn, { passive: false });
+    this.chartWheelCleanup = () => el.removeEventListener('wheel', fn);
   }
 
   get selectedDevice(): DashboardDevice | null {
@@ -236,7 +268,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     const s = this.chartPointsForDraw();
     const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
     if (!s[idx]) return '';
-    return this.formatChartDateTime(s[idx].at);
+    return this.formatChartDateTime(s[idx].at, this.chartVisibleSpanMs());
   }
 
   get hoverTemp1Label(): string {
@@ -244,7 +276,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     const s = this.chartPointsForDraw();
     const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
     if (!s[idx]) return '—';
-    return `${s[idx].temperatureC.toFixed(1)}°C`;
+    const d = this.tempDecimalsForDisplay();
+    return `${s[idx].temperatureC.toFixed(d)}°C`;
   }
 
   get hoverTemp2Label(): string {
@@ -255,7 +288,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     const filled = this.temp2SeriesForwardFilled(s);
     const t2 = filled[idx];
     if (t2 == null || Number.isNaN(t2)) return '—';
-    return `${t2.toFixed(1)}°C`;
+    const d = this.tempDecimalsForDisplay();
+    return `${t2.toFixed(d)}°C`;
   }
 
   get hoverYCurrent(): number | null {
@@ -309,7 +343,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   }
 
   get avgDeltaLabel(): string {
-    const series = this.chartReadings();
+    const series = this.chartReadingsZoomed();
     if (this.analysisShowsCurrent) {
       const filled = this.currentSeriesForwardFilled(series);
       const n = filled.length;
@@ -368,7 +402,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   /** Min/máx en el rango visible (solo canales visibles según el selector). */
   get chartTempRangeLabel(): string {
-    const series = this.chartReadings();
+    const series = this.chartReadingsZoomed();
     if (!series.length) return '—';
     const parts: string[] = [];
     if (this.showTemp1) {
@@ -401,7 +435,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   }
 
   get chartCurrentRangeLabel(): string {
-    const series = this.chartReadings();
+    const series = this.chartReadingsZoomed();
     const filled = this.currentSeriesForwardFilled(series);
     const vals = filled.filter((x): x is number => x != null && Number.isFinite(x));
     if (!vals.length) return '—';
@@ -417,6 +451,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     this.filterFrom = '';
     this.filterTo = '';
     this.clearRemoteChartState();
+    this.resetChartZoom();
   }
 
   onFilterDayChange(): void {
@@ -425,6 +460,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
       this.filterFrom = '';
       this.filterTo = '';
     }
+    this.resetChartZoom();
     this.scheduleRemoteChartLoad();
   }
 
@@ -433,12 +469,14 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     if (this.filterFrom || this.filterTo) {
       this.filterDay = '';
     }
+    this.resetChartZoom();
     this.scheduleRemoteChartLoad();
   }
 
   onChartDeviceChange(): void {
     this.deviceIdFromUrl = null;
     this.syncSensorLabelsWithSelected();
+    this.resetChartZoom();
     this.scheduleRemoteChartLoad();
   }
 
@@ -480,6 +518,84 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   onChartMouseLeave(): void {
     this.hoverIndex = null;
+  }
+
+  /** Serie temporal tras el zoom (misma base que el gráfico). */
+  private chartReadingsZoomed(): TemperatureReading[] {
+    const full = this.chartReadings();
+    if (full.length < 2) return full;
+    const t0 = new Date(full[0].at).getTime();
+    const t1 = new Date(full[full.length - 1].at).getTime();
+    const span = t1 - t0;
+    if (!Number.isFinite(span) || span <= 0) return full;
+    const ta = t0 + this.chartZoomLo * span;
+    const tb = t0 + this.chartZoomHi * span;
+    const out = full.filter((r) => {
+      const t = new Date(r.at).getTime();
+      return t >= ta && t <= tb;
+    });
+    if (out.length < 2) return full;
+    return out;
+  }
+
+  get chartZoomIsActive(): boolean {
+    return this.chartZoomLo > 0.0005 || this.chartZoomHi < 0.9995;
+  }
+
+  resetChartZoom(): void {
+    this.chartZoomLo = 0;
+    this.chartZoomHi = 1;
+  }
+
+  /**
+   * Rueda: acerca/aleja el rango visible (centrado en el cursor).
+   * deltaY negativo = acercar (más detalle en tiempo y en °C).
+   */
+  onChartWheel(event: WheelEvent): void {
+    if (!this.hasChartData) return;
+    const full = this.chartReadings();
+    if (full.length < 2) return;
+    event.preventDefault();
+    const el = event.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const frac = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+
+    const tMin = new Date(full[0].at).getTime();
+    const tMax = new Date(full[full.length - 1].at).getTime();
+    const span = tMax - tMin;
+    if (!Number.isFinite(span) || span <= 0) return;
+
+    const pos = this.chartZoomLo + frac * (this.chartZoomHi - this.chartZoomLo);
+    const curW = this.chartZoomHi - this.chartZoomLo;
+    const factor = event.deltaY < 0 ? 0.88 : 1.12;
+    let newW = curW * factor;
+    newW = Math.max(1e-5, Math.min(1, newW));
+
+    let newLo = pos - frac * newW;
+    let newHi = pos + (1 - frac) * newW;
+    if (newLo < 0) {
+      newHi -= newLo;
+      newLo = 0;
+    }
+    if (newHi > 1) {
+      newLo -= newHi - 1;
+      newHi = 1;
+    }
+    newLo = Math.max(0, newLo);
+    newHi = Math.min(1, newHi);
+    if (newHi - newLo < 1e-5) return;
+
+    const ta = tMin + newLo * span;
+    const tb = tMin + newHi * span;
+    const count = full.filter((r) => {
+      const t = new Date(r.at).getTime();
+      return t >= ta && t <= tb;
+    }).length;
+    if (count < 2) return;
+
+    this.chartZoomLo = newLo;
+    this.chartZoomHi = newHi;
   }
 
   backToDashboard(): void {
@@ -530,7 +646,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   get chartCurrentLabel1(): string {
     if (!this.showTemp1) return '—';
-    const series = this.chartReadings();
+    const series = this.chartReadingsZoomed();
     const n = series.length;
     if (!n) return '—';
     const v = series[n - 1].temperatureC;
@@ -539,7 +655,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   get chartCurrentLabel2(): string {
     if (!this.showTemp2 || !this.hasSecondSeries) return '—';
-    const series = this.chartReadings();
+    const series = this.chartReadingsZoomed();
     const n = series.length;
     if (!n) return '—';
     const filled = this.temp2SeriesForwardFilled(series);
@@ -550,7 +666,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   get chartLatestCurrentLabel(): string {
     if (!this.analysisShowsCurrent) return '—';
-    const series = this.chartReadings();
+    const series = this.chartReadingsZoomed();
     const filled = this.currentSeriesForwardFilled(series);
     const n = filled.length;
     if (!n) return '—';
@@ -560,7 +676,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   }
 
   private chartValueRange(): { minV: number; maxV: number; span: number } | null {
-    const series = this.chartReadings();
+    const series = this.chartReadingsZoomed();
     if (!series.length) return null;
 
     if (this.analysisShowsCurrent) {
@@ -633,24 +749,44 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     if (!padded) return ['—', '—', '—', '—', '—'];
     const n = 5;
     const labels: string[] = [];
+    const tempDec = this.analysisShowsCurrent ? 0 : this.tempDecimalsForDisplay();
     for (let i = 0; i < n; i++) {
       const ratio = (n - 1 - i) / (n - 1);
       const v = padded.minV + ratio * (padded.maxV - padded.minV);
       if (this.analysisShowsCurrent) {
         labels.push(`${this.formatCurrentAxisTick(v, padded.span)} A`);
       } else {
-        labels.push(`${v.toFixed(1)}°C`);
+        labels.push(`${v.toFixed(tempDec)}°C`);
       }
     }
     return labels;
   }
 
+  /** Decimales en °C según el rango visible (más zoom → más precisión). */
+  private tempDecimalsForDisplay(): number {
+    if (this.analysisShowsCurrent) return 1;
+    const padded = this.chartPaddedBounds();
+    if (!padded) return 1;
+    if (padded.span < 0.4) return 2;
+    if (padded.span < 1.2) return 2;
+    return 1;
+  }
+
+  private chartVisibleSpanMs(): number {
+    const series = this.chartReadingsZoomed();
+    if (series.length < 2) return 86400000;
+    const t0 = new Date(series[0].at).getTime();
+    const t1 = new Date(series[series.length - 1].at).getTime();
+    return Math.max(0, t1 - t0);
+  }
+
   /** Etiquetas de tiempo en el eje X (inicio → fin del rango mostrado). */
   get chartXAxisTickLabels(): string[] {
-    const series = this.chartReadings();
+    const series = this.chartReadingsZoomed();
     if (series.length < 1) return [];
+    const spanMs = this.chartVisibleSpanMs();
     if (series.length === 1) {
-      return [this.formatChartAxisTimeLabel(series[0].at)];
+      return [this.formatChartAxisTimeLabel(series[0].at, spanMs)];
     }
     const t0 = new Date(series[0].at).getTime();
     const t1 = new Date(series[series.length - 1].at).getTime();
@@ -659,19 +795,25 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     for (let i = 0; i < ticks; i++) {
       const ratio = i / (ticks - 1);
       const ms = t0 + ratio * (t1 - t0);
-      labels.push(this.formatChartAxisTimeLabel(new Date(ms).toISOString()));
+      labels.push(this.formatChartAxisTimeLabel(new Date(ms).toISOString(), spanMs));
     }
     return labels;
   }
 
-  private formatChartAxisTimeLabel(iso: string): string {
+  /** Eje X: con zoom fuerte muestra segundos (y milisegundos si el rango es muy corto). */
+  private formatChartAxisTimeLabel(iso: string, spanMs: number): string {
     try {
-      return new Date(iso).toLocaleString('es-AR', {
+      const d = new Date(iso);
+      const opts: Intl.DateTimeFormatOptions = {
         day: '2-digit',
         month: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
-      });
+      };
+      if (spanMs < 48 * 60 * 60 * 1000) {
+        opts.second = '2-digit';
+      }
+      return d.toLocaleString('es-AR', opts);
     } catch {
       return iso;
     }
@@ -733,10 +875,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   /**
    * Puntos que se dibujan: en modo tendencia se deciman para no generar miles de segmentos.
-   * La escala Y sigue usando todas las lecturas (`chartReadings`).
+   * La escala Y usa la serie visible (incluye zoom horizontal).
    */
   chartPointsForDraw(): TemperatureReading[] {
-    const s = this.chartReadings();
+    const s = this.chartReadingsZoomed();
     if (this.chartStylePreset !== 'trend') return s;
     return this.evenSampleReadings(s, this.trendDrawPointCap);
   }
@@ -1254,14 +1396,20 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     }
   }
 
-  private formatChartDateTime(iso: string): string {
+  private formatChartDateTime(iso: string, spanMs?: number): string {
     try {
-      return new Date(iso).toLocaleString('es-AR', {
-        hour: '2-digit',
-        minute: '2-digit',
+      const d = new Date(iso);
+      const span = spanMs ?? 86400000;
+      const opts: Intl.DateTimeFormatOptions = {
         day: '2-digit',
         month: '2-digit',
-      });
+        hour: '2-digit',
+        minute: '2-digit',
+      };
+      if (span < 48 * 60 * 60 * 1000) {
+        opts.second = '2-digit';
+      }
+      return d.toLocaleString('es-AR', opts);
     } catch {
       return iso;
     }

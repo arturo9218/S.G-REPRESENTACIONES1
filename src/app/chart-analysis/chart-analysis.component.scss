@@ -548,6 +548,18 @@ $border: rgba(148, 163, 184, 0.18);
   padding-top: 0.1rem;
 }
 
+.chart-head__zoom-hint {
+  font-size: 0.68rem;
+  color: rgba(148, 163, 184, 0.95);
+  font-weight: 700;
+  max-width: 16rem;
+  line-height: 1.25;
+}
+
+.chart-zoom-reset {
+  font-size: 0.75rem;
+}
+
 .chart-empty {
   margin: 0 0 0.7rem;
   padding: 0.55rem 0.7rem;
