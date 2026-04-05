@@ -200,9 +200,9 @@
         <div class="chart__axis" aria-hidden="true">
           <span class="chart__axis-title chart__axis-title--y" *ngIf="chartStylePreset === 'trend' && !analysisShowsCurrent">Temperatura</span>
           <span class="chart__axis-title chart__axis-title--y" *ngIf="chartStylePreset === 'trend' && analysisShowsCurrent">Corriente (A)</span>
-          <span>{{ chartYMaxLabel }}</span>
-          <span>{{ chartYMidLabel }}</span>
-          <span>{{ chartYMinLabel }}</span>
+          <div class="chart__axis-values">
+            <span *ngFor="let y of chartYAxisLabelsFromTop">{{ y }}</span>
+          </div>
         </div>
 
         <div class="chart__svg-wrap" (mousemove)="onChartMouseMove($event)" (mouseleave)="onChartMouseLeave()">
@@ -229,19 +229,16 @@
 
             <g class="chart__grid" clip-path="url(#chartPlotClip)">
               <line *ngFor="let gy of chartGridYStops" x1="0" [attr.y1]="gy" x2="100" [attr.y2]="gy" />
-              <ng-container *ngIf="chartStylePreset === 'trend'">
-                <line
-                  *ngFor="let gx of chartGridXStops"
-                  [attr.x1]="gx"
-                  y1="8"
-                  [attr.x2]="gx"
-                  y2="92"
-                  class="chart__grid-v"
-                />
-              </ng-container>
+              <line
+                *ngFor="let gx of chartGridXStops"
+                [attr.x1]="gx"
+                y1="8"
+                [attr.x2]="gx"
+                y2="92"
+                class="chart__grid-v"
+              />
             </g>
-            <line class="chart-axis-line" x1="4" y1="8" x2="4" y2="92" />
-            <line class="chart-axis-line" x1="4" y1="92" x2="100" y2="92" />
+            <rect class="chart-plot-frame" x="4" y="8" width="96" height="84" fill="none" />
 
             <g clip-path="url(#chartPlotClip)">
               <ng-container *ngIf="!analysisShowsCurrent">
@@ -443,6 +440,12 @@
             <div class="chart-tooltip__row" *ngIf="showTemp1">{{ sensor1Name }}: <strong>{{ hoverTemp1Label }}</strong></div>
             <div class="chart-tooltip__row" *ngIf="showTemp2">{{ sensor2Name }}: <strong>{{ hoverTemp2Label }}</strong></div>
             <div class="chart-tooltip__row" *ngIf="analysisShowsCurrent">Corriente: <strong>{{ hoverCurrentLabel }}</strong></div>
+          </div>
+        </div>
+        <div class="chart__x-axis" *ngIf="hasChartData && chartXAxisTickLabels.length">
+          <span class="chart__x-axis-spacer" aria-hidden="true"></span>
+          <div class="chart__x-axis-ticks">
+            <span *ngFor="let x of chartXAxisTickLabels" class="chart__x-axis-tick">{{ x }}</span>
           </div>
         </div>
       </div>

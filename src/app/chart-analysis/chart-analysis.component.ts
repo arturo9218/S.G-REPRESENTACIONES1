@@ -67,7 +67,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     { value: 'trend', label: 'Tendencia (rejilla + color por subida/bajada)' },
   ];
 
-  readonly chartGridYStops = [14, 34, 54, 74, 86];
+  /** Líneas horizontales alineadas con las 5 etiquetas del eje Y (8–92 en viewBox). */
+  get chartGridYStops(): number[] {
+    return [8, 29, 50, 71, 92];
+  }
   readonly chartGridXStops = [20, 35, 50, 65, 80];
 
   /** En modo tendencia, decimar puntos para que el SVG sea fluido. */
@@ -624,31 +627,54 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     };
   }
 
-  get chartYMaxLabel(): string {
+  /** Cinco marcas del eje Y (arriba = máx.), alineadas con la rejilla. */
+  get chartYAxisLabelsFromTop(): string[] {
     const padded = this.chartPaddedBounds();
-    if (!padded) return '—';
-    if (this.analysisShowsCurrent) {
-      return `${this.formatCurrentAxisTick(padded.maxV, padded.span)} A`;
+    if (!padded) return ['—', '—', '—', '—', '—'];
+    const n = 5;
+    const labels: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const ratio = (n - 1 - i) / (n - 1);
+      const v = padded.minV + ratio * (padded.maxV - padded.minV);
+      if (this.analysisShowsCurrent) {
+        labels.push(`${this.formatCurrentAxisTick(v, padded.span)} A`);
+      } else {
+        labels.push(`${v.toFixed(1)}°C`);
+      }
     }
-    return `${padded.maxV.toFixed(1)}°C`;
+    return labels;
   }
 
-  get chartYMidLabel(): string {
-    const padded = this.chartPaddedBounds();
-    if (!padded) return '—';
-    if (this.analysisShowsCurrent) {
-      return `${this.formatCurrentAxisTick((padded.minV + padded.maxV) / 2, padded.span)} A`;
+  /** Etiquetas de tiempo en el eje X (inicio → fin del rango mostrado). */
+  get chartXAxisTickLabels(): string[] {
+    const series = this.chartReadings();
+    if (series.length < 1) return [];
+    if (series.length === 1) {
+      return [this.formatChartAxisTimeLabel(series[0].at)];
     }
-    return `${((padded.minV + padded.maxV) / 2).toFixed(1)}°C`;
+    const t0 = new Date(series[0].at).getTime();
+    const t1 = new Date(series[series.length - 1].at).getTime();
+    const ticks = 5;
+    const labels: string[] = [];
+    for (let i = 0; i < ticks; i++) {
+      const ratio = i / (ticks - 1);
+      const ms = t0 + ratio * (t1 - t0);
+      labels.push(this.formatChartAxisTimeLabel(new Date(ms).toISOString()));
+    }
+    return labels;
   }
 
-  get chartYMinLabel(): string {
-    const padded = this.chartPaddedBounds();
-    if (!padded) return '—';
-    if (this.analysisShowsCurrent) {
-      return `${this.formatCurrentAxisTick(padded.minV, padded.span)} A`;
+  private formatChartAxisTimeLabel(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return iso;
     }
-    return `${padded.minV.toFixed(1)}°C`;
   }
 
   private formatCurrentAxisTick(value: number, span: number): string {
