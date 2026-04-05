@@ -119,6 +119,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
    * Al llegar lecturas, los ids pasan a `…-crit`/etc. Sin re-alinear, suena como alerta nueva.
    */
   private readingsHydrationDone = false;
+  /** No pitido del panel (ni notif. del navegador) hasta este instante; cubre carreras al cargar/recargar. */
+  private alarmPanelSilentUntilMs = 0;
   private readonly panelAlertIdsStorageKey = 'sg_panel_alert_ids_v1';
   /** Último pitido del panel (ms); respeta el retardo entre alertas al reabrir la app */
   private readonly panelLastAlarmToneAtStorageKey = 'sg_panel_last_alarm_tone_at_v1';
@@ -163,6 +165,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.alarmPanelSilentUntilMs = Date.now() + 10_000;
     this.syncShellRoute();
     this.routerSub = this.router.events
       .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
@@ -1836,6 +1839,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return Math.max(1, Math.round(value / 60000));
   }
 
+  private shouldPlayPanelAlarmNow(): boolean {
+    return Date.now() >= this.alarmPanelSilentUntilMs;
+  }
+
+  /** Extiende el silencio inicial si llegan lecturas tarde o en varios lotes. */
+  private bumpAlarmPanelSilentGrace(ms: number): void {
+    const until = Date.now() + ms;
+    if (until > this.alarmPanelSilentUntilMs) {
+      this.alarmPanelSilentUntilMs = until;
+    }
+  }
+
   private updateAlarmAccumulator(): void {
     const current = new Set(this.activeAlerts.map((a) => a.id));
 
@@ -1886,6 +1901,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.persistPanelAlertIdsSnapshot(current);
       this.panelAlarmBaselineSeeded = true;
       this.alarmRepeatAnchorDone = true;
+      this.bumpAlarmPanelSilentGrace(5000);
       return;
     }
 
@@ -1909,8 +1925,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (newIds.length > 0) {
       this.alarmEventsCount += newIds.length;
       this.persistAlarmEventsCount();
-      this.playAlarmTone();
-      this.tryBrowserNotification(newIds);
+      if (this.shouldPlayPanelAlarmNow()) {
+        this.playAlarmTone();
+        this.tryBrowserNotification(newIds);
+      }
     }
 
     if (!this.alarmRepeatAnchorDone && this.devices.length > 0) {
@@ -1924,7 +1942,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (current.size > 0) {
       const now = Date.now();
       const cooldownMs = this.panelAlarmRepeatCooldownMs();
-      if (now - this.lastAlarmToneAtMs >= cooldownMs) {
+      if (now - this.lastAlarmToneAtMs >= cooldownMs && this.shouldPlayPanelAlarmNow()) {
         this.playAlarmTone();
       }
     }
