@@ -799,6 +799,7 @@
               <p class="notify-panel__hint">
                 Avisos del sistema (Web Push) aunque la app esté en segundo plano o cerrada: umbrales de temperatura y equipo sin datos.
                 Tenés que pulsar “Activar en este navegador” <strong>en cada dispositivo</strong> (PC y celular por separado). En Android/Chrome aceptá notificaciones del sitio; en iPhone (iOS 16.4+), instalá la PWA en inicio y activá avisos ahí.
+                <strong>Android:</strong> si el aviso llega sin tono, en Ajustes del teléfono abrí notificaciones de Chrome → este sitio → importancia/sonido (muchas veces el canal queda en silencio hasta que lo subís manualmente).
               </p>
               <p class="notify-panel__hint" *ngIf="webPushUiState === 'loading'">Comprobando soporte…</p>
               <p class="notify-panel__hint" *ngIf="webPushUiState === 'unsupported'">
@@ -843,7 +844,8 @@
             <h2 class="card__title card__title--sm">Sonido de alarmas</h2>
             <div class="notify-panel">
               <p class="notify-panel__hint">
-                Tono del pitido cuando hay alertas en el panel (desconectado, temperatura alta/baja). Hacé clic en la página una vez si el navegador bloquea el audio.
+                Pitido <strong>con la página abierta</strong> (alertas en el panel). No es el mismo que el tono del mensaje del sistema cuando llega un push con la app cerrada.
+                Hacé clic en la página una vez si el navegador bloquea el audio. Al volver a la pestaña o abrir la app no se reinicia el pitido repetido solo por haber estado en segundo plano.
               </p>
               <label class="notify-panel__field notify-panel__field--full">
                 <span>Preset</span>

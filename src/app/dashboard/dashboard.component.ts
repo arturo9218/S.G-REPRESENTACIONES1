@@ -1,7 +1,7 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormBuilder, Validators } from '@angular/forms';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
-import { combineLatest, Subscription } from 'rxjs';
+import { combineLatest, fromEvent, Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { AuthService } from '../core/auth.service';
 import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
@@ -71,6 +71,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private subRead: Subscription | null = null;
   private routerSub: Subscription | null = null;
   private routeQuerySub: Subscription | null = null;
+  private visibilitySub: Subscription | null = null;
   /** Evita que queryParamMap pise la selección mientras actualizamos la URL desde el picker */
   private skipQueryParamDeviceSync = false;
   private audioCtx: AudioContext | null = null;
@@ -165,6 +166,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.loadAlarmSoundPreset();
     void this.refreshWebPushUi();
     this.setupAlarmAudioUnlock();
+    /** Al volver a la pestaña/app, el cooldown del pitido repetido no debe dispararse por el tiempo en segundo plano. */
+    this.visibilitySub = fromEvent(document, 'visibilitychange').subscribe(() => {
+      if (document.visibilityState === 'visible') {
+        const now = Date.now();
+        this.lastAlarmToneAtMs = now;
+        this.persistLastAlarmToneAtMs(now);
+      }
+    });
     this.alarmEventsCount = this.loadAlarmEventsCount();
     this.routeQuerySub = combineLatest([
       this.deviceStore.devices$,
@@ -211,6 +220,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subRead?.unsubscribe();
     this.routerSub?.unsubscribe();
     this.routeQuerySub?.unsubscribe();
+    this.visibilitySub?.unsubscribe();
+    this.visibilitySub = null;
   }
 
   private syncShellRoute(): void {
@@ -1831,7 +1842,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
           const arr = JSON.parse(raw) as unknown;
           if (Array.isArray(arr)) {
             this.lastActiveAlertIds = new Set(arr.filter((x) => typeof x === 'string'));
-            this.lastAlarmToneAtMs = this.loadPersistedLastAlarmToneAtOrNow();
+            /** Nueva instancia del panel (p. ej. /dashboard → /configuracion): no arrastrar el cooldown del pitido repetido ni ejecutar repeat en esta misma pasada. */
+            this.lastAlarmToneAtMs = Date.now();
+            this.persistLastAlarmToneAtMs(this.lastAlarmToneAtMs);
+            return;
           } else {
             this.lastActiveAlertIds = new Set(current);
             this.lastAlarmToneAtMs = Date.now();
@@ -1959,23 +1973,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
       localStorage.setItem(this.panelAlertIdsStorageKey, JSON.stringify([...current]));
     } catch {
       /* */
-    }
-  }
-
-  /** Evita lastAlarmToneAtMs=0: si no hay marca, el retardo parece “cumplido” y suena al abrir la app */
-  private loadPersistedLastAlarmToneAtOrNow(): number {
-    try {
-      const raw = localStorage.getItem(this.panelLastAlarmToneAtStorageKey);
-      if (!raw) {
-        return Date.now();
-      }
-      const n = Number.parseInt(raw, 10);
-      if (!Number.isFinite(n) || n <= 0 || n > Date.now()) {
-        return Date.now();
-      }
-      return n;
-    } catch {
-      return Date.now();
     }
   }
 
