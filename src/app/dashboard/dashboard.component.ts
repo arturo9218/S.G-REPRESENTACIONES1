@@ -109,6 +109,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private lastAlarmToneAtMs = 0;
   /** Primera pasada: persistir snapshot sin sonar (evita pitido al recargar con las mismas alertas). */
   private panelAlarmSnapshotInitialized = false;
+  /** Primera hidratación con dispositivos: si no había snapshot, alinear sin pitido (evita “todas nuevas”). */
+  private panelAlarmBaselineSeeded = false;
+  /** Primera pasada con datos: ancla el repeat para no sonar al entrar si el último pitido fue hace mucho. */
+  private alarmRepeatAnchorDone = false;
   private readonly panelAlertIdsStorageKey = 'sg_panel_alert_ids_v1';
   /** Último pitido del panel (ms); respeta el retardo entre alertas al reabrir la app */
   private readonly panelLastAlarmToneAtStorageKey = 'sg_panel_last_alarm_tone_at_v1';
@@ -1851,6 +1855,23 @@ export class DashboardComponent implements OnInit, OnDestroy {
       }
     }
 
+    if (this.devices.length === 0) {
+      return;
+    }
+
+    if (
+      !this.panelAlarmBaselineSeeded &&
+      this.lastActiveAlertIds.size === 0 &&
+      current.size > 0
+    ) {
+      this.panelAlarmBaselineSeeded = true;
+      this.lastActiveAlertIds = new Set(current);
+      this.lastAlarmToneAtMs = Date.now();
+      this.persistLastAlarmToneAtMs(this.lastAlarmToneAtMs);
+      this.persistPanelAlertIdsSnapshot(current);
+      return;
+    }
+
     const newIds: string[] = [];
     for (const id of current) {
       if (!this.lastActiveAlertIds.has(id)) newIds.push(id);
@@ -1861,6 +1882,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.playAlarmTone();
       this.tryBrowserNotification(newIds);
     }
+
+    if (!this.alarmRepeatAnchorDone && this.devices.length > 0) {
+      this.alarmRepeatAnchorDone = true;
+      if (newIds.length === 0) {
+        this.lastAlarmToneAtMs = Date.now();
+        this.persistLastAlarmToneAtMs(this.lastAlarmToneAtMs);
+      }
+    }
+
     if (current.size > 0) {
       const now = Date.now();
       const cooldownMs = this.panelAlarmRepeatCooldownMs();
@@ -1868,8 +1898,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.playAlarmTone();
       }
     }
-    this.lastActiveAlertIds = current;
-    this.persistPanelAlertIdsSnapshot(current);
+
+    const skipPersistEmptyWhileNoReadings =
+      current.size === 0 && this.readings.length === 0 && this.devices.length > 0;
+    if (!skipPersistEmptyWhileNoReadings) {
+      this.lastActiveAlertIds = current;
+      this.persistPanelAlertIdsSnapshot(current);
+    }
   }
 
   /** Retardo de pitido/notificación según tipo de alerta (temp vs desconectado). */

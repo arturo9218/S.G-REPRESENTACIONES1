@@ -37,6 +37,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   sensor2LabelForm = '';
   sensorLabelsSaving = false;
   sensorLabelsFeedback = '';
+  pdfExporting = false;
   hoverIndex: number | null = null;
   filterDay = '';
   filterFrom = '';
@@ -71,6 +72,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
 
   /** En modo tendencia, decimar puntos para que el SVG sea fluido. */
   private readonly trendDrawPointCap = 420;
+
+  private readonly pdfTableMaxRows = 4000;
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -315,29 +318,83 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
       const sign = d >= 0 ? '+' : '';
       return `${sign}${d.toFixed(2)} A`;
     }
-    const last = series.length ? series[series.length - 1].temperatureC : null;
-    const prev = series.length > 1 ? series[series.length - 2].temperatureC : null;
-    if (last == null || prev == null) return '—';
-    const d = last - prev;
-    const sign = d >= 0 ? '+' : '';
-    return `${sign}${d.toFixed(1)}°C`;
+    if (this.showTemp1 && this.showTemp2) {
+      if (series.length < 2) return '—';
+      const last1 = series[series.length - 1].temperatureC;
+      const prev1 = series[series.length - 2].temperatureC;
+      const filled = this.temp2SeriesForwardFilled(series);
+      const last2 = filled[series.length - 1];
+      const prev2 = filled[series.length - 2];
+      const d1 = last1 - prev1;
+      const s1 = d1 >= 0 ? '+' : '';
+      const line1 = `${this.sensor1Name} ${s1}${d1.toFixed(1)}°C`;
+      if (
+        last2 == null ||
+        prev2 == null ||
+        Number.isNaN(last2) ||
+        Number.isNaN(prev2) ||
+        !this.hasSecondSeries
+      ) {
+        return line1;
+      }
+      const d2 = last2 - prev2;
+      const s2 = d2 >= 0 ? '+' : '';
+      return `${line1}\n${this.sensor2Name} ${s2}${d2.toFixed(1)}°C`;
+    }
+    if (this.showTemp1 && !this.showTemp2) {
+      const last = series.length ? series[series.length - 1].temperatureC : null;
+      const prev = series.length > 1 ? series[series.length - 2].temperatureC : null;
+      if (last == null || prev == null) return '—';
+      const d = last - prev;
+      const sign = d >= 0 ? '+' : '';
+      return `${sign}${d.toFixed(1)}°C`;
+    }
+    if (!this.showTemp1 && this.showTemp2) {
+      const filled = this.temp2SeriesForwardFilled(series);
+      const n = filled.length;
+      if (n < 2) return '—';
+      const last = filled[n - 1];
+      const prev = filled[n - 2];
+      if (last == null || prev == null || Number.isNaN(last) || Number.isNaN(prev)) return '—';
+      const d = last - prev;
+      const sign = d >= 0 ? '+' : '';
+      return `${sign}${d.toFixed(1)}°C`;
+    }
+    return '—';
   }
 
-  /** Min/máx en el rango visible (como el resumen lateral del dashboard). */
+  /** Min/máx en el rango visible (solo canales visibles según el selector). */
   get chartTempRangeLabel(): string {
     const series = this.chartReadings();
     if (!series.length) return '—';
-    const t1 = series.map((r) => r.temperatureC);
-    const n1 = this.sensor1Name;
-    let s = `${n1} min ${Math.min(...t1).toFixed(1)} · max ${Math.max(...t1).toFixed(1)}°C`;
-    const t2vals = series
-      .map((r) => r.temp2C)
-      .filter((x): x is number => x != null && !Number.isNaN(x));
-    if (t2vals.length) {
-      const n2 = this.sensor2Name;
-      s += ` · ${n2} min ${Math.min(...t2vals).toFixed(1)} · max ${Math.max(...t2vals).toFixed(1)}°C`;
+    const parts: string[] = [];
+    if (this.showTemp1) {
+      const t1 = series.map((r) => r.temperatureC);
+      parts.push(
+        `${this.sensor1Name} min ${Math.min(...t1).toFixed(1)} · max ${Math.max(...t1).toFixed(1)}°C`
+      );
     }
-    return s;
+    if (this.showTemp2 && this.hasSecondSeries) {
+      const t2vals = series
+        .map((r) => r.temp2C)
+        .filter((x): x is number => x != null && !Number.isNaN(x));
+      if (t2vals.length) {
+        parts.push(
+          `${this.sensor2Name} min ${Math.min(...t2vals).toFixed(1)} · max ${Math.max(...t2vals).toFixed(1)}°C`
+        );
+      }
+    }
+    if (!parts.length) return '—';
+    return parts.length > 1 ? parts.join('\n') : parts[0];
+  }
+
+  /** Δ con dos sensores: mostrar en columna en lugar de una línea larga. */
+  get avgDeltaIsMultiline(): boolean {
+    return (
+      this.analysisChannel === 'both' &&
+      !this.analysisShowsCurrent &&
+      this.avgDeltaLabel.includes('\n')
+    );
   }
 
   get chartCurrentRangeLabel(): string {
@@ -814,6 +871,15 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   }
 
   private chartReadings(): TemperatureReading[] {
+    return this.chartReadingsImpl(true);
+  }
+
+  /** Misma serie que el gráfico, sin tope de puntos (p. ej. exportación PDF). */
+  private chartReadingsUncapped(): TemperatureReading[] {
+    return this.chartReadingsImpl(false);
+  }
+
+  private chartReadingsImpl(applyDisplayCap: boolean): TemperatureReading[] {
     if (!this.selectedDeviceId) return [];
 
     const bounds = this.getEffectiveChartBounds();
@@ -825,18 +891,21 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     if (useRemote) {
       if (this.remoteChartLoading) return [];
       if (this.remoteChartSeries !== null) {
-        return this.capChartPoints(this.remoteChartSeries);
+        const sorted = [...this.remoteChartSeries].sort(
+          (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+        );
+        return applyDisplayCap ? this.capChartPoints(sorted) : sorted;
       }
       if (this.remoteChartError) {
-        return this.chartReadingsLocalFiltered();
+        return this.chartReadingsLocalFiltered(applyDisplayCap);
       }
       return [];
     }
 
-    return this.chartReadingsLocalFiltered();
+    return this.chartReadingsLocalFiltered(applyDisplayCap);
   }
 
-  private chartReadingsLocalFiltered(): TemperatureReading[] {
+  private chartReadingsLocalFiltered(applyDisplayCap = true): TemperatureReading[] {
     if (!this.selectedDeviceId) return [];
     const source = this.readings.filter((r) => r.deviceId === this.selectedDeviceId);
     let filtered = [...source];
@@ -879,7 +948,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
     const sorted = filtered.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
     if (sorted.length) {
       const windowed = this.hasUserDateFilter() ? sorted : sorted.slice(-48);
-      return this.capChartPoints(windowed);
+      return applyDisplayCap ? this.capChartPoints(windowed) : windowed;
     }
 
     if (this.hasUserDateFilter()) {
@@ -1232,6 +1301,198 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy {
   get sensor2Name(): string {
     const d = this.selectedDevice;
     return d?.sensor2Label?.trim() || 'Sensor 2';
+  }
+
+  async downloadAnalysisPdf(event?: Event): Promise<void> {
+    event?.stopPropagation();
+    event?.preventDefault();
+    const deviceId = this.selectedDeviceId;
+    if (!deviceId) {
+      alert('Seleccioná un dispositivo para exportar.');
+      return;
+    }
+    let rows = [...this.chartReadingsUncapped()].sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+    );
+    if (!rows.length) {
+      alert('No hay lecturas en el rango del gráfico. Ajustá filtros o esperá datos.');
+      return;
+    }
+    const rawLen = rows.length;
+    rows = this.evenSamplePdfRows(rows, this.pdfTableMaxRows);
+    let pdfNoteLine = '';
+    if (rawLen > this.pdfTableMaxRows) {
+      pdfNoteLine = `Tabla: muestreo uniforme (${this.pdfTableMaxRows} de ${rawLen} lecturas).`;
+    }
+
+    this.pdfExporting = true;
+    try {
+      const [jspdfMod, { autoTable }] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ]);
+      const JsPDF = jspdfMod.default;
+      const device = this.selectedDevice;
+      const name = device?.name ?? 'dispositivo';
+      const s1 = this.sensor1Name;
+      const s2 = this.sensor2Name;
+      const has2 = rows.some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
+      const hasCurrent = rows.some((r) => effectiveCurrentA(r) != null);
+
+      const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      doc.setFontSize(14);
+      doc.text('SG Monitoreo — análisis (exportación)', 14, 16);
+      doc.setFontSize(10);
+      doc.text(`Dispositivo: ${name}`, 14, 23);
+      doc.setFontSize(8);
+      doc.setTextColor(80);
+      const rangeLine = this.analysisPdfRangeLabel();
+      const ch = this.analysisPdfChannelLabel();
+      let headerY = 28;
+      doc.text(
+        `Generado: ${new Date().toLocaleString('es-AR')} · ${rows.length} filas · ${rangeLine} · Canal: ${ch}`,
+        14,
+        headerY
+      );
+      if (pdfNoteLine) {
+        headerY += 5;
+        doc.text(pdfNoteLine, 14, headerY);
+        headerY += 2;
+      }
+      doc.setTextColor(0);
+
+      const tableStartY = pdfNoteLine ? headerY + 2 : 32;
+
+      const buildHead = (): string[][] => {
+        const cols = ['Fecha y hora'];
+        if (this.analysisShowsCurrent) {
+          if (hasCurrent) cols.push('Corriente (A)');
+        } else if (this.analysisChannel === 'both') {
+          cols.push(`${s1} (°C)`);
+          if (has2) cols.push(`${s2} (°C)`);
+        } else if (this.analysisChannel === 'temp1') {
+          cols.push(`${s1} (°C)`);
+        } else if (this.analysisChannel === 'temp2' && has2) {
+          cols.push(`${s2} (°C)`);
+        } else {
+          cols.push(`${s1} (°C)`);
+        }
+        return [cols];
+      };
+      const head = buildHead();
+      const body: string[][] = rows.map((r) => {
+        const row: string[] = [this.formatPdfDateTime(r.at)];
+        if (this.analysisShowsCurrent) {
+          if (hasCurrent) {
+            const ia = effectiveCurrentA(r);
+            row.push(ia != null && Number.isFinite(ia) ? ia.toFixed(2) : '—');
+          }
+        } else if (this.analysisChannel === 'both') {
+          row.push(r.temperatureC.toFixed(1));
+          if (has2) {
+            row.push(
+              r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C.toFixed(1) : '—'
+            );
+          }
+        } else if (this.analysisChannel === 'temp1') {
+          row.push(r.temperatureC.toFixed(1));
+        } else if (this.analysisChannel === 'temp2' && has2) {
+          row.push(
+            r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C.toFixed(1) : '—'
+          );
+        } else {
+          row.push(r.temperatureC.toFixed(1));
+        }
+        return row;
+      });
+
+      autoTable(doc, {
+        startY: tableStartY,
+        head,
+        body,
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+        alternateRowStyles: { fillColor: [245, 247, 250] },
+        margin: { left: 14, right: 14 },
+      });
+
+      const safe = name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);
+      doc.save(`analisis_${safe}_${this.pdfDateStamp()}.pdf`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      alert(`No se pudo generar el PDF: ${msg}`);
+    } finally {
+      this.pdfExporting = false;
+    }
+  }
+
+  private analysisPdfRangeLabel(): string {
+    if (this.filterDay?.trim()) {
+      return `día ${this.filterDay.trim()}`;
+    }
+    if (this.filterFrom?.trim() || this.filterTo?.trim()) {
+      const a = this.filterFrom?.trim() || '…';
+      const b = this.filterTo?.trim() || '…';
+      return `desde ${a} hasta ${b}`;
+    }
+    if (
+      this.selectedDeviceId &&
+      this.deviceStore.isCloudSyncActive() &&
+      this.deviceStore.isCloudDeviceId(this.selectedDeviceId)
+    ) {
+      return 'últimos 7 días (consulta nube)';
+    }
+    return 'ventana local del gráfico';
+  }
+
+  private analysisPdfChannelLabel(): string {
+    switch (this.analysisChannel) {
+      case 'both':
+        return 'Ambos sensores';
+      case 'temp1':
+        return 'Sensor 1';
+      case 'temp2':
+        return 'Sensor 2';
+      case 'current':
+        return 'Corriente';
+      default:
+        return this.analysisChannel;
+    }
+  }
+
+  private pdfDateStamp(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+  }
+
+  private formatPdfDateTime(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+    } catch {
+      return iso;
+    }
+  }
+
+  private evenSamplePdfRows(sorted: TemperatureReading[], max: number): TemperatureReading[] {
+    if (sorted.length <= max) {
+      return sorted;
+    }
+    const out: TemperatureReading[] = [];
+    const last = sorted.length - 1;
+    for (let i = 0; i < max; i++) {
+      const idx = Math.round((i * last) / (max - 1));
+      out.push(sorted[idx]);
+    }
+    return out;
   }
 
   signOut(): void {

@@ -173,6 +173,14 @@
             </select>
           </label>
           <div class="chart-head__hint">Actualización ~{{ (environment.readingsPollIntervalMs || 5000) / 1000 }}s</div>
+          <button
+            type="button"
+            class="btn btn--ghost chart-pdf-btn"
+            [disabled]="pdfExporting || !selectedDeviceId"
+            (click)="downloadAnalysisPdf($event)"
+          >
+            {{ pdfExporting ? 'Generando PDF…' : 'Descargar PDF' }}
+          </button>
           <button type="button" class="btn btn--ghost chart-full-btn" (click)="toggleChartFullscreen(chartPanel)">
             Pantalla completa
           </button>
@@ -411,6 +419,15 @@
                 vector-effect="non-scaling-stroke"
               />
             </g>
+            <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYTemp2 != null && !analysisShowsCurrent">
+              <circle
+                class="chart-hover-dot chart-hover-dot--s2"
+                [attr.cx]="hoverX"
+                [attr.cy]="hoverYTemp2"
+                r="1.4"
+                vector-effect="non-scaling-stroke"
+              />
+            </g>
             <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYCurrent != null && analysisShowsCurrent">
               <circle
                 class="chart-hover-dot chart-hover-dot--power"
@@ -431,7 +448,16 @@
       </div>
 
       <div class="chart-stats">
-        <span class="chart-stat chart-stat--delta">Δ última: <strong>{{ avgDeltaLabel }}</strong></span>
+        <span
+          class="chart-stat chart-stat--delta"
+          [class.chart-stat--delta-stacked]="avgDeltaIsMultiline"
+        >
+          <ng-container *ngIf="avgDeltaIsMultiline; else deltaInline">
+            <span class="chart-stat__delta-kicker">Δ última</span>
+            <strong class="chart-stat__delta-stack">{{ avgDeltaLabel }}</strong>
+          </ng-container>
+          <ng-template #deltaInline>Δ última: <strong>{{ avgDeltaLabel }}</strong></ng-template>
+        </span>
         <span class="chart-stat" *ngIf="showTemp1">
           {{ sensor1Name }}: <strong>{{ chartCurrentLabel1 }}</strong>
         </span>

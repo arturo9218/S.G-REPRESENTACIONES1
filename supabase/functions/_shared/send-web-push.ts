@@ -65,6 +65,8 @@ export async function sendPushToUser(
     vibrate: [200, 100, 200],
     renotify: Boolean(payload.tag),
     silent: false,
+    /** Pide tono por defecto del canal (Android/Chrome; requiere ngsw parcheado con "sound" en NOTIFICATION_OPTION_NAMES). */
+    sound: 'default',
     requireInteraction: payload.requireInteraction !== false,
   };
   if (payload.tag) {
