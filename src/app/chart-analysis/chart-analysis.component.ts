@@ -93,7 +93,13 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   chartZoomHi = 1;
 
   @ViewChild('chartSvgWrap') chartSvgWrap?: ElementRef<HTMLElement>;
-  private chartWheelCleanup?: () => void;
+  @ViewChild('chartPdfCapture') chartPdfCapture?: ElementRef<HTMLElement>;
+  /** Pellizco (2 dedos): distancia inicial y ventana al empezar el gesto */
+  private pinchStartDist = 0;
+  private pinchStartZoomLo = 0;
+  private pinchStartZoomHi = 0;
+  private pinchCenterFrac = 0.5;
+  private pinchActive = false;
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -155,13 +161,13 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   ngAfterViewInit(): void {
-    queueMicrotask(() => this.attachChartWheelListener());
-    window.setTimeout(() => this.attachChartWheelListener(), 400);
+    queueMicrotask(() => this.attachChartInteractionListeners());
+    window.setTimeout(() => this.attachChartInteractionListeners(), 400);
   }
 
   ngOnDestroy(): void {
-    this.chartWheelCleanup?.();
-    this.chartWheelCleanup = undefined;
+    this.chartInteractionCleanup?.();
+    this.chartInteractionCleanup = undefined;
     if (this.remoteLoadTimer != null) {
       clearTimeout(this.remoteLoadTimer);
       this.remoteLoadTimer = null;
@@ -170,12 +176,166 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.subRead?.unsubscribe();
   }
 
-  private attachChartWheelListener(): void {
+  private chartInteractionCleanup?: () => void;
+
+  private attachChartInteractionListeners(): void {
     const el = this.chartSvgWrap?.nativeElement;
     if (!el) return;
-    const fn = (e: WheelEvent) => this.onChartWheel(e);
-    el.addEventListener('wheel', fn, { passive: false });
-    this.chartWheelCleanup = () => el.removeEventListener('wheel', fn);
+    this.chartInteractionCleanup?.();
+
+    const onWheel = (e: WheelEvent) => this.onChartWheel(e);
+    const onTouchStart = (e: TouchEvent) => this.onChartTouchStart(e);
+    const onTouchMove = (e: TouchEvent) => this.onChartTouchMove(e);
+    const onTouchEnd = (e: TouchEvent) => this.onChartTouchEnd(e);
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd);
+    el.addEventListener('touchcancel', onTouchEnd);
+
+    this.chartInteractionCleanup = () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }
+
+  private static touchDistance(a: Touch, b: Touch): number {
+    const dx = a.clientX - b.clientX;
+    const dy = a.clientY - b.clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  onChartTouchStart(event: TouchEvent): void {
+    if (!this.hasChartData) return;
+    if (event.touches.length === 2) {
+      this.pinchActive = true;
+      const t0 = event.touches[0];
+      const t1 = event.touches[1];
+      this.pinchStartDist = ChartAnalysisComponent.touchDistance(t0, t1);
+      if (this.pinchStartDist < 4) {
+        this.pinchActive = false;
+        return;
+      }
+      this.pinchStartZoomLo = this.chartZoomLo;
+      this.pinchStartZoomHi = this.chartZoomHi;
+      const el = event.currentTarget as HTMLElement;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const cx = (t0.clientX + t1.clientX) / 2;
+      this.pinchCenterFrac = Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
+      event.preventDefault();
+    }
+  }
+
+  onChartTouchMove(event: TouchEvent): void {
+    if (!this.pinchActive || event.touches.length !== 2) return;
+    const t0 = event.touches[0];
+    const t1 = event.touches[1];
+    const d = ChartAnalysisComponent.touchDistance(t0, t1);
+    if (d < 4 || this.pinchStartDist < 4) return;
+
+    const W0 = this.pinchStartZoomHi - this.pinchStartZoomLo;
+    let newW = W0 * (this.pinchStartDist / d);
+    newW = Math.max(1e-5, Math.min(1, newW));
+
+    const pos = this.pinchStartZoomLo + this.pinchCenterFrac * W0;
+    let newLo = pos - this.pinchCenterFrac * newW;
+    let newHi = pos + (1 - this.pinchCenterFrac) * newW;
+    if (newLo < 0) {
+      newHi -= newLo;
+      newLo = 0;
+    }
+    if (newHi > 1) {
+      newLo -= newHi - 1;
+      newHi = 1;
+    }
+    newLo = Math.max(0, newLo);
+    newHi = Math.min(1, newHi);
+    if (newHi - newLo < 1e-5) return;
+
+    const full = this.chartReadings();
+    if (full.length < 2) return;
+    const tMin = new Date(full[0].at).getTime();
+    const tMax = new Date(full[full.length - 1].at).getTime();
+    const span = tMax - tMin;
+    if (!Number.isFinite(span) || span <= 0) return;
+    const ta = tMin + newLo * span;
+    const tb = tMin + newHi * span;
+    const count = full.filter((r) => {
+      const t = new Date(r.at).getTime();
+      return t >= ta && t <= tb;
+    }).length;
+    if (count < 2) return;
+
+    this.chartZoomLo = newLo;
+    this.chartZoomHi = newHi;
+    event.preventDefault();
+  }
+
+  onChartTouchEnd(event: TouchEvent): void {
+    if (event.touches.length < 2) {
+      this.pinchActive = false;
+    }
+  }
+
+  /** Zoom centrado (p. ej. botones en móvil). factor menor que 1 = acercar. */
+  chartZoomStep(factor: number): void {
+    if (!this.hasChartData) return;
+    const curW = this.chartZoomHi - this.chartZoomLo;
+    this.tryApplyChartZoomWindow(curW * factor, 0.5);
+  }
+
+  chartZoomIn(): void {
+    this.chartZoomStep(0.88);
+  }
+
+  chartZoomOut(): void {
+    this.chartZoomStep(1.12);
+  }
+
+  /**
+   * Ajusta el ancho normalizado del rango visible [0,1], anclado en `frac` (0=izq, 1=der).
+   */
+  private tryApplyChartZoomWindow(newW: number, frac: number): boolean {
+    if (!this.hasChartData) return false;
+    const full = this.chartReadings();
+    if (full.length < 2) return false;
+    const tMin = new Date(full[0].at).getTime();
+    const tMax = new Date(full[full.length - 1].at).getTime();
+    const span = tMax - tMin;
+    if (!Number.isFinite(span) || span <= 0) return false;
+
+    const pos = this.chartZoomLo + frac * (this.chartZoomHi - this.chartZoomLo);
+    let w = Math.max(1e-5, Math.min(1, newW));
+    let newLo = pos - frac * w;
+    let newHi = pos + (1 - frac) * w;
+    if (newLo < 0) {
+      newHi -= newLo;
+      newLo = 0;
+    }
+    if (newHi > 1) {
+      newLo -= newHi - 1;
+      newHi = 1;
+    }
+    newLo = Math.max(0, newLo);
+    newHi = Math.min(1, newHi);
+    if (newHi - newLo < 1e-5) return false;
+
+    const ta = tMin + newLo * span;
+    const tb = tMin + newHi * span;
+    const count = full.filter((r) => {
+      const t = new Date(r.at).getTime();
+      return t >= ta && t <= tb;
+    }).length;
+    if (count < 2) return false;
+
+    this.chartZoomLo = newLo;
+    this.chartZoomHi = newHi;
+    return true;
   }
 
   get selectedDevice(): DashboardDevice | null {
@@ -555,47 +715,14 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     if (!this.hasChartData) return;
     const full = this.chartReadings();
     if (full.length < 2) return;
-    event.preventDefault();
     const el = event.currentTarget as HTMLElement;
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0) return;
     const frac = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-
-    const tMin = new Date(full[0].at).getTime();
-    const tMax = new Date(full[full.length - 1].at).getTime();
-    const span = tMax - tMin;
-    if (!Number.isFinite(span) || span <= 0) return;
-
-    const pos = this.chartZoomLo + frac * (this.chartZoomHi - this.chartZoomLo);
     const curW = this.chartZoomHi - this.chartZoomLo;
     const factor = event.deltaY < 0 ? 0.88 : 1.12;
-    let newW = curW * factor;
-    newW = Math.max(1e-5, Math.min(1, newW));
-
-    let newLo = pos - frac * newW;
-    let newHi = pos + (1 - frac) * newW;
-    if (newLo < 0) {
-      newHi -= newLo;
-      newLo = 0;
-    }
-    if (newHi > 1) {
-      newLo -= newHi - 1;
-      newHi = 1;
-    }
-    newLo = Math.max(0, newLo);
-    newHi = Math.min(1, newHi);
-    if (newHi - newLo < 1e-5) return;
-
-    const ta = tMin + newLo * span;
-    const tb = tMin + newHi * span;
-    const count = full.filter((r) => {
-      const t = new Date(r.at).getTime();
-      return t >= ta && t <= tb;
-    }).length;
-    if (count < 2) return;
-
-    this.chartZoomLo = newLo;
-    this.chartZoomHi = newHi;
+    if (!this.tryApplyChartZoomWindow(curW * factor, frac)) return;
+    event.preventDefault();
   }
 
   backToDashboard(): void {
@@ -1477,6 +1604,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     return d?.sensor2Label?.trim() || 'Sensor 2';
   }
 
+  private delayPdf(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
   async downloadAnalysisPdf(event?: Event): Promise<void> {
     event?.stopPropagation();
     event?.preventDefault();
@@ -1500,6 +1631,37 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     }
 
     this.pdfExporting = true;
+    this.hoverIndex = null;
+    await this.delayPdf(60);
+
+    let chartImgData: string | null = null;
+    let chartImgW = 0;
+    let chartImgH = 0;
+    const captureEl = this.chartPdfCapture?.nativeElement;
+    if (captureEl && this.hasChartData) {
+      try {
+        const html2canvas = (await import('html2canvas')).default;
+        const canvas = await html2canvas(captureEl, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#0f172a',
+          ignoreElements: (node: Element) => {
+            if (!(node instanceof HTMLElement)) return false;
+            return (
+              node.classList.contains('chart-head__actions') ||
+              node.classList.contains('chart-tooltip')
+            );
+          },
+        });
+        chartImgData = canvas.toDataURL('image/png');
+        chartImgW = canvas.width;
+        chartImgH = canvas.height;
+      } catch {
+        chartImgData = null;
+      }
+    }
+
     try {
       const [jspdfMod, { autoTable }] = await Promise.all([
         import('jspdf'),
@@ -1514,6 +1676,14 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       const hasCurrent = rows.some((r) => effectiveCurrentA(r) != null);
 
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 14;
+
+      const styleLabel =
+        this.chartStyleOptions.find((o) => o.value === this.chartStylePreset)?.label ??
+        this.chartStylePreset;
+
       doc.setFontSize(14);
       doc.text('SG Monitoreo — análisis (exportación)', 14, 16);
       doc.setFontSize(10);
@@ -1524,7 +1694,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       const ch = this.analysisPdfChannelLabel();
       let headerY = 28;
       doc.text(
-        `Generado: ${new Date().toLocaleString('es-AR')} · ${rows.length} filas · ${rangeLine} · Canal: ${ch}`,
+        `Generado: ${new Date().toLocaleString('es-AR')} · ${rows.length} filas · ${rangeLine} · Canal: ${ch} · Estilo: ${styleLabel}`,
         14,
         headerY
       );
@@ -1535,7 +1705,35 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       }
       doc.setTextColor(0);
 
-      const tableStartY = pdfNoteLine ? headerY + 2 : 32;
+      let tableStartY = pdfNoteLine ? headerY + 4 : 34;
+
+      if (chartImgData && chartImgW > 0 && chartImgH > 0) {
+        doc.setFontSize(9);
+        doc.text('Gráfico (misma vista que en pantalla, canal y zoom incluidos)', 14, tableStartY);
+        tableStartY += 5;
+        const maxW = pageW - 2 * margin;
+        let dispW = maxW;
+        let dispH = (chartImgH * dispW) / chartImgW;
+        const room = pageH - tableStartY - 18;
+        if (dispH > room && room > 25) {
+          const r = room / dispH;
+          dispH *= r;
+          dispW *= r;
+        }
+        doc.addImage(chartImgData, 'PNG', margin, tableStartY, dispW, dispH);
+        tableStartY += dispH + 8;
+      }
+
+      if (tableStartY > pageH - 45) {
+        doc.addPage();
+        tableStartY = 18;
+      }
+
+      doc.setFontSize(8);
+      doc.setTextColor(80);
+      doc.text('Tabla de valores numéricos', 14, tableStartY);
+      doc.setTextColor(0);
+      tableStartY += 4;
 
       const buildHead = (): string[][] => {
         const cols = ['Fecha y hora'];

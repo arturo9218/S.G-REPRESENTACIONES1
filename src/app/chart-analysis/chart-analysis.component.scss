@@ -552,8 +552,22 @@ $border: rgba(148, 163, 184, 0.18);
   font-size: 0.68rem;
   color: rgba(148, 163, 184, 0.95);
   font-weight: 700;
-  max-width: 16rem;
+  max-width: 18rem;
   line-height: 1.25;
+}
+
+.chart-head__zoom-btns {
+  display: inline-flex;
+  gap: 0.2rem;
+  align-items: center;
+}
+
+.chart-zoom-nudge {
+  min-width: 2.25rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 1.1rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .chart-zoom-reset {
@@ -694,6 +708,8 @@ $border: rgba(148, 163, 184, 0.18);
   min-height: clamp(200px, 36dvh, 420px);
   height: clamp(240px, 42dvh, 640px);
   max-height: min(78dvh, 820px);
+  /* Scroll vertical con un dedo; el pellizco lo maneja el componente (touchmove). */
+  touch-action: pan-y;
 }
 
 .panel--chart:fullscreen .chart__svg-wrap {

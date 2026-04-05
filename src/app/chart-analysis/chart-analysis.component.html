@@ -145,6 +145,7 @@
       [class.panel--chart-style-technical]="chartStylePreset === 'technical'"
       [class.panel--chart-style-trend]="chartStylePreset === 'trend'"
     >
+      <div class="chart-pdf-capture" #chartPdfCapture>
       <div class="chart-head">
         <div class="chart-head__legend">
           <span class="legend-item" *ngIf="showTemp1">
@@ -174,8 +175,16 @@
           </label>
           <div class="chart-head__hint">Actualización ~{{ (environment.readingsPollIntervalMs || 5000) / 1000 }}s</div>
           <span class="chart-head__zoom-hint" *ngIf="hasChartData">
-            Rueda: zoom · Doble clic en el gráfico: todo el rango
+            PC: rueda · Móvil: pellizco 2 dedos o +/− · Doble clic: ver todo
           </span>
+          <div class="chart-head__zoom-btns" *ngIf="hasChartData">
+            <button type="button" class="btn btn--ghost chart-zoom-nudge" (click)="chartZoomIn()" title="Acercar">
+              +
+            </button>
+            <button type="button" class="btn btn--ghost chart-zoom-nudge" (click)="chartZoomOut()" title="Alejar">
+              −
+            </button>
+          </div>
           <button
             type="button"
             class="btn btn--ghost chart-zoom-reset"
@@ -488,6 +497,7 @@
           Corriente: <strong>{{ chartLatestCurrentLabel }}</strong>
         </span>
         <span class="chart-stat chart-stat--range">{{ chartSideRangeLabel }}</span>
+      </div>
       </div>
     </div>
   </section>
