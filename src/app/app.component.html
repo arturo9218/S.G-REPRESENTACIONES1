@@ -1,5 +1,7 @@
 <div class="app-update-banner" *ngIf="updateAvailable" role="status">
-  <span class="app-update-banner__text">Hay una versión nueva. Actualizá para ver los últimos cambios.</span>
+  <span class="app-update-banner__text">
+    Hay una versión nueva (avisamos con un tono breve). Actualizá para ver los últimos cambios. Si ya diste permiso de notificaciones, también verás un aviso del sistema.
+  </span>
   <div class="app-update-banner__actions">
     <button type="button" class="app-update-banner__btn app-update-banner__btn--primary" (click)="activateNewVersion()">
       Actualizar ahora

@@ -114,6 +114,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private panelAlarmBaselineSeeded = false;
   /** Primera pasada con datos: ancla el repeat para no sonar al entrar si el último pitido fue hace mucho. */
   private alarmRepeatAnchorDone = false;
+  /**
+   * Tras recargar, la primera emisión suele ser con readings=[] → todos "offline" (ids `…-offline`).
+   * Al llegar lecturas, los ids pasan a `…-crit`/etc. Sin re-alinear, suena como alerta nueva.
+   */
+  private readingsHydrationDone = false;
   private readonly panelAlertIdsStorageKey = 'sg_panel_alert_ids_v1';
   /** Último pitido del panel (ms); respeta el retardo entre alertas al reabrir la app */
   private readonly panelLastAlarmToneAtStorageKey = 'sg_panel_last_alarm_tone_at_v1';
@@ -1870,6 +1875,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
 
     if (this.devices.length === 0) {
+      return;
+    }
+
+    if (!this.readingsHydrationDone && this.readings.length > 0) {
+      this.readingsHydrationDone = true;
+      this.lastActiveAlertIds = new Set(current);
+      this.lastAlarmToneAtMs = Date.now();
+      this.persistLastAlarmToneAtMs(this.lastAlarmToneAtMs);
+      this.persistPanelAlertIdsSnapshot(current);
+      this.panelAlarmBaselineSeeded = true;
+      this.alarmRepeatAnchorDone = true;
       return;
     }
 
