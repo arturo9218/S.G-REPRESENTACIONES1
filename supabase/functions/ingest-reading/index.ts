@@ -163,15 +163,19 @@ Deno.serve(async (req) => {
         msg = `${sensorLabel}: ${t.toFixed(1)} °C, por encima del máximo configurado (${th.temp1_max_c} °C).`;
       }
       if (breach && device.owner_user_id) {
-        const last = th.last_push_temp_breach_at
+        const lastMs = th.last_push_temp_breach_at
           ? new Date(th.last_push_temp_breach_at).getTime()
-          : 0;
+          : null;
         const configuredCooldown =
           typeof th.temp_push_cooldown_ms === 'number' &&
           Number.isFinite(th.temp_push_cooldown_ms)
             ? Math.max(MIN_TEMP_PUSH_COOLDOWN_MS, Math.round(th.temp_push_cooldown_ms))
             : TEMP_PUSH_COOLDOWN_MS;
-        if (Date.now() - last > configuredCooldown) {
+        const now = Date.now();
+        // Antes: last=0 si null ⇒ Date.now()-0 siempre > cooldown ⇒ reintento cada lectura.
+        if (lastMs != null && now - lastMs <= configuredCooldown) {
+          // Aún en retardo respecto al último aviso (o intento).
+        } else {
           const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
           const when = formatEsArDateTime(new Date());
           const pushResult = await sendPushToUser(supabase, device.owner_user_id, {
@@ -187,14 +191,13 @@ Deno.serve(async (req) => {
             skipped: pushResult.skipped,
             lastError: pushResult.lastError,
           };
-          // Solo aplicar cooldown si al menos un push llegó al navegador (evita “silencio” + bloqueo 15–30 min).
-          if (pushResult.sent > 0) {
-            await supabase
-              .from('device_thresholds')
-              .update({ last_push_temp_breach_at: new Date().toISOString() })
-              .eq('device_id', device.id);
-          } else {
-            console.warn('[ingest-reading] alarma temp sin push enviado:', pushResult);
+          // Siempre marcar último intento para respetar el retardo aunque falle Web Push (VAPID, sin suscripción, etc.).
+          await supabase
+            .from('device_thresholds')
+            .update({ last_push_temp_breach_at: new Date().toISOString() })
+            .eq('device_id', device.id);
+          if (pushResult.sent === 0) {
+            console.warn('[ingest-reading] alarma temp sin push entregado:', pushResult);
           }
         }
       }

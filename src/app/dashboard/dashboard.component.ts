@@ -1922,13 +1922,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
     for (const id of current) {
       if (!this.lastActiveAlertIds.has(id)) newIds.push(id);
     }
-    if (newIds.length > 0) {
+    if (newIds.length > 0 && this.shouldPlayPanelAlarmNow()) {
       this.alarmEventsCount += newIds.length;
       this.persistAlarmEventsCount();
-      if (this.shouldPlayPanelAlarmNow()) {
-        this.playAlarmTone();
-        this.tryBrowserNotification(newIds);
-      }
+      this.playAlarmTone();
+      this.tryBrowserNotification(newIds);
     }
 
     if (!this.alarmRepeatAnchorDone && this.devices.length > 0) {

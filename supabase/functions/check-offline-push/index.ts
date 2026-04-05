@@ -111,10 +111,11 @@ Deno.serve(async (req) => {
 
     if (now - lastAt <= OFFLINE_AFTER_MS) continue;
 
-    const lastPush = th.last_push_offline_at
+    const lastPushMs = th.last_push_offline_at
       ? new Date(th.last_push_offline_at).getTime()
-      : 0;
-    if (now - lastPush <= offlinePushCooldownMs) continue;
+      : null;
+    // Antes: lastPush=0 si null ⇒ now-0 > cooldown siempre ⇒ reintento cada cron.
+    if (lastPushMs != null && now - lastPushMs <= offlinePushCooldownMs) continue;
 
     const name = typeof d.name === 'string' ? d.name : 'Dispositivo';
     const lastReadingAt = new Date(lastAt);
@@ -130,13 +131,12 @@ Deno.serve(async (req) => {
       requireInteraction: true,
     });
     offlinePushes += r.sent;
-    if (r.sent > 0) {
-      await supabase
-        .from('device_thresholds')
-        .update({ last_push_offline_at: new Date().toISOString() })
-        .eq('device_id', d.id);
-    } else {
-      console.warn('[check-offline-push] offline push no enviado:', d.id, r);
+    await supabase
+      .from('device_thresholds')
+      .update({ last_push_offline_at: new Date().toISOString() })
+      .eq('device_id', d.id);
+    if (r.sent === 0) {
+      console.warn('[check-offline-push] offline push no entregado:', d.id, r);
     }
   }
 
