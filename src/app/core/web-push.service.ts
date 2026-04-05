@@ -18,11 +18,34 @@ function formatPushSubscribeError(raw: string): string {
   const lower = raw.toLowerCase();
   if (lower.includes('push service error') || lower.includes('registration failed')) {
     return (
-      `${raw} — Probá: abrir el sitio en Chrome o Safari (no dentro de WhatsApp/Instagram). ` +
-      'En iPhone: añadí la PWA a inicio. Verificá que en Vercel esté VAPID_PUBLIC_KEY y coincida con Supabase (mismo par que VAPID_PRIVATE_KEY).'
+      `${raw} — Suele ser red inestable o datos móviles limitando el registro con Google (FCM). ` +
+      'Activá las notificaciones conectado a Wi‑Fi (una vez alcanza; después suelen llegar también con datos). ' +
+      'Desactivá ahorro de datos / VPN, mejor señal 4G o probá de nuevo. ' +
+      'Si con Wi‑Fi tampoco funciona, recién ahí revisá VAPID en Vercel y Supabase (mismo par de claves). ' +
+      'Chrome/Safari directo (no WebView de WhatsApp). iPhone: PWA en inicio (iOS 16.4+).'
     );
   }
   return raw;
+}
+
+/** Reintenta registro FCM ante cortes breves de red (típico en 4G). */
+async function requestSubscriptionWithRetry(
+  swPush: SwPush,
+  serverPublicKey: string,
+  maxAttempts = 3
+): Promise<PushSubscription> {
+  let last: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await swPush.requestSubscription({ serverPublicKey });
+    } catch (e) {
+      last = e;
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 800 * attempt));
+      }
+    }
+  }
+  throw last;
 }
 
 export type WebPushUiState = 'loading' | 'unsupported' | 'none' | 'active';
@@ -92,7 +115,7 @@ export class WebPushService {
       }
     }
     try {
-      const sub = await this.swPush.requestSubscription({ serverPublicKey: pk });
+      const sub = await requestSubscriptionWithRetry(this.swPush, pk);
       const p256dh = uint8ToBase64(sub.getKey('p256dh'));
       const auth = uint8ToBase64(sub.getKey('auth'));
       const { error } = await this.auth.client.from('push_subscriptions').upsert(
