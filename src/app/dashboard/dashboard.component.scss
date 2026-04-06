@@ -204,34 +204,6 @@ $border: rgba(148, 163, 184, 0.18);
   max-width: 48rem;
 }
 
-.onboarding-tip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.65rem 1rem;
-  margin-bottom: 1rem;
-  padding: 0.75rem 1rem;
-  border-radius: 12px;
-  border: 1px solid rgba(59, 130, 246, 0.28);
-  background: rgba(30, 58, 138, 0.22);
-}
-
-.onboarding-tip__text {
-  margin: 0;
-  flex: 1;
-  min-width: 0;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: #e2e8f0;
-}
-
-.onboarding-tip__btn {
-  flex-shrink: 0;
-  font-size: 0.78rem;
-  padding: 0.4rem 0.75rem;
-}
-
 .topbar__left {
   display: flex;
   align-items: center;
@@ -576,6 +548,13 @@ $border: rgba(148, 163, 184, 0.18);
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+}
+
+/* En móvil/tablet la grilla pasa a 1 columna: esta tarjeta repite lo de las tarjetas de dispositivo. */
+@media (max-width: 1024px) {
+  .card--telemetry-sidebar {
+    display: none;
+  }
 }
 
 .grid-main__left {

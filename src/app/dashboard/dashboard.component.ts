@@ -201,7 +201,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
     });
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
       this.devices = list;
-      this.maybeShowOnboarding(list);
       if (this.selectedDeviceId && !list.some((d) => d.id === this.selectedDeviceId)) {
         this.selectDevice(list[0]?.id ?? null, false);
         return;
@@ -257,10 +256,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.devices.length > 0;
   }
 
-  /** Consejos breves la primera vez que hay dispositivos (PWA instalada). */
-  showOnboardingBanner = false;
-  private static readonly onboardingLsKey = 'sg_onboarding_seen_v1';
-
   /** Última marca de tiempo entre todas las lecturas cargadas (referencia de frescura). */
   get lastDataRefreshLabel(): string {
     if (!this.readings.length) return '';
@@ -276,19 +271,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
       hour: '2-digit',
       minute: '2-digit',
     });
-  }
-
-  dismissOnboarding(): void {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(DashboardComponent.onboardingLsKey, '1');
-    }
-    this.showOnboardingBanner = false;
-  }
-
-  private maybeShowOnboarding(list: DashboardDevice[]): void {
-    if (typeof localStorage === 'undefined') return;
-    if (localStorage.getItem(DashboardComponent.onboardingLsKey)) return;
-    if (list.length > 0) this.showOnboardingBanner = true;
   }
 
   get filteredDevices(): DashboardDevice[] {

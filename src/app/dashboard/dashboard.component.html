@@ -110,15 +110,6 @@
     </div>
 
     <div class="shell__content" *ngIf="hasDevices; else emptyState">
-      <div class="onboarding-tip" *ngIf="showOnboardingBanner" role="region" aria-label="Consejos">
-        <p class="onboarding-tip__text">
-          <strong>Consejo:</strong> en <strong>Ajustes</strong> podés umbrales y nombres de sensores; en
-          <strong>Dispositivos</strong> ves el estado de cada equipo. Los datos se actualizan solos con conexión.
-        </p>
-        <button type="button" class="btn btn--ghost onboarding-tip__btn" (click)="dismissOnboarding()">
-          Entendido
-        </button>
-      </div>
       <ng-container *ngIf="shellRoute !== 'settings'">
       <section id="section-kpi" class="kpi-row" aria-label="Resumen">
         <article class="kpi-card">
@@ -597,7 +588,7 @@
             </ng-template>
           </article>
 
-          <article class="card">
+          <article class="card card--telemetry-sidebar">
             <h2 class="card__title card__title--sm">Lectura actual (multi-sensor)</h2>
             <div class="telemetry" *ngIf="selectedTelemetry as t; else noTelemetry">
               <div class="telemetry__dual" *ngIf="hasDualTelemetry(t)">
