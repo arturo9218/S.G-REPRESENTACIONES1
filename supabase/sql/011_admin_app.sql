@@ -1,6 +1,3 @@
--- Políticas de administrador (is_app_admin). Tras 012_admin_emails.sql la función usa la tabla admin_emails.
--- Ejecutar en Supabase SQL Editor después de los scripts anteriores.
---
 -- Permite leer/modificar todos los dispositivos, lecturas y umbrales si el JWT
 -- coincide con el email de administrador (sin guardar contraseñas en la DB).
 
@@ -46,8 +43,11 @@ create policy "admin_manage_thresholds"
   using (public.is_app_admin())
   with check (public.is_app_admin());
 
--- RPC gráfico: permitir admin además del dueño del equipo
-create or replace function public.get_device_readings_chart(
+-- RPC gráfico: admin o dueño. Misma firma de retorno que 005_current_a.sql (read_at, temp1, temp2, current_a).
+-- Hay que DROP si antes existía otra variante (3 columnas vs 4); Postgres no permite cambiar el tipo de retorno con CREATE OR REPLACE.
+drop function if exists public.get_device_readings_chart(uuid, timestamptz, timestamptz) cascade;
+
+create function public.get_device_readings_chart(
   p_device_id uuid,
   p_from timestamptz,
   p_to timestamptz
@@ -55,7 +55,8 @@ create or replace function public.get_device_readings_chart(
 returns table (
   read_at timestamptz,
   temp1_c double precision,
-  temp2_c double precision
+  temp2_c double precision,
+  current_a double precision
 )
 language plpgsql
 stable
@@ -92,7 +93,8 @@ begin
     return query
       select dr.created_at,
              dr.temp1_c,
-             dr.temp2_c
+             dr.temp2_c,
+             dr.current_a
       from public.device_readings dr
       where dr.device_id = p_device_id
         and dr.created_at >= p_from
@@ -106,7 +108,8 @@ begin
     return query
       select date_trunc('hour', dr.created_at) as read_at,
              avg(dr.temp1_c)::double precision,
-             avg(dr.temp2_c)::double precision
+             avg(dr.temp2_c)::double precision,
+             avg(dr.current_a)::double precision
       from public.device_readings dr
       where dr.device_id = p_device_id
         and dr.created_at >= p_from
@@ -119,7 +122,8 @@ begin
   return query
     select date_trunc('day', dr.created_at) as read_at,
            avg(dr.temp1_c)::double precision,
-           avg(dr.temp2_c)::double precision
+           avg(dr.temp2_c)::double precision,
+           avg(dr.current_a)::double precision
     from public.device_readings dr
     where dr.device_id = p_device_id
       and dr.created_at >= p_from
@@ -131,4 +135,9 @@ $$;
 
 grant execute on function public.get_device_readings_chart(uuid, timestamptz, timestamptz) to authenticated;
 
+revoke execute on function public.get_device_readings_chart(uuid, timestamptz, timestamptz) from public;
+
 notify pgrst, 'reload schema';
+-- Políticas de administrador (is_app_admin). Tras 012_admin_emails.sql la función usa la tabla admin_emails.
+-- Ejecutar en Supabase SQL Editor después de los scripts anteriores.
+--
