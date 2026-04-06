@@ -1,7 +1,7 @@
 {
   "name": "SG Monitoreo",
   "short_name": "SG Monitor",
-  "description": "Monitoreo de temperatura y alertas en tiempo real.",
+  "description": "Monitoreo de temperatura y alertas. En el móvil: menú del navegador → Instalar app o Añadir a pantalla de inicio.",
   "display": "standalone",
   "start_url": "/",
   "scope": "/",

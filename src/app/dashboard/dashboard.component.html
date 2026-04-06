@@ -461,11 +461,11 @@
               </header>
               <div class="device-card__head-line" aria-hidden="true"></div>
               <div
-                class="device-card__glass"
-                [class.device-card__glass--pending]="d.temperatureC == null && d.temperature2C == null"
+                class="device-card__temps"
+                [class.device-card__temps--pending]="d.temperatureC == null && d.temperature2C == null"
               >
                 <ng-container *ngIf="d.temperatureC != null && d.temperature2C != null; else singleOrEmpty">
-                  <div class="device-card__glass-inner">
+                  <div class="device-card__temps-inner">
                     <div class="device-card__sensor-col">
                       <span class="device-card__sensor-label">{{ d.sensor1Label || 'Sensor 1' }}</span>
                       <span class="device-card__sensor-value">{{ formatTempCard(d.temperatureC) }}</span>
@@ -510,7 +510,7 @@
                 </ng-container>
                 <ng-template #singleOrEmpty>
                   <ng-container *ngIf="d.temperatureC != null || d.temperature2C != null; else noTemp">
-                    <div class="device-card__glass-inner device-card__glass-inner--single">
+                    <div class="device-card__temps-inner device-card__temps-inner--single">
                       <span class="device-card__sensor-label">{{ deviceFirstSensorLabel(d) }}</span>
                       <span class="device-card__sensor-value">{{ formatTempCard(deviceFirstTempC(d)) }}</span>
                       <div class="device-card__sensor-foot">
@@ -533,7 +533,7 @@
                   </ng-container>
                 </ng-template>
                 <ng-template #noTemp>
-                  <div class="device-card__glass-inner device-card__glass-inner--empty">
+                  <div class="device-card__temps-inner device-card__temps-inner--empty">
                     <span class="device-card__sensor-value device-card__sensor-value--muted">Sin lectura</span>
                     <span class="device-card__sensor-label device-card__sensor-label--muted">Esperando datos del dispositivo</span>
                   </div>
@@ -582,7 +582,7 @@
             </ng-template>
           </article>
 
-          <article class="card card--telemetry-glass">
+          <article class="card">
             <h2 class="card__title card__title--sm">Lectura actual (multi-sensor)</h2>
             <div class="telemetry" *ngIf="selectedTelemetry as t; else noTelemetry">
               <div class="telemetry__dual" *ngIf="hasDualTelemetry(t)">
