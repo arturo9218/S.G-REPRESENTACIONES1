@@ -3,6 +3,7 @@ import { SwUpdate, VersionReadyEvent } from '@angular/service-worker';
 import { Subscription, fromEvent, interval } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { environment } from '../environments/environment';
+import { ConnectivityService } from './core/connectivity.service';
 
 @Component({
   selector: 'app-root',
@@ -13,13 +14,25 @@ export class AppComponent implements OnInit, OnDestroy {
   /** Hay build nuevo en el servidor; el SW ya lo descargó y puede activarse. */
   updateAvailable = false;
 
+  /** Conexión a internet (navegador / PWA). */
+  online = true;
+
   private versionSub?: Subscription;
   private pollSub?: Subscription;
   private visSub?: Subscription;
+  private connSub?: Subscription;
 
-  constructor(private readonly swUpdate: SwUpdate) {}
+  constructor(
+    private readonly swUpdate: SwUpdate,
+    private readonly connectivity: ConnectivityService
+  ) {}
 
   ngOnInit(): void {
+    this.online = this.connectivity.isOnline;
+    this.connSub = this.connectivity.online$.subscribe((v) => {
+      this.online = v;
+    });
+
     if (!environment.production || !this.swUpdate.isEnabled) {
       return;
     }
@@ -51,9 +64,17 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.connSub?.unsubscribe();
     this.versionSub?.unsubscribe();
     this.pollSub?.unsubscribe();
     this.visSub?.unsubscribe();
+  }
+
+  /** Recarga la app tras recuperar conexión o para reintentar peticiones fallidas. */
+  reloadApp(): void {
+    if (typeof location !== 'undefined') {
+      location.reload();
+    }
   }
 
   dismissUpdatePrompt(): void {

@@ -1,0 +1,14 @@
+---
+description: Usuarios con app instalada (PWA); contexto de producto y copy
+alwaysApply: true
+---
+
+# App instalada (PWA)
+
+- Los usuarios **ya tienen la app instalada** en el celular o escritorio (PWA `display: standalone`, service worker). No es el caso típico de alguien que “entra una vez al sitio por curiosidad”.
+- **Copy y ayudas en pantalla:** priorizar mensajes para quien **usa la app a diario** (estados vacíos, errores, configuración). Evitar tutoriales que asuman “primera visita en el navegador” salvo en flujos realmente nuevos (registro, primer dispositivo).
+- **Instalar / añadir a inicio:** mencionarlo solo donde aplique (nuevo usuario, otro dispositivo, o sección “Ayuda”), no como CTA principal en cada pantalla.
+- **Offline y reconexión:** son más relevantes que en una web solo-desktop; mensajes claros cuando no hay red y qué sigue disponible.
+- **Rendimiento en móvil:** tratar como canal principal de uso, no como excepción.
+
+Al sugerir mejoras de UX o textos, asumir este contexto salvo que el usuario indique lo contrario.

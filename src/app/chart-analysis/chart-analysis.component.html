@@ -214,7 +214,12 @@
       </div>
 
       <p class="chart-empty" *ngIf="remoteChartLoading">Cargando historial desde la nube…</p>
-      <p class="chart-empty" *ngIf="!remoteChartLoading && remoteChartError">{{ remoteChartError }}</p>
+      <div class="chart-empty chart-empty--error" *ngIf="!remoteChartLoading && remoteChartError">
+        <span>{{ remoteChartError }}</span>
+        <button type="button" class="btn btn--ghost chart-empty__retry" (click)="retryRemoteChartLoad()">
+          Reintentar
+        </button>
+      </div>
       <p class="chart-empty" *ngIf="!remoteChartLoading && !remoteChartError && filterActiveButNoPoints">
         No hay lecturas en el rango elegido. Probá otras fechas o limpiá los filtros.
       </p>

@@ -184,6 +184,54 @@ $border: rgba(148, 163, 184, 0.18);
   border-bottom: 1px solid $border;
 }
 
+.topbar-sub {
+  flex-shrink: 0;
+  padding: 0.35rem 1.5rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: $muted;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.4);
+
+  strong {
+    color: #93c5fd;
+    font-weight: 700;
+  }
+}
+
+.topbar-sub__text {
+  display: block;
+  max-width: 48rem;
+}
+
+.onboarding-tip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  background: rgba(30, 58, 138, 0.22);
+}
+
+.onboarding-tip__text {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #e2e8f0;
+}
+
+.onboarding-tip__btn {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.75rem;
+}
+
 .topbar__left {
   display: flex;
   align-items: center;

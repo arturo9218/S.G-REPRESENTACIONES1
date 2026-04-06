@@ -1,3 +1,9 @@
+<div class="app-offline-banner" *ngIf="!online" role="alert">
+  <span class="app-offline-banner__text">
+    Sin conexión: las lecturas pueden dejar de actualizarse hasta que vuelva internet.
+  </span>
+  <button type="button" class="app-offline-banner__btn" (click)="reloadApp()">Reintentar</button>
+</div>
 <div class="app-update-banner" *ngIf="updateAvailable" role="status">
   <span class="app-update-banner__text">
     Hay una versión nueva (avisamos con un tono breve). Actualizá para ver los últimos cambios. Si ya diste permiso de notificaciones, también verás un aviso del sistema.

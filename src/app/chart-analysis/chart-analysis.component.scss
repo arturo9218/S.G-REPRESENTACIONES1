@@ -620,6 +620,20 @@ $border: rgba(148, 163, 184, 0.18);
   font-weight: 600;
 }
 
+.chart-empty--error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  justify-content: space-between;
+}
+
+.chart-empty__retry {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.65rem;
+}
+
 .chart-debug {
   margin: 0 0 0.45rem;
   font-size: 0.7rem;

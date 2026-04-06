@@ -103,7 +103,22 @@
       </div>
     </header>
 
+    <div class="topbar-sub" *ngIf="hasDevices && lastDataRefreshLabel" role="status">
+      <span class="topbar-sub__text">
+        Última lectura en datos: <strong>{{ lastDataRefreshLabel }}</strong>
+      </span>
+    </div>
+
     <div class="shell__content" *ngIf="hasDevices; else emptyState">
+      <div class="onboarding-tip" *ngIf="showOnboardingBanner" role="region" aria-label="Consejos">
+        <p class="onboarding-tip__text">
+          <strong>Consejo:</strong> en <strong>Ajustes</strong> podés umbrales y nombres de sensores; en
+          <strong>Dispositivos</strong> ves el estado de cada equipo. Los datos se actualizan solos con conexión.
+        </p>
+        <button type="button" class="btn btn--ghost onboarding-tip__btn" (click)="dismissOnboarding()">
+          Entendido
+        </button>
+      </div>
       <ng-container *ngIf="shellRoute !== 'settings'">
       <section id="section-kpi" class="kpi-row" aria-label="Resumen">
         <article class="kpi-card">
@@ -973,7 +988,10 @@
       <div class="empty">
         <div class="empty__card">
           <h1 class="empty__title">Sin dispositivos</h1>
-          <p class="empty__text">Agregá un dispositivo para ver el panel.</p>
+          <p class="empty__text">
+            Agregá un dispositivo para ver temperaturas y alertas. Si ya cargaste equipos en otro momento, revisá la
+            conexión o cerrá sesión y volvé a entrar.
+          </p>
           <div class="empty__actions">
             <button type="button" class="btn btn--primary" (click)="openAddDeviceModal()">+ Dispositivo</button>
             <button *ngIf="isDev" type="button" class="btn btn--ghost" (click)="loadDemoDevices()">Demo</button>

@@ -2,6 +2,43 @@
   display: block;
 }
 
+.app-offline-banner {
+  position: sticky;
+  top: 0;
+  z-index: 10001;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem 1rem;
+  padding: 0.55rem 1rem;
+  background: linear-gradient(135deg, #7c2d12 0%, #451a03 100%);
+  color: #ffedd5;
+  font-size: 0.85rem;
+  border-bottom: 1px solid rgba(254, 215, 170, 0.35);
+}
+
+.app-offline-banner__text {
+  text-align: center;
+  max-width: 40rem;
+  line-height: 1.35;
+}
+
+.app-offline-banner__btn {
+  padding: 0.35rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 237, 213, 0.45);
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-offline-banner__btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 .app-update-banner {
   position: sticky;
   top: 0;

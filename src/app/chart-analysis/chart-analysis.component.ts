@@ -16,6 +16,7 @@ import {
   TemperatureReading,
 } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
+import { capChartPointsSorted } from '../core/chart-sampling';
 import { effectiveCurrentA } from '../core/reading.utils';
 
 type AnalysisChannel = 'temp1' | 'temp2' | 'both' | 'current';
@@ -1205,7 +1206,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
         const sorted = [...this.remoteChartSeries].sort(
           (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
         );
-        return applyDisplayCap ? this.capChartPoints(sorted) : sorted;
+        return applyDisplayCap ? capChartPointsSorted(sorted) : sorted;
       }
       if (this.remoteChartError) {
         return this.chartReadingsLocalFiltered(applyDisplayCap);
@@ -1261,7 +1262,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const sorted = filtered.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
     if (sorted.length) {
       const windowed = this.hasUserDateFilter() ? sorted : sorted.slice(-48);
-      return applyDisplayCap ? this.capChartPoints(windowed) : windowed;
+      return applyDisplayCap ? capChartPointsSorted(windowed) : windowed;
     }
 
     if (this.hasUserDateFilter()) {
@@ -1283,21 +1284,6 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       return synthetic;
     }
     return [];
-  }
-
-  private capChartPoints(sorted: TemperatureReading[]): TemperatureReading[] {
-    const cap = 8000;
-    if (sorted.length <= cap) return sorted;
-
-    // Mantener todo el rango temporal (inicio y fin), no solo los últimos puntos.
-    // Si no, filtros largos parecían "cortados" al día más reciente.
-    const out: TemperatureReading[] = [];
-    const lastIndex = sorted.length - 1;
-    for (let i = 0; i < cap; i++) {
-      const idx = Math.round((i * lastIndex) / (cap - 1));
-      out.push(sorted[idx]);
-    }
-    return out;
   }
 
   private hasUserDateFilter(): boolean {
@@ -1481,6 +1467,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.remoteChartSeries = null;
     this.remoteChartLoading = false;
     this.remoteChartError = '';
+  }
+
+  /** Reintenta cargar el historial desde la nube tras un error de red o de API. */
+  retryRemoteChartLoad(): void {
+    this.scheduleRemoteChartLoad();
   }
 
   private scheduleRemoteChartLoad(): void {
