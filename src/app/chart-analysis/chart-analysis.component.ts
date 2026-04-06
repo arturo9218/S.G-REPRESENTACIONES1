@@ -347,6 +347,22 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     return this.deviceStore.isCloudDeviceId(this.selectedDeviceId);
   }
 
+  /**
+   * Texto del rango que usa el gráfico (nube o filtros), para móvil y confirmación Desde/Hasta.
+   */
+  get chartBoundsSummaryLine(): string {
+    const b = this.getEffectiveChartBounds();
+    if (!b) return '';
+    const fmt = (d: Date) =>
+      d.toLocaleString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    return `${fmt(b.from)} → ${fmt(b.to)}`;
+  }
+
   get hasSecondSeries(): boolean {
     return this.chartReadings().some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
   }
@@ -1205,7 +1221,32 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const source = this.readings.filter((r) => r.deviceId === this.selectedDeviceId);
     let filtered = [...source];
 
-    if (this.filterDay) {
+    const hasFrom = !!this.filterFrom?.trim();
+    const hasTo = !!this.filterTo?.trim();
+
+    if (hasFrom || hasTo) {
+      if (hasFrom) {
+        const fromMs = this.parseLocalDateLike(this.filterFrom)?.getTime() ?? Number.NaN;
+        if (Number.isFinite(fromMs)) {
+          filtered = filtered.filter((r) => new Date(r.at).getTime() >= fromMs);
+        }
+      }
+      if (hasTo) {
+        const parsedTo = this.parseLocalDateLike(this.filterTo);
+        if (
+          parsedTo &&
+          parsedTo.getHours() === 0 &&
+          parsedTo.getMinutes() === 0 &&
+          parsedTo.getSeconds() === 0
+        ) {
+          parsedTo.setHours(23, 59, 59, 999);
+        }
+        const toMs = parsedTo?.getTime() ?? Number.NaN;
+        if (Number.isFinite(toMs)) {
+          filtered = filtered.filter((r) => new Date(r.at).getTime() <= toMs);
+        }
+      }
+    } else if (this.filterDay) {
       const dayRange = this.parseDayRange(this.filterDay);
       if (dayRange) {
         const msStart = dayRange.from.getTime();
@@ -1214,29 +1255,6 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
           const t = new Date(r.at).getTime();
           return Number.isFinite(t) && t >= msStart && t <= msEnd;
         });
-      }
-    }
-
-    if (this.filterFrom) {
-      const fromMs = this.parseLocalDateLike(this.filterFrom)?.getTime() ?? Number.NaN;
-      if (Number.isFinite(fromMs)) {
-        filtered = filtered.filter((r) => new Date(r.at).getTime() >= fromMs);
-      }
-    }
-
-    if (this.filterTo) {
-      const parsedTo = this.parseLocalDateLike(this.filterTo);
-      if (
-        parsedTo &&
-        parsedTo.getHours() === 0 &&
-        parsedTo.getMinutes() === 0 &&
-        parsedTo.getSeconds() === 0
-      ) {
-        parsedTo.setHours(23, 59, 59, 999);
-      }
-      const toMs = parsedTo?.getTime() ?? Number.NaN;
-      if (Number.isFinite(toMs)) {
-        filtered = filtered.filter((r) => new Date(r.at).getTime() <= toMs);
       }
     }
 
@@ -1313,40 +1331,47 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   /** Límites solo si el usuario eligió día o rango (consulta Supabase). */
   private getUserDateFilterBounds(): { from: Date; to: Date } | null {
+    const hasFrom = !!this.filterFrom?.trim();
+    const hasTo = !!this.filterTo?.trim();
+    /**
+     * Desde/Hasta tienen prioridad sobre "Día": si ambos estaban llenos,
+     * antes el día completo pisaba el rango horario (solo se veía efecto de "hasta").
+     */
+    if (hasFrom || hasTo) {
+      let from: Date;
+      let to: Date;
+
+      if (hasFrom) {
+        const parsed = this.parseLocalDateLike(this.filterFrom);
+        if (!parsed) return null;
+        from = parsed;
+        if (!Number.isFinite(from.getTime())) return null;
+      } else {
+        from = new Date(0);
+      }
+
+      if (hasTo) {
+        const parsed = this.parseLocalDateLike(this.filterTo);
+        if (!parsed) return null;
+        to = parsed;
+        if (!Number.isFinite(to.getTime())) return null;
+        if (to.getHours() === 0 && to.getMinutes() === 0 && to.getSeconds() === 0) {
+          to.setHours(23, 59, 59, 999);
+        }
+      } else {
+        to = new Date();
+      }
+
+      if (from > to) return null;
+      return { from, to };
+    }
+
     if (this.filterDay?.trim()) {
       const dayRange = this.parseDayRange(this.filterDay.trim());
       return dayRange ?? null;
     }
-    const hasFrom = !!this.filterFrom?.trim();
-    const hasTo = !!this.filterTo?.trim();
-    if (!hasFrom && !hasTo) return null;
 
-    let from: Date;
-    let to: Date;
-
-    if (hasFrom) {
-      const parsed = this.parseLocalDateLike(this.filterFrom);
-      if (!parsed) return null;
-      from = parsed;
-      if (!Number.isFinite(from.getTime())) return null;
-    } else {
-      from = new Date(0);
-    }
-
-    if (hasTo) {
-      const parsed = this.parseLocalDateLike(this.filterTo);
-      if (!parsed) return null;
-      to = parsed;
-      if (!Number.isFinite(to.getTime())) return null;
-      if (to.getHours() === 0 && to.getMinutes() === 0 && to.getSeconds() === 0) {
-        to.setHours(23, 59, 59, 999);
-      }
-    } else {
-      to = new Date();
-    }
-
-    if (from > to) return null;
-    return { from, to };
+    return null;
   }
 
   /**

@@ -440,42 +440,103 @@
               (click)="selectDevice(d.id)"
             >
               <header class="device-card__head">
-                <div>
+                <div class="device-card__head-text">
                   <h3 class="device-card__name">{{ d.name }}</h3>
                   <span class="device-card__id">ID panel: {{ d.id }}</span>
                   <span class="device-card__module" *ngIf="d.moduleId">ID dispositivo: {{ d.moduleId }}</span>
                 </div>
-                <span class="device-card__status" [class.device-card__status--off]="!d.online">
-                  <span class="device-card__dot"></span>
-                  {{ d.online ? 'Online' : 'Offline' }}
-                </span>
+                <div class="device-card__head-actions">
+                  <span class="device-card__status" [class.device-card__status--off]="!d.online">
+                    <span class="device-card__dot"></span>
+                    {{ d.online ? 'Online' : 'Offline' }}
+                  </span>
+                  <span class="device-card__burger" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="4" y1="6" x2="20" y2="6" />
+                      <line x1="4" y1="12" x2="20" y2="12" />
+                      <line x1="4" y1="18" x2="20" y2="18" />
+                    </svg>
+                  </span>
+                </div>
               </header>
+              <div class="device-card__head-line" aria-hidden="true"></div>
               <div
-                class="device-card__temp"
-                [class.device-card__temp--pending]="d.temperatureC == null && d.temperature2C == null"
+                class="device-card__glass"
+                [class.device-card__glass--pending]="d.temperatureC == null && d.temperature2C == null"
               >
-                <ng-container *ngIf="d.temperatureC != null || d.temperature2C != null; else noTemp">
-                  <div class="device-card__temps-row">
-                    <span class="device-card__temp-val" *ngIf="d.temperatureC != null">{{
-                      formatTemp(d.temperatureC)
-                    }}</span>
-                    <span
-                      class="device-card__temp-sep"
-                      *ngIf="d.temperatureC != null && d.temperature2C != null"
-                      >·</span>
-                    <span
-                      class="device-card__temp-val device-card__temp-val--dual"
-                      *ngIf="d.temperature2C != null"
-                      >{{ formatTemp(d.temperature2C) }}</span>
+                <ng-container *ngIf="d.temperatureC != null && d.temperature2C != null; else singleOrEmpty">
+                  <div class="device-card__glass-inner">
+                    <div class="device-card__sensor-col">
+                      <span class="device-card__sensor-label">{{ d.sensor1Label || 'Sensor 1' }}</span>
+                      <span class="device-card__sensor-value">{{ formatTempCard(d.temperatureC) }}</span>
+                      <div class="device-card__sensor-foot">
+                        <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
+                        <a
+                          class="device-card__chart-link"
+                          [routerLink]="['/chart']"
+                          [queryParams]="{ deviceId: d.id }"
+                          (click)="$event.stopPropagation()"
+                          title="Ver gráfico"
+                          aria-label="Ver gráfico de temperaturas"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16l4-4 3 3 5-6" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                    <div class="device-card__sensor-col">
+                      <span class="device-card__sensor-label">{{ d.sensor2Label || 'Sensor 2' }}</span>
+                      <span class="device-card__sensor-value">{{ formatTempCard(d.temperature2C) }}</span>
+                      <div class="device-card__sensor-foot">
+                        <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
+                        <a
+                          class="device-card__chart-link"
+                          [routerLink]="['/chart']"
+                          [queryParams]="{ deviceId: d.id }"
+                          (click)="$event.stopPropagation()"
+                          title="Ver gráfico"
+                          aria-label="Ver gráfico de temperaturas"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16l4-4 3 3 5-6" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
                   </div>
-                  <span
-                    class="device-card__temp-hint"
-                    *ngIf="d.temperatureC != null && d.temperature2C != null"
-                    >{{ (d.sensor1Label || 'Sensor 1') + ' / ' + (d.sensor2Label || 'Sensor 2') }}</span>
                 </ng-container>
+                <ng-template #singleOrEmpty>
+                  <ng-container *ngIf="d.temperatureC != null || d.temperature2C != null; else noTemp">
+                    <div class="device-card__glass-inner device-card__glass-inner--single">
+                      <span class="device-card__sensor-label">{{ deviceFirstSensorLabel(d) }}</span>
+                      <span class="device-card__sensor-value">{{ formatTempCard(deviceFirstTempC(d)) }}</span>
+                      <div class="device-card__sensor-foot">
+                        <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
+                        <a
+                          class="device-card__chart-link"
+                          [routerLink]="['/chart']"
+                          [queryParams]="{ deviceId: d.id }"
+                          (click)="$event.stopPropagation()"
+                          title="Ver gráfico"
+                          aria-label="Ver gráfico de temperaturas"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16l4-4 3 3 5-6" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                  </ng-container>
+                </ng-template>
                 <ng-template #noTemp>
-                  <span class="device-card__temp-val device-card__temp-val--muted">Dispositivo</span>
-                  <span class="device-card__temp-hint">Sin lectura</span>
+                  <div class="device-card__glass-inner device-card__glass-inner--empty">
+                    <span class="device-card__sensor-value device-card__sensor-value--muted">Sin lectura</span>
+                    <span class="device-card__sensor-label device-card__sensor-label--muted">Esperando datos del dispositivo</span>
+                  </div>
                 </ng-template>
               </div>
               <footer class="device-card__foot">
@@ -483,7 +544,7 @@
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                   {{ d.location }}
                 </span>
-                <span class="device-card__meta">{{ d.updatedAtLabel }}</span>
+                <span class="device-card__meta" *ngIf="d.temperatureC == null && d.temperature2C == null">{{ d.updatedAtLabel }}</span>
                 <span class="device-card__meta" *ngIf="d.espLocalIp">{{ d.espLocalIp }}</span>
                 <span class="device-card__meta" *ngIf="d.batteryPct != null">{{ d.batteryPct }}%</span>
               </footer>
@@ -521,20 +582,62 @@
             </ng-template>
           </article>
 
-          <article class="card">
+          <article class="card card--telemetry-glass">
             <h2 class="card__title card__title--sm">Lectura actual (multi-sensor)</h2>
             <div class="telemetry" *ngIf="selectedTelemetry as t; else noTelemetry">
-              <div class="telemetry__row">
-                <span>{{ selectedSensor1Name }}</span>
-                <strong>{{ formatTemp(t.temperatureC) }}</strong>
+              <div class="telemetry__dual" *ngIf="hasDualTelemetry(t)">
+                <div class="telemetry__col">
+                  <span class="telemetry__label">{{ selectedSensor1Name }}</span>
+                  <span class="telemetry__value">{{ formatTempCard(t.temperatureC) }}</span>
+                  <div class="telemetry__foot">
+                    <span class="telemetry__clock">{{ t.at | date:'HH:mm' }}</span>
+                    <a
+                      class="telemetry__chart-link"
+                      [routerLink]="['/chart']"
+                      [queryParams]="{ deviceId: selectedDeviceId }"
+                      title="Ver gráfico"
+                      aria-label="Ver gráfico de temperaturas"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                        <path d="M3 3v18h18" />
+                        <path d="M7 16l4-4 3 3 5-6" />
+                      </svg>
+                    </a>
+                  </div>
+                </div>
+                <div class="telemetry__col">
+                  <span class="telemetry__label">{{ selectedSensor2Name }}</span>
+                  <span class="telemetry__value">{{ formatTempCard(t.temp2C ?? null) }}</span>
+                  <div class="telemetry__foot">
+                    <span class="telemetry__clock">{{ t.at | date:'HH:mm' }}</span>
+                    <a
+                      class="telemetry__chart-link"
+                      [routerLink]="['/chart']"
+                      [queryParams]="{ deviceId: selectedDeviceId }"
+                      title="Ver gráfico"
+                      aria-label="Ver gráfico de temperaturas"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                        <path d="M3 3v18h18" />
+                        <path d="M7 16l4-4 3 3 5-6" />
+                      </svg>
+                    </a>
+                  </div>
+                </div>
               </div>
-              <div class="telemetry__row">
-                <span>{{ selectedSensor2Name }}</span>
-                <strong>{{ formatTemp(t.temp2C ?? null) }}</strong>
+              <div class="telemetry__rows" *ngIf="!hasDualTelemetry(t)">
+                <div class="telemetry__row">
+                  <span>{{ selectedSensor1Name }}</span>
+                  <strong>{{ formatTempCard(t.temperatureC) }}</strong>
+                </div>
+                <div class="telemetry__row">
+                  <span>{{ selectedSensor2Name }}</span>
+                  <strong>{{ formatTempCard(t.temp2C ?? null) }}</strong>
+                </div>
               </div>
               <div class="telemetry__row">
                 <span>Temperatura 3</span>
-                <strong>{{ formatTemp(t.temp3C ?? null) }}</strong>
+                <strong>{{ formatTempCard(t.temp3C ?? null) }}</strong>
               </div>
               <div class="telemetry__row">
                 <span>Corriente</span>

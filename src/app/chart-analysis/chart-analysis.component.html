@@ -64,6 +64,7 @@
           <input
             type="datetime-local"
             class="control__select"
+            step="60"
             [(ngModel)]="filterFrom"
             (ngModelChange)="onFilterRangeChange()"
           />
@@ -74,6 +75,7 @@
           <input
             type="datetime-local"
             class="control__select"
+            step="60"
             [(ngModel)]="filterTo"
             (ngModelChange)="onFilterRangeChange()"
           />
@@ -81,6 +83,10 @@
         <button type="button" class="btn btn--ghost" (click)="clearDateFilters()">
           Limpiar filtros
         </button>
+        <div class="range-widget" *ngIf="chartBoundsSummaryLine">
+          <span class="range-widget__title">Rango que consulta el gráfico</span>
+          <span class="range-widget__value">{{ chartBoundsSummaryLine }}</span>
+        </div>
         <p class="panel__hint" *ngIf="selectedIsCloudDevice">
           Sin filtros, el gráfico carga los <strong>últimos 7 días</strong> desde Supabase (comportamiento
           alineado al panel principal). Con día o rango Desde/Hasta, rangos largos usan detalle / promedio

@@ -1352,6 +1352,35 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return `${sign}${c.toFixed(1)}°C`;
   }
 
+  /** Tarjetas / widgets grandes: dos decimales (mejor lectura en pantalla). */
+  formatTempCard(c: number | null): string {
+    if (c == null || Number.isNaN(c)) return '—';
+    const sign = c > 0 ? '+' : '';
+    return `${sign}${c.toFixed(2)}°C`;
+  }
+
+  /** Lectura actual: layout dos columnas cuando hay ambos canales con valor. */
+  hasDualTelemetry(t: TemperatureReading): boolean {
+    return (
+      t.temperatureC != null &&
+      Number.isFinite(t.temperatureC) &&
+      t.temp2C != null &&
+      Number.isFinite(t.temp2C)
+    );
+  }
+
+  /** Tarjeta dispositivo con un solo canal: etiqueta coherente con el valor mostrado. */
+  deviceFirstSensorLabel(d: DashboardDevice): string {
+    if (d.temperatureC != null) return d.sensor1Label?.trim() || 'Sensor 1';
+    return d.sensor2Label?.trim() || 'Sensor 2';
+  }
+
+  deviceFirstTempC(d: DashboardDevice): number | null {
+    if (d.temperatureC != null) return d.temperatureC;
+    if (d.temperature2C != null) return d.temperature2C;
+    return null;
+  }
+
   /** Historial / línea de tiempo: nombres personalizados si existen */
   formatHistoryTemps(h: HistoryListItem): string {
     const n1 = h.sensor1Label?.trim() || 'Sensor 1';
