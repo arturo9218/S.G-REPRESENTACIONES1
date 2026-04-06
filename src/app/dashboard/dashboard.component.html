@@ -1,8 +1,8 @@
 <div class="shell shell--dark">
   <aside class="shell__sidebar" aria-label="Navegación principal">
     <div class="shell__sidebar-brand">
-      <div class="shell__sidebar-logo">SG</div>
-      <span class="shell__sidebar-title">SG Monitoreo</span>
+      <div class="shell__sidebar-logo">AR</div>
+      <span class="shell__sidebar-title">AR Monitoreo</span>
     </div>
     <nav class="shell__nav shell__nav--labeled">
       <button
@@ -65,8 +65,13 @@
   <div class="shell__main">
     <header class="topbar">
       <div class="topbar__left">
-        <span class="topbar__brand-mark">SG</span>
-        <span class="topbar__brand-text">SG Monitoreo</span>
+        <span class="topbar__brand-mark">AR</span>
+        <span class="topbar__brand-text">AR Monitoreo</span>
+        <span
+          class="topbar__admin-pill"
+          *ngIf="isAdminView"
+          title="Estás viendo equipos de todas las cuentas"
+        >Admin</span>
       </div>
       <div class="topbar__search-wrap">
         <svg class="topbar__search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -546,6 +551,9 @@
                 </ng-template>
               </div>
               <footer class="device-card__foot">
+                <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && d.ownerUserId">
+                  Cuenta {{ formatOwnerUserIdShort(d.ownerUserId) }}
+                </span>
                 <span class="device-card__meta">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                   {{ d.location }}
@@ -677,6 +685,56 @@
       <ng-container *ngIf="shellRoute === 'settings'">
         <div class="settings-page">
           <h1 class="settings-page__title">Configuración</h1>
+
+          <article class="card card--admin-roster" *ngIf="isAdminView">
+            <h2 class="card__title card__title--sm">Administradores</h2>
+            <p class="card__hint card__hint--tight">
+              Solo quien ya es administrador puede agregar o quitar cuentas. Tiene que quedar al menos una.
+            </p>
+            <p class="card__hint" *ngIf="adminListLoading">Cargando lista…</p>
+            <ul class="admin-roster" *ngIf="!adminListLoading && adminListEmails.length">
+              <li class="admin-roster__row" *ngFor="let em of adminListEmails">
+                <span class="admin-roster__email">{{ em }}</span>
+                <button
+                  type="button"
+                  class="btn btn--ghost btn--sm admin-roster__remove"
+                  [disabled]="adminListSaving"
+                  (click)="removeAdminEmail(em)"
+                >
+                  Quitar
+                </button>
+              </li>
+            </ul>
+            <div class="notify-panel notify-panel--labels" *ngIf="!adminListLoading">
+              <label class="notify-panel__field notify-panel__field--full">
+                <span>Agregar email</span>
+                <input
+                  type="email"
+                  [(ngModel)]="newAdminEmail"
+                  maxlength="120"
+                  autocomplete="email"
+                  placeholder="correo@ejemplo.com"
+                  [disabled]="adminListSaving"
+                />
+              </label>
+              <button
+                type="button"
+                class="btn btn--primary notify-panel__save"
+                [disabled]="adminListSaving"
+                (click)="addAdminEmail()"
+              >
+                {{ adminListSaving ? 'Guardando…' : 'Agregar administrador' }}
+              </button>
+            </div>
+            <p
+              class="sensor-labels-feedback"
+              *ngIf="adminListFeedback && !adminListSaving"
+              [class.sensor-labels-feedback--warn]="adminListFeedback.includes('No se pudo') || adminListFeedback.includes('permission') || adminListFeedback.includes('JWT')"
+            >
+              {{ adminListFeedback }}
+            </p>
+          </article>
+
           <article class="card settings-page__device-pick">
             <h2 class="card__title card__title--sm">Dispositivo a configurar</h2>
             <p class="card__hint card__hint--tight">

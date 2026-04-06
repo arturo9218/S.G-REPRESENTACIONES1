@@ -136,9 +136,9 @@ export class AppComponent implements OnInit, OnDestroy {
     try {
       const icon =
         typeof location !== 'undefined' ? `${location.origin}/favicon.ico` : undefined;
-      new Notification('SG Monitoreo — actualización', {
+      new Notification('AR Monitoreo — actualización', {
         body: 'Hay una versión nueva. Usá "Actualizar ahora" en la barra superior.',
-        tag: 'sg-pwa-update',
+        tag: 'ar-pwa-update',
         renotify: true,
         icon,
       });

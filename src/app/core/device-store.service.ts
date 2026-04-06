@@ -10,9 +10,9 @@ import { AuthService } from './auth.service';
 import { ingestFunctionUrl, isSupabaseConfigured } from './supabase-config';
 import { DashboardDevice, TemperatureReading } from './models/dashboard.models';
 
-const STORAGE_KEY_PREFIX = 'sg-monitor-devices-v2';
-const READINGS_KEY_PREFIX = 'sg-monitor-readings-v2';
-const TOKEN_MAP_PREFIX = 'sg-monitor-device-tokens-v2';
+const STORAGE_KEY_PREFIX = 'ar-monitor-devices-v2';
+const READINGS_KEY_PREFIX = 'ar-monitor-readings-v2';
+const TOKEN_MAP_PREFIX = 'ar-monitor-device-tokens-v2';
 /**
  * Máximo de lecturas en localStorage (tras merge con la nube).
  * La consulta a Supabase ya no usa un solo `limit` global: se pide historial por dispositivo
@@ -112,10 +112,13 @@ export class DeviceStoreService {
   private userScopeKey = 'anon';
   private readonly subject = new BehaviorSubject<DashboardDevice[]>([]);
   private readonly readingsSubject = new BehaviorSubject<TemperatureReading[]>([]);
+  private readonly adminSubject = new BehaviorSubject<boolean>(false);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
 
   readonly devices$ = this.subject.asObservable();
   readonly readings$ = this.readingsSubject.asObservable();
+  /** Sesión actual con email listado en environment.adminEmails (vista de todos los equipos). */
+  readonly admin$ = this.adminSubject.asObservable();
 
   constructor(
     private readonly auth: AuthService,
@@ -123,9 +126,14 @@ export class DeviceStoreService {
   ) {
     void this.bootstrapScope();
     this.auth.client.auth.onAuthStateChange((_event, session) => {
+      void this.auth.fetchIsAppAdmin().then((v) => this.adminSubject.next(v));
       const nextScope = session?.user.id ?? 'anon';
       this.setScope(nextScope);
     });
+  }
+
+  get isAdminView(): boolean {
+    return this.adminSubject.value;
   }
 
   get snapshot(): DashboardDevice[] {
@@ -811,20 +819,40 @@ export class DeviceStoreService {
     const session = await this.auth.getSession();
     if (!session?.user.id) return;
 
-    const { data, error } = await this.auth.client
+    const isAdmin = await this.auth.fetchIsAppAdmin();
+    this.adminSubject.next(isAdmin);
+
+    const baseFields =
+      'id, module_id, name, location, active, updated_at, sensor_1_label, sensor_2_label';
+    const selectFields = isAdmin ? `${baseFields}, owner_user_id` : baseFields;
+
+    let q = this.auth.client
       .from('devices')
-      .select(
-        'id, module_id, name, location, active, updated_at, sensor_1_label, sensor_2_label'
-      )
-      .eq('owner_user_id', session.user.id)
+      .select(selectFields)
       .order('created_at', { ascending: true });
+    if (!isAdmin) {
+      q = q.eq('owner_user_id', session.user.id);
+    }
+
+    const { data, error } = await q;
 
     if (error || !data) {
       console.warn('Supabase devices:', error?.message);
       return;
     }
 
-    const ids = data.map((r) => r.id as string);
+    type DeviceRow = {
+      id: string;
+      name: string;
+      location: string | null;
+      module_id: string;
+      sensor_1_label: string | null;
+      sensor_2_label: string | null;
+      owner_user_id?: string | null;
+    };
+    const rows = data as unknown as DeviceRow[];
+
+    const ids = rows.map((r) => r.id);
     const thresholdsByDevice = new Map<
       string,
       {
@@ -879,17 +907,20 @@ export class DeviceStoreService {
 
     const tokens = this.readTokenMap();
     const prevById = new Map(this.snapshot.map((d) => [d.id, d]));
-    const cloudDevices: DashboardDevice[] = data.map((row) => {
-      const rid = row.id as string;
+    const cloudDevices: DashboardDevice[] = rows.map((row) => {
+      const rid = row.id;
       const prev = prevById.get(rid);
       const th = thresholdsByDevice.get(rid);
       const s1 = row.sensor_1_label as string | null | undefined;
       const s2 = row.sensor_2_label as string | null | undefined;
+      const ownerId =
+        isAdmin && typeof row.owner_user_id === 'string' ? row.owner_user_id : undefined;
       return {
         id: rid,
-        name: row.name as string,
+        name: row.name,
         location: (row.location as string)?.trim() || 'Sin ubicación',
-        moduleId: row.module_id as string,
+        moduleId: row.module_id,
+        ownerUserId: ownerId,
         temperatureC: prev?.temperatureC ?? null,
         temperature2C: prev?.temperature2C ?? null,
         online: prev?.online ?? false,

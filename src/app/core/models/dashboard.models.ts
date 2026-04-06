@@ -27,6 +27,8 @@ export interface DashboardDevice {
   tempPushCooldownMs?: number | null;
   /** Retardo entre avisos de “desconectado” (ms); independiente del de temperatura */
   offlinePushCooldownMs?: number | null;
+  /** UUID del dueño en Supabase (solo relleno en vista admin) */
+  ownerUserId?: string;
   /** Creado en Supabase; lecturas vienen de la nube */
   cloudSynced?: boolean;
   /** Código de 6 dígitos para WiFiManager api_key (solo en este navegador tras el alta) */
@@ -63,10 +65,10 @@ export interface TemperatureReading {
 /** Tipo de alarma en panel y sonido */
 export type DashboardAlertKind = 'offline' | 'temp_high' | 'temp_low';
 
-/** Preset de pitido (localStorage `sg_alarm_sound_v1`) */
+/** Preset de pitido (localStorage `ar_alarm_sound_v1`) */
 export type AlarmSoundPreset = 'classic' | 'buzzer' | 'chime' | 'low';
 
-/** Estilo visual del gráfico de temperaturas (localStorage `sg_chart_style_v1`). */
+/** Estilo visual del gráfico de temperaturas (localStorage `ar_chart_style_v1`). */
 export type ChartStylePreset = 'area' | 'line' | 'minimal' | 'technical' | 'trend';
 
 export interface DashboardAlert {

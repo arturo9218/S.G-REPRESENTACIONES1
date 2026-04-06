@@ -9,6 +9,11 @@ export const environment = {
   supabaseUrl: 'https://fohbhymulrmdsgrubtlo.supabase.co',
   supabaseAnonKey:
     'sb_publishable_wi66yVcEeu7Y_44mkfNHIg_9-nbkHeb',
+  /**
+   * Respaldo offline si falla el RPC is_app_admin. La lista real está en Supabase (admin_emails, sql/012).
+   */
+  adminEmails: ['arturoalmeida9218@gmail.com'] as readonly string[],
+
   /** Si true y hay sesión, dispositivos y lecturas se sincronizan con Supabase (ESP → Function → DB → app). */
   deviceCloudSync: true,
   ingestFunctionPath: '/functions/v1/ingest-reading',

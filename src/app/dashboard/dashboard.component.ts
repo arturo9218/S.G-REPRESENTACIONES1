@@ -69,6 +69,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
   notificationSettingsFeedbackIsError = false;
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
+  private subAdmin: Subscription | null = null;
+  /** Vista admin: todos los equipos; permisos reales vienen de Supabase (admin_emails + is_app_admin). */
+  isAdminView = false;
+  /** Lista de emails admin (solo visible si isAdminView; tabla public.admin_emails). */
+  adminListEmails: string[] = [];
+  adminListLoading = false;
+  adminListSaving = false;
+  newAdminEmail = '';
+  adminListFeedback = '';
   private routerSub: Subscription | null = null;
   private routeQuerySub: Subscription | null = null;
   private visibilitySub: Subscription | null = null;
@@ -85,7 +94,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Vista compacta vs ampliada del gráfico de temperaturas */
   chartExpanded = false;
 
-  private readonly chartStyleStorageKey = 'sg_chart_style_v1';
+  private readonly chartStyleStorageKey = 'ar_chart_style_v1';
   chartStylePreset: ChartStylePreset = 'area';
   readonly chartStyleOptions: { value: ChartStylePreset; label: string }[] = [
     { value: 'area', label: 'Área (relleno suave)' },
@@ -121,11 +130,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private readingsHydrationDone = false;
   /** No pitido del panel (ni notif. del navegador) hasta este instante; cubre carreras al cargar/recargar. */
   private alarmPanelSilentUntilMs = 0;
-  private readonly panelAlertIdsStorageKey = 'sg_panel_alert_ids_v1';
+  private readonly panelAlertIdsStorageKey = 'ar_panel_alert_ids_v1';
   /** Último pitido del panel (ms); respeta el retardo entre alertas al reabrir la app */
-  private readonly panelLastAlarmToneAtStorageKey = 'sg_panel_last_alarm_tone_at_v1';
-  private readonly alarmsCountStorageKey = 'sg_alarms_count_v1';
-  private readonly alarmSoundStorageKey = 'sg_alarm_sound_v1';
+  private readonly panelLastAlarmToneAtStorageKey = 'ar_panel_last_alarm_tone_at_v1';
+  private readonly alarmsCountStorageKey = 'ar_alarms_count_v1';
+  private readonly alarmSoundStorageKey = 'ar_alarm_sound_v1';
 
   /** Preset de pitido (panel y notificación en primer plano) */
   alarmSoundPreset: AlarmSoundPreset = 'classic';
@@ -212,6 +221,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.readings = list;
       this.updateAlarmAccumulator();
     });
+    this.subAdmin = this.deviceStore.admin$.subscribe((v) => {
+      this.isAdminView = v;
+      if (v && this.shellRoute === 'settings') void this.loadAdminEmails();
+    });
   }
 
   ngOnDestroy(): void {
@@ -226,6 +239,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     this.subDev?.unsubscribe();
     this.subRead?.unsubscribe();
+    this.subAdmin?.unsubscribe();
     this.routerSub?.unsubscribe();
     this.routeQuerySub?.unsubscribe();
     this.visibilitySub?.unsubscribe();
@@ -237,6 +251,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (path === '/configuracion') {
       this.shellRoute = 'settings';
       void this.refreshWebPushUi();
+      if (this.isAdminView) void this.loadAdminEmails();
       return;
     }
     if (path === '/dispositivos') {
@@ -283,11 +298,67 @@ export class DashboardComponent implements OnInit, OnDestroy {
         d.location,
         d.moduleId ?? '',
         d.espLocalIp ?? '',
+        d.ownerUserId ?? '',
       ]
         .join(' ')
         .toLowerCase();
       return hay.includes(q);
     });
+  }
+
+  /** Primeros caracteres del UUID de cuenta (vista admin). */
+  formatOwnerUserIdShort(id: string | undefined): string {
+    if (!id) return '';
+    const t = id.replace(/-/g, '');
+    return t.length > 10 ? `${t.slice(0, 10)}…` : t;
+  }
+
+  async loadAdminEmails(): Promise<void> {
+    if (!this.isAdminView) return;
+    this.adminListLoading = true;
+    this.adminListFeedback = '';
+    const { data, error } = await this.auth.client.from('admin_emails').select('email').order('email');
+    this.adminListLoading = false;
+    if (error) {
+      this.adminListFeedback = error.message;
+      this.adminListEmails = [];
+      return;
+    }
+    this.adminListEmails = (data ?? []).map((r: { email: string }) => r.email);
+  }
+
+  async addAdminEmail(): Promise<void> {
+    const raw = this.newAdminEmail.trim().toLowerCase();
+    if (!raw || !raw.includes('@')) {
+      this.adminListFeedback = 'Ingresá un email válido.';
+      return;
+    }
+    this.adminListSaving = true;
+    this.adminListFeedback = '';
+    const { error } = await this.auth.client.from('admin_emails').insert({ email: raw });
+    this.adminListSaving = false;
+    if (error) {
+      const msg = error.message ?? '';
+      this.adminListFeedback =
+        msg.includes('duplicate') || error.code === '23505' ? 'Ese email ya es administrador.' : msg;
+      return;
+    }
+    this.newAdminEmail = '';
+    await this.loadAdminEmails();
+  }
+
+  async removeAdminEmail(email: string): Promise<void> {
+    if (!this.isAdminView) return;
+    if (!window.confirm(`¿Quitar a ${email} como administrador?`)) return;
+    this.adminListSaving = true;
+    this.adminListFeedback = '';
+    const { error } = await this.auth.client.from('admin_emails').delete().eq('email', email);
+    this.adminListSaving = false;
+    if (error) {
+      this.adminListFeedback = error.message;
+      return;
+    }
+    await this.loadAdminEmails();
   }
 
   get summaryTotal(): number {
@@ -723,7 +794,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       doc.setFontSize(14);
       doc.text(
-        hasCurrent ? 'SG Monitoreo — temperaturas y corriente' : 'SG Monitoreo — temperaturas',
+        hasCurrent ? 'AR Monitoreo — temperaturas y corriente' : 'AR Monitoreo — temperaturas',
         14,
         16
       );
@@ -985,6 +1056,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       queryParams: this.selectedDeviceId ? { deviceId: this.selectedDeviceId } : { deviceId: null },
       replaceUrl: true,
     });
+    if (section === 'settings' && this.isAdminView) void this.loadAdminEmails();
   }
 
   openChartInNewTab(e?: Event): void {
@@ -2096,7 +2168,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const did = this.deviceIdFromAlertId(alertId);
       const cooldownMs = this.panelAlarmCooldownMsForDeviceAndKind(did, al.kind);
       try {
-        const key = `sg_browser_notif_${alertId}`;
+        const key = `ar_browser_notif_${alertId}`;
         const raw = sessionStorage.getItem(key);
         const last = raw ? Number.parseInt(raw, 10) : 0;
         if (Number.isFinite(last) && last > 0 && Date.now() - last < cooldownMs) {

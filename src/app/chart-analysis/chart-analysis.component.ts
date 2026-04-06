@@ -65,7 +65,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   /** Evita que una respuesta vieja de red pise un filtro nuevo. */
   private remoteLoadGeneration = 0;
 
-  private readonly chartStyleStorageKey = 'sg_chart_style_v1';
+  private readonly chartStyleStorageKey = 'ar_chart_style_v1';
   chartStylePreset: ChartStylePreset = 'area';
   readonly chartStyleOptions: { value: ChartStylePreset; label: string }[] = [
     { value: 'area', label: 'Área (relleno suave)' },
@@ -1701,7 +1701,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
         this.chartStylePreset;
 
       doc.setFontSize(14);
-      doc.text('SG Monitoreo — análisis (exportación)', 14, 16);
+      doc.text('AR Monitoreo — análisis (exportación)', 14, 16);
       doc.setFontSize(10);
       doc.text(`Dispositivo: ${name}`, 14, 23);
       doc.setFontSize(8);

@@ -1,6 +1,6 @@
 {
   "buildCommand": "npm run build",
-  "outputDirectory": "dist/sg-monitor",
+  "outputDirectory": "dist/ar-monitor",
   "framework": null,
   "headers": [
     {
