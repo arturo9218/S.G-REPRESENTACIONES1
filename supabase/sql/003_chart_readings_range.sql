@@ -1,5 +1,5 @@
 -- Historial largo para gráficos: la app llama esta función con un rango [p_from, p_to].
--- <= 4 días: puntos crudos (máx. 20k).
+-- <= 4 días: puntos crudos (máx. 100k; antes 20k cortaba el final del rango con muchas lecturas).
 -- <= 400 días: promedio por hora.
 -- > 400 días: promedio por día (adecuado para ~1 año o más).
 -- Ejecutar en Supabase SQL Editor después de 001 y 002.
@@ -8,6 +8,12 @@
 -- 1) Copiá TODO este archivo y ejecutalo de una vez (Run).
 -- 2) Esperá ~1 min o: Project Settings → API → pausar y reactivar el proyecto (refresca PostgREST).
 -- 3) En la app, abrí la consola (F12): el mensaje de error ahora incluye el detalle de Supabase.
+--
+-- Si Postgres dice que no puede cambiar el tipo de retorno: otra variante de esta función ya existe
+-- (p. ej. con columna current_a en 005/011). Hay que DROP antes de crear; CASCADE quita dependencias.
+-- Si usás gráfico de corriente (A) en análisis, preferí FRONTEND/supabase/sql/011_admin_app.sql en lugar de este archivo.
+
+drop function if exists public.get_device_readings_chart(uuid, timestamptz, timestamptz) cascade;
 
 create or replace function public.get_device_readings_chart(
   p_device_id uuid,
@@ -56,7 +62,7 @@ begin
         and dr.created_at >= p_from
         and dr.created_at <= p_to
       order by dr.created_at asc
-      limit 20000;
+      limit 100000;
     return;
   end if;
 

@@ -55,7 +55,7 @@ begin
         and dr.created_at >= p_from
         and dr.created_at <= p_to
       order by dr.created_at asc
-      limit 20000;
+      limit 100000;
     return;
   end if;
 

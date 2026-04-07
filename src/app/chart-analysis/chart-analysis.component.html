@@ -181,7 +181,7 @@
           </label>
           <div class="chart-head__hint">Actualización ~{{ (environment.readingsPollIntervalMs || 5000) / 1000 }}s</div>
           <span class="chart-head__zoom-hint" *ngIf="hasChartData">
-            PC: rueda · Móvil: pellizco 2 dedos o +/− · Doble clic: ver todo
+            PC: rueda · Con zoom: arrastrar para mover · Móvil: pellizco o 1 dedo al mover · Doble clic: ver todo
           </span>
           <div class="chart-head__zoom-btns" *ngIf="hasChartData">
             <button type="button" class="btn btn--ghost chart-zoom-nudge" (click)="chartZoomIn()" title="Acercar">
@@ -238,7 +238,10 @@
 
         <div
           class="chart__svg-wrap"
+          [class.chart__svg-wrap--pan-ready]="chartZoomIsActive"
+          [class.chart__svg-wrap--panning]="chartPanDrag"
           #chartSvgWrap
+          (mousedown)="onChartMouseDown($event)"
           (mousemove)="onChartMouseMove($event)"
           (mouseleave)="onChartMouseLeave()"
           (dblclick)="resetChartZoom()"

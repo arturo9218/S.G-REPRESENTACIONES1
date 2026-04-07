@@ -761,6 +761,17 @@ $border: rgba(148, 163, 184, 0.18);
   touch-action: pan-y;
 }
 
+.chart__svg-wrap--pan-ready {
+  cursor: grab;
+  /* Con zoom, el arrastre horizontal lo hace JS (un dedo / ratón). */
+  touch-action: none;
+}
+
+.chart__svg-wrap--panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .panel--chart:fullscreen .chart__svg-wrap {
   height: min(calc(100dvh - 8rem), 900px);
   max-height: none;

@@ -102,6 +102,14 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   private pinchCenterFrac = 0.5;
   private pinchActive = false;
 
+  /** Arrastre horizontal con el zoom activo (PC y un dedo en móvil). */
+  chartPanDrag = false;
+  private chartPanGlobalCleanup?: () => void;
+  private touchPanOneFinger = false;
+  private touchPanStartX = 0;
+  private touchPanStartZoomLo = 0;
+  private touchPanStartZoomHi = 0;
+
   constructor(
     private readonly route: ActivatedRoute,
     private readonly router: Router,
@@ -167,6 +175,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   ngOnDestroy(): void {
+    this.chartPanGlobalCleanup?.();
+    this.chartPanGlobalCleanup = undefined;
     this.chartInteractionCleanup?.();
     this.chartInteractionCleanup = undefined;
     if (this.remoteLoadTimer != null) {
@@ -213,6 +223,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   onChartTouchStart(event: TouchEvent): void {
     if (!this.hasChartData) return;
     if (event.touches.length === 2) {
+      this.touchPanOneFinger = false;
       this.pinchActive = true;
       const t0 = event.touches[0];
       const t1 = event.touches[1];
@@ -229,10 +240,37 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       const cx = (t0.clientX + t1.clientX) / 2;
       this.pinchCenterFrac = Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
       event.preventDefault();
+    } else if (
+      event.touches.length === 1 &&
+      this.chartZoomIsActive &&
+      !this.pinchActive
+    ) {
+      this.touchPanOneFinger = true;
+      this.touchPanStartX = event.touches[0].clientX;
+      this.touchPanStartZoomLo = this.chartZoomLo;
+      this.touchPanStartZoomHi = this.chartZoomHi;
     }
   }
 
   onChartTouchMove(event: TouchEvent): void {
+    if (
+      this.touchPanOneFinger &&
+      !this.pinchActive &&
+      event.touches.length === 1 &&
+      this.chartZoomIsActive
+    ) {
+      const dx = event.touches[0].clientX - this.touchPanStartX;
+      if (
+        this.tryApplyChartPanByPixels(
+          dx,
+          this.touchPanStartZoomLo,
+          this.touchPanStartZoomHi
+        )
+      ) {
+        event.preventDefault();
+      }
+      return;
+    }
     if (!this.pinchActive || event.touches.length !== 2) return;
     const t0 = event.touches[0];
     const t1 = event.touches[1];
@@ -278,6 +316,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   onChartTouchEnd(event: TouchEvent): void {
+    if (event.touches.length === 0) {
+      this.touchPanOneFinger = false;
+    }
     if (event.touches.length < 2) {
       this.pinchActive = false;
     }
@@ -337,6 +378,84 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.chartZoomLo = newLo;
     this.chartZoomHi = newHi;
     return true;
+  }
+
+  /**
+   * Desplaza la ventana [lo,hi] en el tiempo (arrastre lateral tras zoom).
+   * dx > 0 = arrastre hacia la derecha → ver tiempos anteriores.
+   */
+  private tryApplyChartPanByPixels(
+    dx: number,
+    panStartZoomLo: number,
+    panStartZoomHi: number
+  ): boolean {
+    if (!this.hasChartData) return false;
+    const el = this.chartSvgWrap?.nativeElement;
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return false;
+    const W0 = panStartZoomHi - panStartZoomLo;
+    const deltaNorm = (dx / rect.width) * W0;
+    let newLo = panStartZoomLo - deltaNorm;
+    let newHi = panStartZoomHi - deltaNorm;
+    if (newLo < 0) {
+      newHi -= newLo;
+      newLo = 0;
+    }
+    if (newHi > 1) {
+      newLo -= newHi - 1;
+      newHi = 1;
+    }
+    newLo = Math.max(0, newLo);
+    newHi = Math.min(1, newHi);
+    if (newHi - newLo < 1e-5) return false;
+
+    const full = this.chartReadings();
+    if (full.length < 2) return false;
+    const tMin = new Date(full[0].at).getTime();
+    const tMax = new Date(full[full.length - 1].at).getTime();
+    const span = tMax - tMin;
+    if (!Number.isFinite(span) || span <= 0) return false;
+    const ta = tMin + newLo * span;
+    const tb = tMin + newHi * span;
+    const count = full.filter((r) => {
+      const t = new Date(r.at).getTime();
+      return t >= ta && t <= tb;
+    }).length;
+    if (count < 2) return false;
+
+    this.chartZoomLo = newLo;
+    this.chartZoomHi = newHi;
+    return true;
+  }
+
+  onChartMouseDown(event: MouseEvent): void {
+    if (event.button !== 0 || !this.hasChartData || !this.chartZoomIsActive) return;
+    const panStartClientX = event.clientX;
+    const panStartZoomLo = this.chartZoomLo;
+    const panStartZoomHi = this.chartZoomHi;
+    const el = this.chartSvgWrap?.nativeElement;
+    if (!el) return;
+
+    this.chartPanDrag = true;
+    this.chartPanGlobalCleanup?.();
+    const onMove = (e: MouseEvent) => {
+      const dx = e.clientX - panStartClientX;
+      this.tryApplyChartPanByPixels(dx, panStartZoomLo, panStartZoomHi);
+    };
+    const onUp = () => {
+      this.chartPanDrag = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      this.chartPanGlobalCleanup = undefined;
+    };
+    this.chartPanGlobalCleanup = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    event.preventDefault();
   }
 
   get selectedDevice(): DashboardDevice | null {
@@ -629,6 +748,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.filterTo = '';
     this.clearRemoteChartState();
     this.resetChartZoom();
+    // Sin esto, en equipo nube la serie queda en null y chartReadingsImpl devuelve [] hasta otro evento.
+    this.scheduleRemoteChartLoad();
   }
 
   onFilterDayChange(): void {
@@ -679,6 +800,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   onChartMouseMove(event: MouseEvent): void {
+    if (this.chartPanDrag) return;
     const el = event.currentTarget as HTMLElement | null;
     if (!el) return;
     const series = this.chartPointsForDraw();
@@ -694,7 +816,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   onChartMouseLeave(): void {
-    this.hoverIndex = null;
+    if (!this.chartPanDrag) {
+      this.hoverIndex = null;
+    }
   }
 
   /** Serie temporal tras el zoom (misma base que el gráfico). */
