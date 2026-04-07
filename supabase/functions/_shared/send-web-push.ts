@@ -18,6 +18,19 @@ export interface PushPayload {
 const PUSH_TTL_SECONDS = 86_400;
 
 /**
+ * web-push espera claves en base64url (como el navegador en PushSubscription.toJSON()).
+ * Filas antiguas pueden tener base64 estándar (con + /); normalizamos para no romper el cifrado.
+ */
+function normalizePushSubscriptionKey(key: string): string {
+  const t = key.trim();
+  if (!t) return t;
+  if (t.includes('+') || t.includes('/')) {
+    return t.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  return t;
+}
+
+/**
  * URL pública del front (HTTPS, sin barra final), ej. https://tu-app.vercel.app
  * Secret en Supabase: APP_PUBLIC_URL — para icon/badge absolutos en Android/Chrome en segundo plano.
  */
@@ -106,10 +119,12 @@ export async function sendPushToUser(
   let lastError = '';
   for (const s of subs) {
     try {
+      const p256dh = normalizePushSubscriptionKey(s.p256dh);
+      const auth = normalizePushSubscriptionKey(s.auth);
       await webPush.sendNotification(
         {
           endpoint: s.endpoint,
-          keys: { p256dh: s.p256dh, auth: s.auth },
+          keys: { p256dh, auth },
         },
         body,
         { TTL: PUSH_TTL_SECONDS }

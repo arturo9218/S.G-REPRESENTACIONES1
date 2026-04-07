@@ -4,14 +4,16 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth.service';
 
-function uint8ToBase64(buf: ArrayBuffer | null): string {
-  if (!buf) return '';
-  const bytes = new Uint8Array(buf);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
+/**
+ * Claves del PushSubscription en base64url (RFC 4648 §5), como en `subscription.toJSON()`.
+ * Antes se usaba btoa (base64 con +/) y la librería web-push en el Edge Function puede fallar al cifrar.
+ */
+function keysFromPushSubscription(sub: PushSubscription): { p256dh: string; auth: string } | null {
+  const j = sub.toJSON();
+  const pk = j.keys?.['p256dh'];
+  const ak = j.keys?.['auth'];
+  if (!pk || !ak) return null;
+  return { p256dh: pk, auth: ak };
 }
 
 function formatPushSubscribeError(raw: string): string {
@@ -116,8 +118,14 @@ export class WebPushService {
     }
     try {
       const sub = await requestSubscriptionWithRetry(this.swPush, pk);
-      const p256dh = uint8ToBase64(sub.getKey('p256dh'));
-      const auth = uint8ToBase64(sub.getKey('auth'));
+      const keys = keysFromPushSubscription(sub);
+      if (!keys) {
+        return {
+          ok: false,
+          message: 'No se pudieron leer las claves de la suscripción push (p256dh/auth). Probá de nuevo o otro navegador.',
+        };
+      }
+      const { p256dh, auth } = keys;
       const { error } = await this.auth.client.from('push_subscriptions').upsert(
         {
           user_id: user.id,
