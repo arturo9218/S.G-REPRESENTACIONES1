@@ -4,7 +4,7 @@
 // supabase functions deploy ingest-reading --no-verify-jwt
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { sendPushToUser } from '../_shared/send-web-push.ts';
+import { sendPushToOwnerAndAdmins } from '../_shared/send-web-push.ts';
 import { formatEsArDateTime } from '../_shared/format-datetime.ts';
 
 const TEMP_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
@@ -234,7 +234,7 @@ Deno.serve(async (req) => {
         else if (shouldSendTemp) title = `${deviceName} · temperatura`;
         else title = `${deviceName} · corriente`;
 
-        const pushResult = await sendPushToUser(supabase, device.owner_user_id, {
+        const pushResult = await sendPushToOwnerAndAdmins(supabase, device.owner_user_id, {
           title,
           body: bodyText,
           data: {

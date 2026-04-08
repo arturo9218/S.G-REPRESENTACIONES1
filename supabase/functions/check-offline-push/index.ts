@@ -3,7 +3,7 @@
 // Deploy: supabase functions deploy check-offline-push --no-verify-jwt
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { sendPushToUser } from '../_shared/send-web-push.ts';
+import { sendPushToOwnerAndAdmins } from '../_shared/send-web-push.ts';
 import { formatEsArDateTime } from '../_shared/format-datetime.ts';
 
 const corsHeaders = {
@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
     const name = typeof d.name === 'string' ? d.name : 'Dispositivo';
     const lastReadingAt = new Date(lastAt);
     const avisoAt = new Date(now);
-    const r = await sendPushToUser(supabase, d.owner_user_id as string, {
+    const r = await sendPushToOwnerAndAdmins(supabase, d.owner_user_id as string, {
       title: `${name}: dispositivo desconectado`,
       body:
         `Sin lecturas nuevas. Última lectura: ${formatEsArDateTime(lastReadingAt)}. ` +

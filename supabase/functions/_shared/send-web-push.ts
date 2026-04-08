@@ -39,11 +39,19 @@ function notificationBaseUrl(): string | undefined {
   return u || undefined;
 }
 
-export async function sendPushToUser(
+/**
+ * Envía el mismo aviso a todas las suscripciones push de los `userIds` indicados (sin duplicar user_id).
+ */
+export async function sendPushToUsers(
   supabase: SupabaseClient,
-  userId: string,
+  userIds: string[],
   payload: PushPayload
 ): Promise<{ sent: number; skipped?: string; lastError?: string }> {
+  const unique = [...new Set(userIds.filter((id) => typeof id === 'string' && id.length > 0))];
+  if (!unique.length) {
+    return { sent: 0, skipped: 'no_user_ids' };
+  }
+
   const publicKey = Deno.env.get('VAPID_PUBLIC_KEY')?.trim();
   const privateKey = Deno.env.get('VAPID_PRIVATE_KEY')?.trim();
   const subject = Deno.env.get('VAPID_SUBJECT')?.trim() ?? 'mailto:noreply@example.com';
@@ -57,12 +65,12 @@ export async function sendPushToUser(
   const { data: subs, error } = await supabase
     .from('push_subscriptions')
     .select('endpoint, p256dh, auth')
-    .eq('user_id', userId);
+    .in('user_id', unique);
 
   if (error || !subs?.length) {
     const sk = error?.message ?? 'no_subscriptions';
     if (sk === 'no_subscriptions') {
-      console.warn('[send-web-push] Sin filas en push_subscriptions para user_id=', userId);
+      console.warn('[send-web-push] Sin filas en push_subscriptions para user_ids=', unique.join(','));
     } else {
       console.warn('[send-web-push] Error leyendo suscripciones:', sk);
     }
@@ -144,4 +152,34 @@ export async function sendPushToUser(
     lastError = 'all_endpoints_failed';
   }
   return { sent, lastError: lastError || undefined };
+}
+
+export async function sendPushToUser(
+  supabase: SupabaseClient,
+  userId: string,
+  payload: PushPayload
+): Promise<{ sent: number; skipped?: string; lastError?: string }> {
+  return sendPushToUsers(supabase, [userId], payload);
+}
+
+/**
+ * Dueño del equipo + todos los administradores (tabla admin_emails). Cada admin debe haber
+ * activado notificaciones en la app con su cuenta para tener filas en push_subscriptions.
+ */
+export async function sendPushToOwnerAndAdmins(
+  supabase: SupabaseClient,
+  ownerUserId: string,
+  payload: PushPayload
+): Promise<{ sent: number; skipped?: string; lastError?: string }> {
+  const ids: string[] = [ownerUserId];
+  const { data: adminRows, error } = await supabase.rpc('get_admin_user_ids_for_push');
+  if (error) {
+    console.warn('[send-web-push] get_admin_user_ids_for_push:', error.message);
+  } else if (adminRows && Array.isArray(adminRows)) {
+    for (const row of adminRows as { user_id?: string }[]) {
+      const uid = row?.user_id;
+      if (typeof uid === 'string' && uid !== ownerUserId) ids.push(uid);
+    }
+  }
+  return sendPushToUsers(supabase, ids, payload);
 }
