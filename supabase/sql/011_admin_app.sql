@@ -1,3 +1,21 @@
+/*
+  IMPORTANTE — no usar solo este archivo en producción para “varios administradores”:
+
+  - La función is_app_admin() definida abajo compara contra UN email fijo en el SQL.
+  - El panel “Administradores” guarda en public.admin_emails (012_admin_emails.sql).
+    Si is_app_admin() sigue siendo la versión de 011, los nuevos admins en la tabla
+    NO tendrán permisos de admin en la base.
+
+  Orden recomendado en un proyecto nuevo:
+  1) 011_admin_app.sql  → políticas RLS para admin + primera versión de is_app_admin
+  2) 012_admin_emails.sql → tabla admin_emails + is_app_admin() basada en esa tabla
+  3) 020_is_app_admin_auth_users_email.sql → is_app_admin() usando email de auth.users
+     (más fiable que solo auth.jwt() ->> 'email')
+
+  Si ya ejecutaste 011 y 012, al menos corré 020 si los admins agregados en el panel
+  no ven todos los equipos.
+*/
+
 -- Permite leer/modificar todos los dispositivos, lecturas y umbrales si el JWT
 -- coincide con el email de administrador (sin guardar contraseñas en la DB).
 
