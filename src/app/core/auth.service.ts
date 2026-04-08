@@ -23,7 +23,7 @@ export class AuthService {
     return list.some((e) => e.trim().toLowerCase() === n);
   }
 
-  /** Coincide con public.is_app_admin() (tabla admin_emails). Ante error de red usa isAdminEmail. */
+  /** Coincide con public.is_app_admin() (tabla admin_emails). Ante error de red o false, usa environment.adminEmails. */
   async fetchIsAppAdmin(): Promise<boolean> {
     const session = await this.getSession();
     if (!session?.user?.email) return false;
@@ -33,7 +33,8 @@ export class AuthService {
         console.warn('is_app_admin:', error.message);
         return this.isAdminEmail(session.user.email);
       }
-      return data === true;
+      if (data === true) return true;
+      return this.isAdminEmail(session.user.email);
     } catch {
       return this.isAdminEmail(session.user.email);
     }
