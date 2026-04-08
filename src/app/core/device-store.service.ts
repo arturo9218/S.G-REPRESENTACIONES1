@@ -581,12 +581,12 @@ export class DeviceStoreService {
 
     const patch: Record<string, null> = {};
     if (ev.kind === 'temp_breach') {
-      patch.temp_breach_episode_started_at = null;
-      patch.last_push_temp_breach_at = null;
+      patch['temp_breach_episode_started_at'] = null;
+      patch['last_push_temp_breach_at'] = null;
     } else if (ev.kind === 'current_breach') {
-      patch.last_push_current_breach_at = null;
+      patch['last_push_current_breach_at'] = null;
     } else if (ev.kind === 'offline') {
-      patch.last_push_offline_at = null;
+      patch['last_push_offline_at'] = null;
     }
 
     if (Object.keys(patch).length > 0) {
