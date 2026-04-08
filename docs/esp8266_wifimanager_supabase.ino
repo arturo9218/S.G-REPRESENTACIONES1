@@ -63,6 +63,15 @@ static const int SCT_SAMPLE_DELAY_US = 200;
 static const float SCT_MIN_WATTS = 8.0f;
 
 /**
+ * Filtro sobre la corriente RMS ya calculada (reduce ruido y picos espurios entre envíos).
+ * SCT_FILTER_ALPHA: 0–1; más alto = responde más rápido, más bajo = más suave (ej. 0.25–0.45).
+ * SCT_FILTER_MAX_OUTLIER_A: si el salto respecto al valor filtrado supera esto (A), se toma
+ *   la lectura anterior filtrada para ese ciclo (rechazo de pico). 0 = desactivar.
+ */
+static const float SCT_FILTER_ALPHA = 0.35f;
+static const float SCT_FILTER_MAX_OUTLIER_A = 10.0f;
+
+/**
  * EEPROM v2: magic + version + XOR del payload (evita leer basura de flash).
  */
 struct NvBlob {
@@ -538,6 +547,28 @@ float readSctAmpsRms() {
   return amps;
 }
 
+/**
+ * Suavizado IIR + rechazo de outliers sobre amps (una vez por ciclo sendTelemetry).
+ * Cuando la lectura cae a 0 (bajo ruido), se reinicia el estado para no arrastrar valores viejos.
+ */
+float filterSctAmpsForSend(float rawAmps) {
+  static float ema = NAN;
+  if (rawAmps <= 0.0f) {
+    ema = NAN;
+    return 0.0f;
+  }
+  if (isnan(ema)) {
+    ema = rawAmps;
+    return rawAmps;
+  }
+  float x = rawAmps;
+  if (SCT_FILTER_MAX_OUTLIER_A > 0.0f && fabsf(x - ema) > SCT_FILTER_MAX_OUTLIER_A) {
+    x = ema;
+  }
+  ema = SCT_FILTER_ALPHA * x + (1.0f - SCT_FILTER_ALPHA) * ema;
+  return ema;
+}
+
 static unsigned long intervalMsFromCfg() {
   unsigned long interval = strtoul(cfg.intervalMs, nullptr, 10);
   if (interval < 3000) interval = DEFAULT_INTERVAL_MS;
@@ -748,7 +779,8 @@ static void flushPendingBacklog() {
 void sendTelemetry() {
   float t1 = NAN, t2 = NAN;
   readTemps12(&t1, &t2);
-  float amps = readSctAmpsRms();
+  float ampsRaw = readSctAmpsRms();
+  float amps = filterSctAmpsForSend(ampsRaw);
   float p = MAINS_V_RMS * amps;
   /* ingest-reading: umbral de corriente usa JSON "current_a" (A RMS). power_w es V*I para el panel. */
 

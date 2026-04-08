@@ -21,7 +21,7 @@ Enviar `POST` a la Function `ingest-reading` con JSON:
 
 ### Corriente (`current_a`)
 
-- El firmware de ejemplo (`docs/esp8266_wifimanager_supabase.ino`) **ya envía** `current_a` con la lectura RMS del SCT (`readSctAmpsRms()` → campo JSON `current_a`).
+- El firmware de ejemplo (`docs/esp8266_wifimanager_supabase.ino`) **ya envía** `current_a` con la lectura RMS del SCT (`readSctAmpsRms()`), luego un **filtro digital** (`filterSctAmpsForSend`: media exponencial + rechazo de picos fuera de un salto máximo) para suavizar ruido y errores puntuales.
 - `power_w` en el ejemplo es `MAINS_V_RMS * amps` (informativo en gráficos); **el umbral de alarma por corriente en la nube usa solo `current_a`**.
 - Si tu sketch no incluye SCT, podés omitir `current_a` o enviar `0`; no habrá alerta por corriente hasta que envíes un valor real.
 

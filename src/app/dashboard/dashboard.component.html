@@ -563,6 +563,20 @@
                   </div>
                 </ng-template>
               </div>
+              <div class="device-card__clamp" *ngIf="deviceShowClampRow(d)">
+                <div
+                  class="device-card__temps-inner device-card__temps-inner--single device-card__temps-inner--clamp"
+                >
+                  <span class="device-card__sensor-label">Pinza / corriente</span>
+                  <span class="device-card__sensor-value">{{ formatDeviceClampMain(d) }}</span>
+                  <span class="device-card__sensor-subline" *ngIf="formatDeviceClampSub(d)">{{
+                    formatDeviceClampSub(d)
+                  }}</span>
+                  <div class="device-card__sensor-foot">
+                    <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
+                  </div>
+                </div>
+              </div>
               <footer class="device-card__foot">
                 <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && d.ownerUserId">
                   Cuenta {{ formatOwnerUserIdShort(d.ownerUserId) }}
@@ -1001,6 +1015,21 @@
                   />
                 </label>
                 <label class="notify-panel__field">
+                  <span>Tensión nominal (V)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="nominalVoltageForm"
+                    (ngModelChange)="onNotificationFormChange()"
+                    placeholder="220"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    name="nominal-voltage-v"
+                    inputmode="decimal"
+                    title="Tablero: 220 V monofásico, 380 V entre fases, etc. Se guarda aunque las alertas estén apagadas."
+                  />
+                </label>
+                <label class="notify-panel__field">
                   <span>Retardo: temperatura (min)</span>
                   <input
                     type="text"
@@ -1034,7 +1063,7 @@
                 </label>
               </div>
               <p class="notify-panel__hint" *ngIf="alertsEnabledForm">
-                Los mín./máx. en °C aplican al sensor 1 y al sensor 2. Corriente: el ESP debe enviar <code>current_a</code> (A RMS); en el panel, si falta corriente y hay potencia, se muestra I estimada (P/220 V). Retardo temperatura: entre avisos si °C o corriente superan el máximo. Retardo desconectado: entre avisos si no hay datos del equipo.
+                Los mín./máx. en °C aplican al sensor 1 y al sensor 2. Corriente: el ESP debe enviar <code>current_a</code> (A RMS); si falta y hay <code>power_w</code>, el panel estima I con la tensión nominal (p. ej. 220 o 380 V según el tablero). Esa misma tensión sirve para el consumo diario (kWh) y la tarjeta “Pinza”. Retardo temperatura: entre avisos si °C o corriente superan el máximo. Retardo desconectado: entre avisos si no hay datos del equipo.
               </p>
               <p class="notify-panel__hint" *ngIf="!alertsEnabledForm">
                 Sin alertas para este dispositivo: no suena el pitido, no aparecen en el panel ni avisos del navegador (tras guardar).
@@ -1058,6 +1087,29 @@
             <ng-template #noDeviceSelectedSettings>
               <p class="card__empty">Seleccioná un dispositivo.</p>
             </ng-template>
+          </article>
+
+          <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync">
+            <h2 class="card__title card__title--sm">Consumo del día (aprox.)</h2>
+            <p class="card__hint card__hint--tight">
+              Integra la potencia entre lecturas guardadas en la nube. Definí la tensión nominal arriba (mismo bloque que umbrales) para que coincida con el tablero (220 V, 380 V entre fases, etc.).
+            </p>
+            <button
+              type="button"
+              class="btn btn--primary notify-panel__save"
+              [disabled]="dailyEnergyLoading"
+              (click)="loadDailyEnergyConsumption()"
+            >
+              {{ dailyEnergyLoading ? 'Calculando…' : 'Calcular consumo de hoy' }}
+            </button>
+            <p class="notify-panel__hint" *ngIf="dailyEnergyError">{{ dailyEnergyError }}</p>
+            <p
+              class="notify-panel__hint"
+              *ngIf="dailyEnergyKwh != null && !dailyEnergyLoading && !dailyEnergyError"
+            >
+              Desde la medianoche local hasta ahora:
+              <strong>{{ dailyEnergyKwh | number: '1.2-3' }} kWh</strong>
+            </p>
           </article>
 
           <article class="card" *ngIf="environment.deviceCloudSync">

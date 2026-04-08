@@ -18,7 +18,7 @@ import {
 } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
-import { effectiveCurrentA } from '../core/reading.utils';
+import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 
 @Component({
   selector: 'app-dashboard',
@@ -47,6 +47,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   tempHighForm = '';
   /** Corriente máxima RMS (A); vacío = sin límite */
   currentMaxForm = '';
+  /** Tensión nominal de línea (V), p. ej. 220 o 380 */
+  nominalVoltageForm = '220';
   tempPushDelayMinForm = '15';
   /** Retardo entre avisos de “desconectado” (min), independiente del de temperatura */
   offlinePushDelayMinForm = '15';
@@ -75,6 +77,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   notificationSettingsSaving = false;
   notificationSettingsFeedback = '';
   notificationSettingsFeedbackIsError = false;
+  /** Consumo aproximado del día (local), desde RPC get_device_energy_kwh (SQL 019). */
+  dailyEnergyKwh: number | null = null;
+  dailyEnergyLoading = false;
+  dailyEnergyError = '';
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
   private subAdmin: Subscription | null = null;
@@ -569,7 +575,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       }
 
       const maxA = d.currentMaxA ?? null;
-      const ia = latest ? effectiveCurrentA(latest) : null;
+      const ia = latest ? effectiveCurrentAWithNominal(latest, d.nominalVoltageV) : null;
       if (
         ia != null &&
         Number.isFinite(ia) &&
@@ -741,7 +747,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   chartHasCurrentSeries(): boolean {
-    return this.chartReadings().some((r) => effectiveCurrentA(r) != null);
+    const v = this.selectedDevice?.nominalVoltageV;
+    return this.chartReadings().some((r) => effectiveCurrentAWithNominal(r, v) != null);
   }
 
   get chartCurrentLatestLabel(): string {
@@ -816,7 +823,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   get selectedTelemetryCurrentA(): number | null {
     const t = this.selectedTelemetry;
-    return t ? effectiveCurrentA(t) : null;
+    return t ? effectiveCurrentAWithNominal(t, this.selectedDevice?.nominalVoltageV) : null;
   }
 
   get hasHumidity(): boolean {
@@ -933,7 +940,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const s1 = this.selectedSensor1Name;
       const s2 = this.selectedSensor2Name;
       const has2 = rows.some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
-      const hasCurrent = rows.some((r) => effectiveCurrentA(r) != null);
+      const nomV = device?.nominalVoltageV;
+      const hasCurrent = rows.some((r) => effectiveCurrentAWithNominal(r, nomV) != null);
 
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       doc.setFontSize(14);
@@ -978,7 +986,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           );
         }
         if (hasCurrent) {
-          const ia = effectiveCurrentA(r);
+          const ia = effectiveCurrentAWithNominal(r, nomV);
           row.push(ia != null && Number.isFinite(ia) ? ia.toFixed(2) : '—');
         }
         return row;
@@ -1219,6 +1227,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.selectedDeviceId = deviceId;
     this.sensorLabelsDirty = false;
     this.notificationSettingsDirty = false;
+    this.dailyEnergyKwh = null;
+    this.dailyEnergyError = '';
     this.syncNotificationFormWithSelected();
     this.syncPdfExportDateDefaults();
     if (syncQueryToUrl) {
@@ -1336,12 +1346,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (!this.alertsEnabledForm) {
       let currentMaxA: number | null;
+      let nominalVoltageV: number;
       try {
         currentMaxA = this.parseCurrentMaxA(this.currentMaxForm);
+        nominalVoltageV = this.parseNominalVoltageV(this.nominalVoltageForm);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         this.notificationSettingsFeedbackIsError = true;
-        this.notificationSettingsFeedback = `Revisá corriente máx. (A): ${msg}`;
+        this.notificationSettingsFeedback = `Revisá corriente máx. (A) o tensión (V): ${msg}`;
         this.scheduleNotificationFeedbackClear();
         return;
       }
@@ -1352,6 +1364,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           tempLowC: null,
           tempHighC: null,
           currentMaxA,
+          nominalVoltageV,
           tempPushCooldownMs: this.parseDelayMinutesToMs(this.tempPushDelayMinForm),
           offlinePushCooldownMs: this.parseDelayMinutesToMs(this.offlinePushDelayMinForm),
         });
@@ -1377,18 +1390,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
     let low: number | null;
     let high: number | null;
     let currentMaxA: number | null;
+    let nominalVoltageV: number;
     let delayMs: number;
     let offlineDelayMs: number;
     try {
       low = this.parseTempValue(this.tempLowForm);
       high = this.parseTempValue(this.tempHighForm);
       currentMaxA = this.parseCurrentMaxA(this.currentMaxForm);
+      nominalVoltageV = this.parseNominalVoltageV(this.nominalVoltageForm);
       delayMs = this.parseDelayMinutesToMs(this.tempPushDelayMinForm);
       offlineDelayMs = this.parseDelayMinutesToMs(this.offlinePushDelayMinForm);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.notificationSettingsFeedbackIsError = true;
-      this.notificationSettingsFeedback = `Revisá los valores (min/máx/retardo/corriente): ${msg}`;
+      this.notificationSettingsFeedback = `Revisá los valores (min/máx/retardo/corriente/tensión): ${msg}`;
       this.scheduleNotificationFeedbackClear();
       return;
     }
@@ -1406,6 +1421,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         tempLowC: low,
         tempHighC: high,
         currentMaxA,
+        nominalVoltageV,
         tempPushCooldownMs: delayMs,
         offlinePushCooldownMs: offlineDelayMs,
       });
@@ -1637,13 +1653,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       h.temp2C == null || Number.isNaN(h.temp2C)
         ? `${n1}: ${t1}`
         : `${n1}: ${t1} · ${n2}: ${this.formatTemp(h.temp2C)}`;
-    const ia = effectiveCurrentA({
-      deviceId: '',
-      at: '',
-      temperatureC: h.temperatureC,
-      currentA: h.currentA ?? null,
-      powerW: h.powerW ?? null,
-    });
+    const ia = effectiveCurrentAWithNominal(
+      { currentA: h.currentA ?? null, powerW: h.powerW ?? null },
+      this.selectedDevice?.nominalVoltageV
+    );
     if (ia != null && Number.isFinite(ia)) s += ` · ${ia.toFixed(2)} A`;
     return s;
   }
@@ -1664,7 +1677,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     name2 = 'Sensor 2'
   ): string {
     let s = this.formatReadingTempsLine(r, name1, name2);
-    const ia = effectiveCurrentA(r);
+    const ia = effectiveCurrentAWithNominal(r, this.selectedDevice?.nominalVoltageV);
     if (ia != null && Number.isFinite(ia)) {
       s += ` · ${ia.toFixed(2)} A`;
     }
@@ -1674,6 +1687,64 @@ export class DashboardComponent implements OnInit, OnDestroy {
   formatCurrent(amps: number | null | undefined): string {
     if (amps == null || Number.isNaN(amps)) return '—';
     return `${amps.toFixed(2)} A`;
+  }
+
+  /** Tarjeta tipo sensor: hay pinza/potencia cuando llega corriente o potencia > 0. */
+  deviceShowClampRow(d: DashboardDevice): boolean {
+    return (
+      (d.currentA != null && Number.isFinite(d.currentA)) ||
+      (d.powerW != null && Number.isFinite(d.powerW) && d.powerW > 0)
+    );
+  }
+
+  formatDeviceClampMain(d: DashboardDevice): string {
+    const ia = effectiveCurrentAWithNominal(
+      { currentA: d.currentA ?? null, powerW: d.powerW ?? null },
+      d.nominalVoltageV
+    );
+    return ia != null && Number.isFinite(ia) ? `${ia.toFixed(2)} A` : '—';
+  }
+
+  formatDeviceClampSub(d: DashboardDevice): string {
+    const ia = effectiveCurrentAWithNominal(
+      { currentA: d.currentA ?? null, powerW: d.powerW ?? null },
+      d.nominalVoltageV
+    );
+    if (ia == null || !Number.isFinite(ia)) return '';
+    const nv = d.nominalVoltageV != null && d.nominalVoltageV > 0 ? d.nominalVoltageV : 220;
+    const kw = (ia * nv) / 1000;
+    return `≈ ${kw.toFixed(2)} kW · ${nv} V`;
+  }
+
+  async loadDailyEnergyConsumption(): Promise<void> {
+    const device = this.selectedDevice;
+    this.dailyEnergyError = '';
+    this.dailyEnergyKwh = null;
+    if (!device || !this.environment.deviceCloudSync) {
+      this.dailyEnergyError = 'Seleccioná un dispositivo sincronizado con la nube.';
+      return;
+    }
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date();
+    this.dailyEnergyLoading = true;
+    try {
+      const { kwh, error } = await this.deviceStore.fetchDeviceEnergyKwh(
+        device.id,
+        start.toISOString(),
+        end.toISOString()
+      );
+      if (error) {
+        this.dailyEnergyError =
+          /function|schema|not find|does not exist/i.test(error)
+            ? 'Ejecutá en Supabase: FRONTEND/supabase/sql/019_nominal_voltage_energy_kwh.sql'
+            : error;
+        return;
+      }
+      this.dailyEnergyKwh = kwh ?? 0;
+    } finally {
+      this.dailyEnergyLoading = false;
+    }
   }
 
   formatPressure(bar: number | null | undefined): string {
@@ -1930,11 +2001,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private currentSeriesForwardFilled(series: TemperatureReading[]): (number | null)[] {
+    const nomV = this.selectedDevice?.nominalVoltageV;
     const n = series.length;
     const out: (number | null)[] = new Array(n).fill(null);
     let last: number | null = null;
     for (let i = 0; i < n; i++) {
-      const t = effectiveCurrentA(series[i]);
+      const t = effectiveCurrentAWithNominal(series[i], nomV);
       if (t != null && Number.isFinite(t)) last = t;
       out[i] = last;
     }
@@ -2030,6 +2102,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.tempLowForm = '';
       this.tempHighForm = '';
       this.currentMaxForm = '';
+      this.nominalVoltageForm = '220';
       this.tempPushDelayMinForm = '15';
       this.offlinePushDelayMinForm = '15';
       this.temp1OffsetForm = '0';
@@ -2055,6 +2128,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
           device.currentMaxA == null || Number.isNaN(device.currentMaxA as number)
             ? ''
             : String(device.currentMaxA);
+        this.nominalVoltageForm =
+          device.nominalVoltageV == null || Number.isNaN(device.nominalVoltageV)
+            ? '220'
+            : String(device.nominalVoltageV);
         this.tempPushDelayMinForm = String(
           this.cooldownMsToMinutes(device.tempPushCooldownMs ?? 15 * 60 * 1000)
         );
@@ -2107,6 +2184,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const n = Number.parseFloat(s);
     if (Number.isNaN(n)) throw new Error('Corriente máx. inválida');
     if (n < 0) throw new Error('La corriente máx. no puede ser negativa');
+    return n;
+  }
+
+  /** Tensión nominal (V), p. ej. 220 o 380; vacío = 220. */
+  private parseNominalVoltageV(value: string | number | null | undefined): number {
+    const s = value == null ? '' : String(value).trim().replace(',', '.');
+    if (!s) return 220;
+    const n = Number.parseFloat(s);
+    if (Number.isNaN(n)) throw new Error('Tensión nominal inválida');
+    if (n < 50 || n > 600) throw new Error('Tensión nominal: entre 50 y 600 V (ej. 220, 380)');
     return n;
   }
 

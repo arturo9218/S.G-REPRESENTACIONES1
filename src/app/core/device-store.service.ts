@@ -80,6 +80,8 @@ export interface DeviceNotificationConfigInput {
   tempHighC: number | null;
   /** Corriente máx. RMS (A); null = sin límite */
   currentMaxA: number | null;
+  /** Tensión nominal (V), p. ej. 220 o 380; null usa 220 en servidor */
+  nominalVoltageV: number | null;
   tempPushCooldownMs: number | null;
   offlinePushCooldownMs: number | null;
 }
@@ -229,6 +231,7 @@ export class DeviceStoreService {
         temp1_max_c: 8,
         temp2_min_c: 2,
         temp2_max_c: 8,
+        nominal_voltage_v: 220,
         temp_push_cooldown_ms: 15 * 60 * 1000,
         offline_push_cooldown_ms: 15 * 60 * 1000,
         temp1_offset_c: 0,
@@ -267,6 +270,7 @@ export class DeviceStoreService {
         tempPushCooldownMs: 15 * 60 * 1000,
         offlinePushCooldownMs: 15 * 60 * 1000,
         currentMaxA: null,
+        nominalVoltageV: 220,
       };
 
       this.persistDevices([...this.snapshot.filter((d) => d.id !== id), device]);
@@ -976,6 +980,7 @@ export class DeviceStoreService {
         low: number | null;
         high: number | null;
         currentMax: number | null;
+        nominalVoltage: number;
         cooldownMs: number | null;
         offlineCooldownMs: number | null;
         o1: number;
@@ -987,7 +992,7 @@ export class DeviceStoreService {
       const { data: thData } = await this.auth.client
         .from('device_thresholds')
         .select(
-          'device_id, notifications_enabled, temp1_min_c, temp1_max_c, current_max_a, temp_push_cooldown_ms, offline_push_cooldown_ms, temp1_offset_c, temp2_offset_c, temp3_offset_c'
+          'device_id, notifications_enabled, temp1_min_c, temp1_max_c, current_max_a, nominal_voltage_v, temp_push_cooldown_ms, offline_push_cooldown_ms, temp1_offset_c, temp2_offset_c, temp3_offset_c'
         )
         .in('device_id', ids);
       for (const th of (thData ?? []) as Record<string, unknown>[]) {
@@ -1009,6 +1014,12 @@ export class DeviceStoreService {
             typeof th['current_max_a'] === 'number' && !Number.isNaN(th['current_max_a'] as number)
               ? (th['current_max_a'] as number)
               : null,
+          nominalVoltage:
+            typeof th['nominal_voltage_v'] === 'number' &&
+            !Number.isNaN(th['nominal_voltage_v'] as number) &&
+            (th['nominal_voltage_v'] as number) > 0
+              ? (th['nominal_voltage_v'] as number)
+              : 220,
           cooldownMs:
             typeof th['temp_push_cooldown_ms'] === 'number' &&
             !Number.isNaN(th['temp_push_cooldown_ms'] as number)
@@ -1052,6 +1063,9 @@ export class DeviceStoreService {
         tempLowC: th?.low ?? (prev?.tempLowC ?? 2),
         tempHighC: th?.high ?? (prev?.tempHighC ?? 8),
         currentMaxA: th?.currentMax ?? prev?.currentMaxA ?? null,
+        nominalVoltageV: th?.nominalVoltage ?? prev?.nominalVoltageV ?? 220,
+        currentA: prev?.currentA ?? null,
+        powerW: prev?.powerW ?? null,
         tempPushCooldownMs: th?.cooldownMs ?? (prev?.tempPushCooldownMs ?? 15 * 60 * 1000),
         offlinePushCooldownMs:
           th?.offlineCooldownMs ??
@@ -1142,6 +1156,8 @@ export class DeviceStoreService {
         ...d,
         temperatureC: r.temperatureC,
         temperature2C: r.temp2C ?? null,
+        currentA: r.currentA ?? null,
+        powerW: r.powerW ?? null,
         online: isOnline,
         updatedAtLabel: this.formatUpdatedLabel(r.at),
       };
@@ -1380,6 +1396,12 @@ export class DeviceStoreService {
     const low = input.tempLowC;
     const high = input.tempHighC;
     const currentMaxA = input.currentMaxA;
+    const nominalV =
+      input.nominalVoltageV != null &&
+      Number.isFinite(input.nominalVoltageV) &&
+      input.nominalVoltageV > 0
+        ? input.nominalVoltageV
+        : 220;
     let cloudError: string | undefined;
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
       const nowIso = new Date().toISOString();
@@ -1394,6 +1416,7 @@ export class DeviceStoreService {
             temp2_min_c: low,
             temp2_max_c: high,
             current_max_a: currentMaxA,
+            nominal_voltage_v: nominalV,
             temp_push_cooldown_ms: input.tempPushCooldownMs,
             offline_push_cooldown_ms: input.offlinePushCooldownMs,
             updated_at: nowIso,
@@ -1413,6 +1436,7 @@ export class DeviceStoreService {
               tempLowC: low,
               tempHighC: high,
               currentMaxA,
+              nominalVoltageV: nominalV,
               tempPushCooldownMs: input.tempPushCooldownMs,
               offlinePushCooldownMs: input.offlinePushCooldownMs,
             }
@@ -1420,6 +1444,32 @@ export class DeviceStoreService {
       )
     );
     return { cloudError };
+  }
+
+  /**
+   * Energía (kWh) en un rango de tiempo (integración trapezoidal en servidor; requiere SQL 019).
+   */
+  async fetchDeviceEnergyKwh(
+    deviceId: string,
+    fromIso: string,
+    toIso: string
+  ): Promise<{ kwh: number | null; error?: string }> {
+    if (!this.isCloudSyncEnabled() || !this.isUuid(deviceId)) {
+      return { kwh: null, error: 'Solo disponible con dispositivos en la nube.' };
+    }
+    const { data, error } = await this.auth.client.rpc('get_device_energy_kwh', {
+      p_device_id: deviceId,
+      p_from: fromIso,
+      p_to: toIso,
+    });
+    if (error) {
+      return { kwh: null, error: error.message };
+    }
+    const n = typeof data === 'number' ? data : Number(data);
+    if (!Number.isFinite(n)) {
+      return { kwh: null, error: 'Respuesta inválida del servidor.' };
+    }
+    return { kwh: n };
   }
 
   async updateDeviceTempCalibration(
@@ -1461,6 +1511,12 @@ export class DeviceStoreService {
           temp2_min_c: dev?.tempLowC ?? null,
           temp2_max_c: dev?.tempHighC ?? null,
           current_max_a: dev?.currentMaxA ?? null,
+          nominal_voltage_v:
+            dev?.nominalVoltageV != null &&
+            Number.isFinite(dev.nominalVoltageV) &&
+            dev.nominalVoltageV > 0
+              ? dev.nominalVoltageV
+              : 220,
           temp_push_cooldown_ms: dev?.tempPushCooldownMs ?? 15 * 60 * 1000,
           offline_push_cooldown_ms:
             dev?.offlinePushCooldownMs ?? dev?.tempPushCooldownMs ?? 15 * 60 * 1000,
@@ -1562,6 +1618,8 @@ export class DeviceStoreService {
               ...d,
               temperatureC: applied.temperatureC,
               temperature2C: applied.temp2C ?? null,
+              currentA: applied.currentA ?? null,
+              powerW: applied.powerW ?? null,
               online: true,
               updatedAtLabel: label,
             }
@@ -1603,6 +1661,7 @@ export class DeviceStoreService {
       tempLowC: 2,
       tempHighC: 8,
       currentMaxA: null,
+      nominalVoltageV: 220,
       sensor1Label: DEFAULT_SENSOR_1_LABEL,
       sensor2Label: DEFAULT_SENSOR_2_LABEL,
     };

@@ -17,7 +17,7 @@ import {
 } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
 import { capChartPointsSorted } from '../core/chart-sampling';
-import { effectiveCurrentA } from '../core/reading.utils';
+import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 
 type AnalysisChannel = 'temp1' | 'temp2' | 'both' | 'current';
 
@@ -533,7 +533,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   get hasCurrentSeries(): boolean {
-    return this.chartReadings().some((r) => effectiveCurrentA(r) != null);
+    const v = this.selectedDevice?.nominalVoltageV;
+    return this.chartReadings().some((r) => effectiveCurrentAWithNominal(r, v) != null);
   }
 
   /** Canal corriente (A) en el selector */
@@ -1797,11 +1798,12 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   private currentSeriesForwardFilled(series: TemperatureReading[]): (number | null)[] {
+    const nomV = this.selectedDevice?.nominalVoltageV;
     const n = series.length;
     const out: (number | null)[] = new Array(n).fill(null);
     let last: number | null = null;
     for (let i = 0; i < n; i++) {
-      const t = effectiveCurrentA(series[i]);
+      const t = effectiveCurrentAWithNominal(series[i], nomV);
       if (t != null && Number.isFinite(t)) last = t;
       out[i] = last;
     }
@@ -1910,7 +1912,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       const s1 = this.sensor1Name;
       const s2 = this.sensor2Name;
       const has2 = rows.some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
-      const hasCurrent = rows.some((r) => effectiveCurrentA(r) != null);
+      const nomV = device?.nominalVoltageV;
+      const hasCurrent = rows.some((r) => effectiveCurrentAWithNominal(r, nomV) != null);
 
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pageW = doc.internal.pageSize.getWidth();
@@ -1993,7 +1996,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
         const row: string[] = [this.formatPdfDateTime(r.at)];
         if (this.analysisShowsCurrent) {
           if (hasCurrent) {
-            const ia = effectiveCurrentA(r);
+            const ia = effectiveCurrentAWithNominal(r, nomV);
             row.push(ia != null && Number.isFinite(ia) ? ia.toFixed(2) : '—');
           }
         } else if (this.analysisChannel === 'both') {

@@ -25,6 +25,12 @@ export interface DashboardDevice {
   tempHighC?: number | null;
   /** Corriente máxima RMS (A); superarla dispara alarma; null = sin umbral */
   currentMaxA?: number | null;
+  /** Tensión nominal de línea (V) para P = V·I y consumo kWh; p. ej. 220 o 380 */
+  nominalVoltageV?: number | null;
+  /** Última corriente RMS (A) reflejada desde lecturas */
+  currentA?: number | null;
+  /** Última potencia (W) desde lecturas */
+  powerW?: number | null;
   /** Retardo entre alertas push de temperatura para este equipo (ms) */
   tempPushCooldownMs?: number | null;
   /** Retardo entre avisos de “desconectado” (ms); independiente del de temperatura */
