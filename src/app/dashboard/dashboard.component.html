@@ -492,7 +492,20 @@
                   <div class="device-card__temps-inner">
                     <div class="device-card__sensor-col">
                       <span class="device-card__sensor-label">{{ d.sensor1Label || 'Sensor 1' }}</span>
-                      <span class="device-card__sensor-value">{{ formatTempCard(d.temperatureC) }}</span>
+                      <span
+                        class="device-card__sensor-value"
+                        [attr.aria-label]="formatTempCard(d.temperatureC)"
+                      >
+                        <span class="device-card__sensor-value-num">{{
+                          formatTempCardValueOnly(d.temperatureC)
+                        }}</span>
+                        <span
+                          *ngIf="formatTempCardValueOnly(d.temperatureC) !== '—'"
+                          class="device-card__sensor-value-unit"
+                          aria-hidden="true"
+                          >°C</span
+                        >
+                      </span>
                       <div class="device-card__sensor-foot">
                         <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
                         <a
@@ -512,7 +525,20 @@
                     </div>
                     <div class="device-card__sensor-col">
                       <span class="device-card__sensor-label">{{ d.sensor2Label || 'Sensor 2' }}</span>
-                      <span class="device-card__sensor-value">{{ formatTempCard(d.temperature2C) }}</span>
+                      <span
+                        class="device-card__sensor-value"
+                        [attr.aria-label]="formatTempCard(d.temperature2C)"
+                      >
+                        <span class="device-card__sensor-value-num">{{
+                          formatTempCardValueOnly(d.temperature2C)
+                        }}</span>
+                        <span
+                          *ngIf="formatTempCardValueOnly(d.temperature2C) !== '—'"
+                          class="device-card__sensor-value-unit"
+                          aria-hidden="true"
+                          >°C</span
+                        >
+                      </span>
                       <div class="device-card__sensor-foot">
                         <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
                         <a
@@ -536,7 +562,20 @@
                   <ng-container *ngIf="d.temperatureC != null || d.temperature2C != null; else noTemp">
                     <div class="device-card__temps-inner device-card__temps-inner--single">
                       <span class="device-card__sensor-label">{{ deviceFirstSensorLabel(d) }}</span>
-                      <span class="device-card__sensor-value">{{ formatTempCard(deviceFirstTempC(d)) }}</span>
+                      <span
+                        class="device-card__sensor-value"
+                        [attr.aria-label]="formatTempCard(deviceFirstTempC(d))"
+                      >
+                        <span class="device-card__sensor-value-num">{{
+                          formatTempCardValueOnly(deviceFirstTempC(d))
+                        }}</span>
+                        <span
+                          *ngIf="formatTempCardValueOnly(deviceFirstTempC(d)) !== '—'"
+                          class="device-card__sensor-value-unit"
+                          aria-hidden="true"
+                          >°C</span
+                        >
+                      </span>
                       <div class="device-card__sensor-foot">
                         <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
                         <a
@@ -568,7 +607,18 @@
                   class="device-card__temps-inner device-card__temps-inner--single device-card__temps-inner--clamp"
                 >
                   <span class="device-card__sensor-label">Pinza / corriente</span>
-                  <span class="device-card__sensor-value">{{ formatDeviceClampMain(d) }}</span>
+                  <span
+                    class="device-card__sensor-value"
+                    [attr.aria-label]="formatDeviceClampMain(d)"
+                  >
+                    <span class="device-card__sensor-value-num">{{ formatDeviceClampAmpNum(d) }}</span>
+                    <span
+                      *ngIf="formatDeviceClampAmpNum(d) !== '—'"
+                      class="device-card__sensor-value-unit device-card__sensor-value-unit--amp"
+                      aria-hidden="true"
+                      >A</span
+                    >
+                  </span>
                   <span class="device-card__sensor-subline" *ngIf="formatDeviceClampSub(d)">{{
                     formatDeviceClampSub(d)
                   }}</span>

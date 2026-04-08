@@ -1622,6 +1622,21 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return `${sign}${c.toFixed(2)}°C`;
   }
 
+  /** Solo el número con signo; la unidad va en un <span> aparte para evitar recortes/° mal leídos. */
+  formatTempCardValueOnly(c: number | null): string {
+    if (c == null || Number.isNaN(c)) return '—';
+    const sign = c > 0 ? '+' : '';
+    return `${sign}${c.toFixed(2)}`;
+  }
+
+  formatDeviceClampAmpNum(d: DashboardDevice): string {
+    const ia = effectiveCurrentAWithNominal(
+      { currentA: d.currentA ?? null, powerW: d.powerW ?? null },
+      d.nominalVoltageV
+    );
+    return ia != null && Number.isFinite(ia) ? ia.toFixed(2) : '—';
+  }
+
   /** Lectura actual: layout dos columnas cuando hay ambos canales con valor. */
   hasDualTelemetry(t: TemperatureReading): boolean {
     return (
@@ -1698,11 +1713,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   formatDeviceClampMain(d: DashboardDevice): string {
-    const ia = effectiveCurrentAWithNominal(
-      { currentA: d.currentA ?? null, powerW: d.powerW ?? null },
-      d.nominalVoltageV
-    );
-    return ia != null && Number.isFinite(ia) ? `${ia.toFixed(2)} A` : '—';
+    const n = this.formatDeviceClampAmpNum(d);
+    return n === '—' ? '—' : `${n} A`;
   }
 
   formatDeviceClampSub(d: DashboardDevice): string {
