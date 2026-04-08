@@ -1555,7 +1555,7 @@ $border: rgba(148, 163, 184, 0.18);
 .device-card__sensor-col {
   display: flex;
   flex-direction: column;
-  padding: 0.75rem 0.6rem 0.65rem;
+  padding: 0.75rem 0.55rem 0.65rem;
   min-width: 0;
 
   &:not(:last-child) {
@@ -1581,9 +1581,10 @@ $border: rgba(148, 163, 184, 0.18);
   flex: 1;
   display: inline-flex;
   flex-wrap: nowrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
-  gap: 0.12em;
+  /* gap en rem: evita solapar °C con el último dígito (em relativo al padre era demasiado chico) */
+  gap: 0.35rem;
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
@@ -1591,8 +1592,9 @@ $border: rgba(148, 163, 184, 0.18);
   font-weight: 700;
   color: #f8fafc;
   letter-spacing: 0;
-  line-height: 1.12;
-  padding: 0.35rem 0.15rem;
+  line-height: 1.15;
+  padding: 0.35rem 0.25rem;
+  white-space: nowrap;
 
   &--muted {
     font-size: 1.05rem;
@@ -1603,22 +1605,26 @@ $border: rgba(148, 163, 184, 0.18);
 }
 
 .device-card__sensor-value-num {
+  flex-shrink: 0;
   font-variant-numeric: tabular-nums;
-  min-width: 0;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .device-card__sensor-value-unit {
   flex-shrink: 0;
-  font-size: 0.62em;
+  font-size: 0.52em;
   font-weight: 700;
   line-height: 1;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   align-self: center;
-  padding-bottom: 0.06em;
+  /* separación explícita del número (algunos fonts pegan ° al dígito) */
+  margin-left: 0.02em;
+  padding-left: 0.02em;
 
   &--amp {
-    margin-left: 0.06em;
+    font-size: 0.58em;
+    margin-left: 0.12em;
+    padding-left: 0;
   }
 }
 
