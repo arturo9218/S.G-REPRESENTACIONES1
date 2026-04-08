@@ -1,20 +1,16 @@
 /*
-  Corriente RMS del SCT (A) por lectura. Ejecutar en Supabase SQL Editor despues de 001-004.
+  Restaura get_device_readings_chart para que el administrador pueda ver graficos de cualquier dispositivo.
 
-  Si ya usas administradores (011 + 012), este script reemplaza get_device_readings_chart y deja
-  el RPC solo para el dueno. Volvé a aplicar 016_get_device_readings_chart_admin.sql
-  para que el admin pueda abrir graficos de analisis de equipos ajenos.
+  Problema: 003 y 005 definen la funcion solo para el dueno (auth.uid() = owner). Si ejecutaste 005
+  despues de 011, se sobrescribio la version con soporte admin: el RPC del analisis devuelve not authorized.
 
-  NOTA: Los comentarios SQL usan doble guion -- o este bloque /* */. Un solo guion - da error de sintaxis.
+  Requisitos: 011_admin_app.sql y 012_admin_emails.sql (is_app_admin con tabla admin_emails).
+  En Supabase: SQL Editor, pegar y ejecutar todo este archivo (NOTIFY recarga la API).
 */
 
-alter table public.device_readings
-  add column if not exists current_a double precision;
+drop function if exists public.get_device_readings_chart(uuid, timestamptz, timestamptz) cascade;
 
-comment on column public.device_readings.current_a is 'Corriente RMS medida (ej. SCT-013), amperios';
-
--- Actualiza la función de gráficos para incluir promedio de corriente en cada bucket.
-create or replace function public.get_device_readings_chart(
+create function public.get_device_readings_chart(
   p_device_id uuid,
   p_from timestamptz,
   p_to timestamptz
@@ -46,8 +42,11 @@ begin
     return;
   end if;
 
-  -- Solo dueño (sin admin). Para admin + gráficos: 016_get_device_readings_chart_admin.sql
-  if auth.uid() is null or auth.uid() <> v_owner then
+  if auth.uid() is null then
+    raise exception 'not authorized' using errcode = '42501';
+  end if;
+
+  if auth.uid() <> v_owner and not public.is_app_admin() then
     raise exception 'not authorized' using errcode = '42501';
   end if;
 
