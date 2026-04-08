@@ -291,7 +291,9 @@ Deno.serve(async (req) => {
         if (shouldSendCurr) patch.last_push_current_breach_at = nowIso;
         await supabase.from('device_thresholds').update(patch).eq('device_id', device.id);
 
-        if (shouldSendTemp) {
+        /** Historial: solo el 1er aviso del episodio; las repeticiones cada 1 min son solo push. */
+        const firstTempPushOfEpisode = shouldSendTemp && !th.last_push_temp_breach_at;
+        if (firstTempPushOfEpisode) {
           const combinedMsg = tempMsgs.join('\n');
           const { error: e1 } = await supabase.from('device_alarm_events').insert({
             device_id: device.id,
