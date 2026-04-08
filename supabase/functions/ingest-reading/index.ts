@@ -196,6 +196,18 @@ Deno.serve(async (req) => {
             .from('device_thresholds')
             .update({ last_push_temp_breach_at: new Date().toISOString() })
             .eq('device_id', device.id);
+          const { error: alarmInsErr } = await supabase.from('device_alarm_events').insert({
+            device_id: device.id,
+            owner_user_id: device.owner_user_id,
+            triggered_at: new Date().toISOString(),
+            kind: 'temp_breach',
+            message: msg,
+            detail: null,
+            temp1_c: t,
+          });
+          if (alarmInsErr) {
+            console.warn('[ingest-reading] device_alarm_events:', alarmInsErr.message);
+          }
           if (pushResult.sent === 0) {
             console.warn('[ingest-reading] alarma temp sin push entregado:', pushResult);
           }

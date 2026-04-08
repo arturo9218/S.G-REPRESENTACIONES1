@@ -596,6 +596,49 @@
             </ng-template>
           </article>
 
+          <article
+            class="card card--alarm-history"
+            *ngIf="(shellRoute === 'dashboard' || shellRoute === 'alerts') && deviceStore.isCloudSyncActive()"
+          >
+            <div class="card__title-row">
+              <h2 class="card__title card__title--sm">Historial de alarmas (nube)</h2>
+              <button
+                type="button"
+                class="btn btn--ghost btn--sm"
+                (click)="loadAlarmHistory()"
+                [disabled]="alarmHistoryLoading"
+                title="Actualizar lista"
+              >
+                {{ alarmHistoryLoading ? '…' : 'Actualizar' }}
+              </button>
+            </div>
+            <p class="card__hint card__hint--sm" *ngIf="alarmHistoryError">
+              {{ alarmHistoryError }}
+            </p>
+            <p class="card__empty" *ngIf="!alarmHistoryLoading && !alarmHistoryError && !alarmHistoryItems.length">
+              Todavía no hay registros. Se guardan cuando se envía un aviso de umbral o de desconectado (Edge).
+            </p>
+            <ul class="alarm-history-list" *ngIf="alarmHistoryItems.length">
+              <li class="alarm-history-item" *ngFor="let ev of alarmHistoryItems">
+                <div class="alarm-history-item__body">
+                  <span class="alarm-history-item__time">{{ ev.triggeredAt | date:'dd/MM/yy HH:mm:ss' }}</span>
+                  <span class="alarm-history-item__device">{{ deviceNameForAlarm(ev.deviceId) }}</span>
+                  <span class="alarm-history-item__kind">{{ alarmKindLabel(ev.kind) }}</span>
+                  <p class="alarm-history-item__msg">{{ ev.message }}</p>
+                  <p class="alarm-history-item__detail" *ngIf="ev.detail">{{ ev.detail }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn--ghost alarm-history-item__del"
+                  (click)="deleteAlarmHistoryRow(ev)"
+                  title="Eliminar este registro"
+                >
+                  Quitar
+                </button>
+              </li>
+            </ul>
+          </article>
+
           <article class="card card--telemetry-sidebar">
             <h2 class="card__title card__title--sm">Lectura actual (multi-sensor)</h2>
             <div class="telemetry" *ngIf="selectedTelemetry as t; else noTelemetry">

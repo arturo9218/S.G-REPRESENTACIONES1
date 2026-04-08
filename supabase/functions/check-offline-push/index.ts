@@ -135,6 +135,21 @@ Deno.serve(async (req) => {
       .from('device_thresholds')
       .update({ last_push_offline_at: new Date().toISOString() })
       .eq('device_id', d.id);
+    const bodyText =
+      `Sin lecturas nuevas. Última lectura: ${formatEsArDateTime(lastReadingAt)}. ` +
+      `Aviso: ${formatEsArDateTime(avisoAt)}.`;
+    const { error: alarmInsErr } = await supabase.from('device_alarm_events').insert({
+      device_id: d.id,
+      owner_user_id: d.owner_user_id as string,
+      triggered_at: new Date().toISOString(),
+      kind: 'offline',
+      message: `${name}: dispositivo desconectado`,
+      detail: bodyText,
+      temp1_c: null,
+    });
+    if (alarmInsErr) {
+      console.warn('[check-offline-push] device_alarm_events:', alarmInsErr.message);
+    }
     if (r.sent === 0) {
       console.warn('[check-offline-push] offline push no entregado:', d.id, r);
     }

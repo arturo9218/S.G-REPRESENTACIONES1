@@ -8,7 +8,11 @@ import { BehaviorSubject } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth.service';
 import { ingestFunctionUrl, isSupabaseConfigured } from './supabase-config';
-import { DashboardDevice, TemperatureReading } from './models/dashboard.models';
+import {
+  DashboardDevice,
+  DeviceAlarmEvent,
+  TemperatureReading,
+} from './models/dashboard.models';
 
 const STORAGE_KEY_PREFIX = 'ar-monitor-devices-v2';
 const READINGS_KEY_PREFIX = 'ar-monitor-readings-v2';
@@ -483,6 +487,57 @@ export class DeviceStoreService {
   /** Sesión con Supabase y sync activado (p. ej. historial largo por RPC). */
   isCloudSyncActive(): boolean {
     return this.isCloudSyncEnabled();
+  }
+
+  /**
+   * Historial de alarmas guardadas en la nube (tabla device_alarm_events).
+   * Dueño y admin pueden listar; requiere 013_device_alarm_events.sql.
+   */
+  async fetchAlarmHistory(): Promise<{ rows: DeviceAlarmEvent[]; error: string | null }> {
+    if (!this.isCloudSyncEnabled()) {
+      return { rows: [], error: null };
+    }
+    const { data, error } = await this.auth.client
+      .from('device_alarm_events')
+      .select('id, device_id, triggered_at, kind, message, detail, temp1_c')
+      .order('triggered_at', { ascending: false })
+      .limit(200);
+    if (error) {
+      if (error.message?.includes('Could not find the table') || error.code === '42P01') {
+        return {
+          rows: [],
+          error:
+            'Ejecutá en Supabase el SQL: FRONTEND/supabase/sql/013_device_alarm_events.sql',
+        };
+      }
+      return { rows: [], error: error.message };
+    }
+    const rows: DeviceAlarmEvent[] = (data as Record<string, unknown>[]).map((row) => {
+      const kind: DeviceAlarmEvent['kind'] =
+        row['kind'] === 'offline' ? 'offline' : 'temp_breach';
+      return {
+        id: String(row['id'] ?? ''),
+        deviceId: String(row['device_id'] ?? ''),
+        triggeredAt:
+          typeof row['triggered_at'] === 'string' ? row['triggered_at'] : new Date().toISOString(),
+        kind,
+        message: typeof row['message'] === 'string' ? row['message'] : '',
+        detail: typeof row['detail'] === 'string' ? row['detail'] : null,
+        temp1C:
+          typeof row['temp1_c'] === 'number' && Number.isFinite(row['temp1_c'] as number)
+            ? (row['temp1_c'] as number)
+            : null,
+      };
+    });
+    return { rows, error: null };
+  }
+
+  async deleteAlarmEvent(id: string): Promise<{ error: string | null }> {
+    if (!this.isCloudSyncEnabled() || !id) {
+      return { error: null };
+    }
+    const { error } = await this.auth.client.from('device_alarm_events').delete().eq('id', id);
+    return { error: error?.message ?? null };
   }
 
   private isUuid(id: string): boolean {

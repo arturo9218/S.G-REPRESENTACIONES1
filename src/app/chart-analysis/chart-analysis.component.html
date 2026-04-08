@@ -90,7 +90,8 @@
         <p class="panel__hint" *ngIf="selectedIsCloudDevice">
           Sin filtros, el gráfico carga los <strong>últimos 7 días</strong> desde Supabase (comportamiento
           alineado al panel principal). Con día o rango Desde/Hasta, rangos largos usan detalle / promedio
-          por hora o por día según dure.
+          por hora o por día según dure. El eje X respeta Desde/Hasta: si la curva no llega al final del
+          rango, en ese tramo no hay lecturas en la nube todavía.
         </p>
       </div>
 
@@ -285,14 +286,14 @@
                 <polygon
                   *ngIf="showTemp1 && chartShowsAreaFill()"
                   class="chart-area chart-area--s1"
-                  [attr.points]="'0,100 ' + chartPolylinePointsS1() + ' 100,100'"
+                  [attr.points]="chartAreaPointsS1()"
                   fill="url(#chartFillS1)"
                 />
 
                 <polygon
                   *ngIf="showTemp2 && hasSecondSeries && chartShowsAreaFill()"
                   class="chart-area chart-area--s2"
-                  [attr.points]="'0,100 ' + chartPolylinePointsS2() + ' 100,100'"
+                  [attr.points]="chartAreaPointsS2()"
                   fill="url(#chartFillS2)"
                 />
 
@@ -368,7 +369,7 @@
                 <polygon
                   *ngIf="chartShowsAreaFill()"
                   class="chart-area chart-area--power"
-                  [attr.points]="'0,100 ' + chartPolylinePointsCurrent() + ' 100,100'"
+                  [attr.points]="chartAreaPointsCurrent()"
                   fill="url(#chartFillPower)"
                 />
                 <ng-container *ngIf="chartStylePreset === 'trend'">

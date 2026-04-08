@@ -83,6 +83,17 @@ export interface DashboardAlert {
   severity: 'warning' | 'critical';
 }
 
+/** Fila de public.device_alarm_events (historial almacenado al disparar alarma). */
+export interface DeviceAlarmEvent {
+  id: string;
+  deviceId: string;
+  triggeredAt: string;
+  kind: 'temp_breach' | 'offline';
+  message: string;
+  detail: string | null;
+  temp1C: number | null;
+}
+
 export interface ActivityItem {
   id: string;
   deviceName: string;

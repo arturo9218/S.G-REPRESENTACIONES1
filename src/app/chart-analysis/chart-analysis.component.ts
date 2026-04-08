@@ -298,12 +298,12 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
     const full = this.chartReadings();
     if (full.length < 2) return;
-    const tMin = new Date(full[0].at).getTime();
-    const tMax = new Date(full[full.length - 1].at).getTime();
-    const span = tMax - tMin;
+    const domPinch = this.getChartTimeDomainMs();
+    if (!domPinch) return;
+    const span = domPinch.toMs - domPinch.fromMs;
     if (!Number.isFinite(span) || span <= 0) return;
-    const ta = tMin + newLo * span;
-    const tb = tMin + newHi * span;
+    const ta = domPinch.fromMs + newLo * span;
+    const tb = domPinch.fromMs + newHi * span;
     const count = full.filter((r) => {
       const t = new Date(r.at).getTime();
       return t >= ta && t <= tb;
@@ -340,16 +340,61 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   /**
+   * Dominio temporal del eje X: con Desde/Hasta usa ese rango (aunque falten lecturas al final);
+   * sin filtro de fechas usa primera→última lectura cargada.
+   */
+  private getChartTimeDomainMs(): { fromMs: number; toMs: number } | null {
+    const ub = this.getUserDateFilterBounds();
+    if (ub) {
+      const fromMs = ub.from.getTime();
+      const toMs = ub.to.getTime();
+      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) return null;
+      return { fromMs, toMs };
+    }
+    const full = this.chartReadings();
+    if (full.length < 1) return null;
+    if (full.length === 1) {
+      const t = new Date(full[0].at).getTime();
+      return { fromMs: t, toMs: t + 1 };
+    }
+    const t0 = new Date(full[0].at).getTime();
+    const t1 = new Date(full[full.length - 1].at).getTime();
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || t0 >= t1) return null;
+    return { fromMs: t0, toMs: t1 };
+  }
+
+  /** Ventana temporal actual (incluye zoom [lo,hi] sobre el dominio). */
+  private getChartVisibleTimeRangeMs(): { t0: number; t1: number } | null {
+    const dom = this.getChartTimeDomainMs();
+    if (!dom) return null;
+    const span = dom.toMs - dom.fromMs;
+    if (!Number.isFinite(span) || span <= 0) return null;
+    return {
+      t0: dom.fromMs + this.chartZoomLo * span,
+      t1: dom.fromMs + this.chartZoomHi * span,
+    };
+  }
+
+  /** Posición X en el viewBox 0–100 según tiempo dentro de la ventana visible. */
+  private chartSvgXForTimeMs(t: number): number | null {
+    const vis = this.getChartVisibleTimeRangeMs();
+    if (!vis || vis.t1 <= vis.t0) return null;
+    const x = ((t - vis.t0) / (vis.t1 - vis.t0)) * 100;
+    return Math.max(0, Math.min(100, x));
+  }
+
+  /**
    * Ajusta el ancho normalizado del rango visible [0,1], anclado en `frac` (0=izq, 1=der).
    */
   private tryApplyChartZoomWindow(newW: number, frac: number): boolean {
     if (!this.hasChartData) return false;
     const full = this.chartReadings();
     if (full.length < 2) return false;
-    const tMin = new Date(full[0].at).getTime();
-    const tMax = new Date(full[full.length - 1].at).getTime();
-    const span = tMax - tMin;
+    const dom = this.getChartTimeDomainMs();
+    if (!dom) return false;
+    const span = dom.toMs - dom.fromMs;
     if (!Number.isFinite(span) || span <= 0) return false;
+    const tMin = dom.fromMs;
 
     const pos = this.chartZoomLo + frac * (this.chartZoomHi - this.chartZoomLo);
     let w = Math.max(1e-5, Math.min(1, newW));
@@ -412,12 +457,12 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
     const full = this.chartReadings();
     if (full.length < 2) return false;
-    const tMin = new Date(full[0].at).getTime();
-    const tMax = new Date(full[full.length - 1].at).getTime();
-    const span = tMax - tMin;
+    const dom = this.getChartTimeDomainMs();
+    if (!dom) return false;
+    const span = dom.toMs - dom.fromMs;
     if (!Number.isFinite(span) || span <= 0) return false;
-    const ta = tMin + newLo * span;
-    const tb = tMin + newHi * span;
+    const ta = dom.fromMs + newLo * span;
+    const tb = dom.fromMs + newHi * span;
     const count = full.filter((r) => {
       const t = new Date(r.at).getTime();
       return t >= ta && t <= tb;
@@ -535,9 +580,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   get hoverX(): number | null {
     if (this.hoverIndex == null) return null;
-    const n = this.chartPointsForDraw().length;
-    if (n < 2) return n === 1 ? 50 : null;
-    return (this.hoverIndex / (n - 1)) * 100;
+    const s = this.chartPointsForDraw();
+    if (!s.length) return null;
+    const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
+    const t = new Date(s[idx].at).getTime();
+    return this.chartSvgXForTimeMs(t);
   }
 
   get hoverYTemp1(): number | null {
@@ -812,7 +859,23 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     if (rect.width <= 0) return;
     const rel = (event.clientX - rect.left) / rect.width;
     const clamped = Math.max(0, Math.min(1, rel));
-    this.hoverIndex = Math.round(clamped * (series.length - 1));
+    const vis = this.getChartVisibleTimeRangeMs();
+    if (!vis || vis.t1 <= vis.t0) {
+      this.hoverIndex = Math.round(clamped * (series.length - 1));
+      return;
+    }
+    const tTarget = vis.t0 + clamped * (vis.t1 - vis.t0);
+    let best = 0;
+    let bestD = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < series.length; i++) {
+      const t = new Date(series[i].at).getTime();
+      const d = Math.abs(t - tTarget);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    this.hoverIndex = best;
   }
 
   onChartMouseLeave(): void {
@@ -825,17 +888,17 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   private chartReadingsZoomed(): TemperatureReading[] {
     const full = this.chartReadings();
     if (full.length < 2) return full;
-    const t0 = new Date(full[0].at).getTime();
-    const t1 = new Date(full[full.length - 1].at).getTime();
-    const span = t1 - t0;
+    const dom = this.getChartTimeDomainMs();
+    if (!dom) return full;
+    const span = dom.toMs - dom.fromMs;
     if (!Number.isFinite(span) || span <= 0) return full;
-    const ta = t0 + this.chartZoomLo * span;
-    const tb = t0 + this.chartZoomHi * span;
+    const ta = dom.fromMs + this.chartZoomLo * span;
+    const tb = dom.fromMs + this.chartZoomHi * span;
     const out = full.filter((r) => {
       const t = new Date(r.at).getTime();
       return t >= ta && t <= tb;
     });
-    if (out.length < 2) return full;
+    if (out.length < 2 && full.length >= 2) return full;
     return out;
   }
 
@@ -1041,28 +1104,21 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   private chartVisibleSpanMs(): number {
-    const series = this.chartReadingsZoomed();
-    if (series.length < 2) return 86400000;
-    const t0 = new Date(series[0].at).getTime();
-    const t1 = new Date(series[series.length - 1].at).getTime();
-    return Math.max(0, t1 - t0);
+    const vis = this.getChartVisibleTimeRangeMs();
+    if (!vis) return 86400000;
+    return Math.max(0, vis.t1 - vis.t0);
   }
 
   /** Etiquetas de tiempo en el eje X (inicio → fin del rango mostrado). */
   get chartXAxisTickLabels(): string[] {
-    const series = this.chartReadingsZoomed();
-    if (series.length < 1) return [];
-    const spanMs = this.chartVisibleSpanMs();
-    if (series.length === 1) {
-      return [this.formatChartAxisTimeLabel(series[0].at, spanMs)];
-    }
-    const t0 = new Date(series[0].at).getTime();
-    const t1 = new Date(series[series.length - 1].at).getTime();
+    const vis = this.getChartVisibleTimeRangeMs();
+    if (!vis || vis.t1 <= vis.t0) return [];
+    const spanMs = vis.t1 - vis.t0;
     const ticks = 5;
     const labels: string[] = [];
     for (let i = 0; i < ticks; i++) {
       const ratio = i / (ticks - 1);
-      const ms = t0 + ratio * (t1 - t0);
+      const ms = vis.t0 + ratio * (vis.t1 - vis.t0);
       labels.push(this.formatChartAxisTimeLabel(new Date(ms).toISOString(), spanMs));
     }
     return labels;
@@ -1099,12 +1155,15 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const n = series.length;
     if (n < 2) return '0,50 100,50';
     const sc = this.chartScale();
-    return series
-      .map((r, i) => {
-        const x = (i / (n - 1)) * 100;
-        return `${x},${sc.toSvgY(r.temperatureC)}`;
-      })
-      .join(' ');
+    const pts: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const r = series[i];
+      const t = new Date(r.at).getTime();
+      const x = this.chartSvgXForTimeMs(t);
+      if (x == null) continue;
+      pts.push(`${x},${sc.toSvgY(r.temperatureC)}`);
+    }
+    return pts.length >= 2 ? pts.join(' ') : '0,50 100,50';
   }
 
   chartPolylinePointsS2(): string {
@@ -1118,7 +1177,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     for (let i = 0; i < n; i++) {
       const t2 = filled[i];
       if (t2 == null || Number.isNaN(t2)) continue;
-      const x = (i / (n - 1)) * 100;
+      const t = new Date(series[i].at).getTime();
+      const x = this.chartSvgXForTimeMs(t);
+      if (x == null) continue;
       pts.push(`${x},${sc.toSvgY(t2)}`);
     }
     return pts.length >= 2 ? pts.join(' ') : '';
@@ -1135,10 +1196,36 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     for (let i = 0; i < n; i++) {
       const pw = filled[i];
       if (pw == null || Number.isNaN(pw)) continue;
-      const x = (i / (n - 1)) * 100;
+      const t = new Date(series[i].at).getTime();
+      const x = this.chartSvgXForTimeMs(t);
+      if (x == null) continue;
       pts.push(`${x},${sc.toSvgY(pw)}`);
     }
     return pts.length >= 2 ? pts.join(' ') : '0,50 100,50';
+  }
+
+  /** Polígono de relleno bajo la curva (base entre primera y última X en tiempo). */
+  private chartAreaFillFromPolyline(polyline: string): string {
+    if (!polyline || polyline === '0,50 100,50') return '';
+    const coords = polyline.trim().split(/\s+/).filter(Boolean);
+    if (coords.length < 2) return '';
+    const first = coords[0].split(',');
+    const last = coords[coords.length - 1].split(',');
+    const fx = first[0];
+    const lx = last[0];
+    return `${fx},100 ${polyline} ${lx},100`;
+  }
+
+  chartAreaPointsS1(): string {
+    return this.chartAreaFillFromPolyline(this.chartPolylinePointsS1());
+  }
+
+  chartAreaPointsS2(): string {
+    return this.chartAreaFillFromPolyline(this.chartPolylinePointsS2());
+  }
+
+  chartAreaPointsCurrent(): string {
+    return this.chartAreaFillFromPolyline(this.chartPolylinePointsCurrent());
   }
 
   /**
@@ -1187,8 +1274,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       const t1 = series[i + 1].temperatureC;
       const d = t1 - t0;
       const trend = d > eps ? 'up' : d < -eps ? 'down' : 'flat';
-      const x1 = (i / (n - 1)) * 100;
-      const x2 = ((i + 1) / (n - 1)) * 100;
+      const x1 = this.chartSvgXForTimeMs(new Date(series[i].at).getTime());
+      const x2 = this.chartSvgXForTimeMs(new Date(series[i + 1].at).getTime());
+      if (x1 == null || x2 == null) continue;
       out.push({ x1, y1: sc.toSvgY(t0), x2, y2: sc.toSvgY(t1), trend });
     }
     return out;
@@ -1200,10 +1288,13 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const n = series.length;
     if (n < 2) return [];
     const sc = this.chartScale();
-    return series.map((r, i) => ({
-      cx: (i / (n - 1)) * 100,
-      cy: sc.toSvgY(r.temperatureC),
-    }));
+    const pts: Array<{ cx: number; cy: number }> = [];
+    for (const r of series) {
+      const x = this.chartSvgXForTimeMs(new Date(r.at).getTime());
+      if (x == null) continue;
+      pts.push({ cx: x, cy: sc.toSvgY(r.temperatureC) });
+    }
+    return pts;
   }
 
   chartTrendSegments2(): Array<{
@@ -1233,8 +1324,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       if (t0 == null || t1 == null || Number.isNaN(t0) || Number.isNaN(t1)) continue;
       const d = t1 - t0;
       const trend = d > eps ? 'up' : d < -eps ? 'down' : 'flat';
-      const x1 = (i / (n - 1)) * 100;
-      const x2 = ((i + 1) / (n - 1)) * 100;
+      const x1 = this.chartSvgXForTimeMs(new Date(series[i].at).getTime());
+      const x2 = this.chartSvgXForTimeMs(new Date(series[i + 1].at).getTime());
+      if (x1 == null || x2 == null) continue;
       out.push({ x1, y1: sc.toSvgY(t0), x2, y2: sc.toSvgY(t1), trend });
     }
     return out;
@@ -1251,7 +1343,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     for (let i = 0; i < n; i++) {
       const t = filled[i];
       if (t == null || Number.isNaN(t)) continue;
-      pts.push({ cx: (i / (n - 1)) * 100, cy: sc.toSvgY(t) });
+      const x = this.chartSvgXForTimeMs(new Date(series[i].at).getTime());
+      if (x == null) continue;
+      pts.push({ cx: x, cy: sc.toSvgY(t) });
     }
     return pts;
   }
@@ -1283,8 +1377,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       if (t0 == null || t1 == null || Number.isNaN(t0) || Number.isNaN(t1)) continue;
       const d = t1 - t0;
       const trend = d > eps ? 'up' : d < -eps ? 'down' : 'flat';
-      const x1 = (i / (n - 1)) * 100;
-      const x2 = ((i + 1) / (n - 1)) * 100;
+      const x1 = this.chartSvgXForTimeMs(new Date(series[i].at).getTime());
+      const x2 = this.chartSvgXForTimeMs(new Date(series[i + 1].at).getTime());
+      if (x1 == null || x2 == null) continue;
       out.push({ x1, y1: sc.toSvgY(t0), x2, y2: sc.toSvgY(t1), trend });
     }
     return out;
@@ -1301,7 +1396,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     for (let i = 0; i < n; i++) {
       const t = filled[i];
       if (t == null || Number.isNaN(t)) continue;
-      pts.push({ cx: (i / (n - 1)) * 100, cy: sc.toSvgY(t) });
+      const x = this.chartSvgXForTimeMs(new Date(series[i].at).getTime());
+      if (x == null) continue;
+      pts.push({ cx: x, cy: sc.toSvgY(t) });
     }
     return pts;
   }

@@ -12,6 +12,7 @@ import {
   DashboardAlert,
   DashboardAlertKind,
   DashboardDevice,
+  DeviceAlarmEvent,
   HistoryListItem,
   TemperatureReading,
 } from '../core/models/dashboard.models';
@@ -115,6 +116,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
    */
   shellRoute: 'dashboard' | 'devices' | 'alerts' | 'settings' = 'dashboard';
   alarmEventsCount = 0;
+  /** Registros en la nube (device_alarm_events); solo con sesión Supabase + SQL 013. */
+  alarmHistoryItems: DeviceAlarmEvent[] = [];
+  alarmHistoryLoading = false;
+  alarmHistoryError = '';
+  private lastAlarmHistoryLoadMs = 0;
   private lastActiveAlertIds = new Set<string>();
   private lastAlarmToneAtMs = 0;
   /** Primera pasada: persistir snapshot sin sonar (evita pitido al recargar con las mismas alertas). */
@@ -163,7 +169,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     private readonly auth: AuthService,
     private readonly router: Router,
     private readonly route: ActivatedRoute,
-    private readonly deviceStore: DeviceStoreService,
+    readonly deviceStore: DeviceStoreService,
     private readonly webPush: WebPushService
   ) {
     void this.auth.getSession().then((s) => {
@@ -216,6 +222,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       }
       this.syncNotificationFormWithSelected();
       this.updateAlarmAccumulator();
+      this.maybeRefreshAlarmHistoryThrottled();
     });
     this.subRead = this.deviceStore.readings$.subscribe((list) => {
       this.readings = list;
@@ -260,11 +267,78 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (path === '/alertas') {
       this.shellRoute = 'alerts';
+      this.scheduleAlarmHistoryIfVisible();
       return;
     }
     if (path === '/dashboard') {
       this.shellRoute = 'dashboard';
     }
+    this.scheduleAlarmHistoryIfVisible();
+  }
+
+  private scheduleAlarmHistoryIfVisible(): void {
+    if (
+      !this.deviceStore.isCloudSyncActive() ||
+      (this.shellRoute !== 'dashboard' && this.shellRoute !== 'alerts')
+    ) {
+      return;
+    }
+    void this.loadAlarmHistory();
+  }
+
+  private maybeRefreshAlarmHistoryThrottled(): void {
+    if (
+      !this.deviceStore.isCloudSyncActive() ||
+      (this.shellRoute !== 'dashboard' && this.shellRoute !== 'alerts')
+    ) {
+      return;
+    }
+    const now = Date.now();
+    if (
+      this.lastAlarmHistoryLoadMs > 0 &&
+      now - this.lastAlarmHistoryLoadMs < 90_000
+    ) {
+      return;
+    }
+    void this.loadAlarmHistory();
+  }
+
+  async loadAlarmHistory(): Promise<void> {
+    if (!this.deviceStore.isCloudSyncActive()) {
+      this.alarmHistoryItems = [];
+      this.alarmHistoryError = '';
+      return;
+    }
+    if (this.alarmHistoryLoading) return;
+    this.alarmHistoryLoading = true;
+    this.alarmHistoryError = '';
+    const { rows, error } = await this.deviceStore.fetchAlarmHistory();
+    this.alarmHistoryLoading = false;
+    this.lastAlarmHistoryLoadMs = Date.now();
+    if (error) {
+      this.alarmHistoryError = error;
+      this.alarmHistoryItems = [];
+      return;
+    }
+    this.alarmHistoryItems = rows;
+  }
+
+  deviceNameForAlarm(deviceId: string): string {
+    return this.devices.find((d) => d.id === deviceId)?.name ?? deviceId;
+  }
+
+  async deleteAlarmHistoryRow(ev: DeviceAlarmEvent): Promise<void> {
+    if (!window.confirm('¿Eliminar este registro del historial?')) return;
+    const { error } = await this.deviceStore.deleteAlarmEvent(ev.id);
+    if (error) {
+      alert(error);
+      return;
+    }
+    this.alarmHistoryItems = this.alarmHistoryItems.filter((x) => x.id !== ev.id);
+  }
+
+  alarmKindLabel(kind: DeviceAlarmEvent['kind']): string {
+    return kind === 'offline' ? 'Desconectado' : 'Umbral temperatura';
   }
 
   get hasDevices(): boolean {
