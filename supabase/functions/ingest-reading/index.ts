@@ -9,6 +9,8 @@ import { formatEsArDateTime } from '../_shared/format-datetime.ts';
 
 const TEMP_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
 const MIN_TEMP_PUSH_COOLDOWN_MS = 60 * 1000;
+/** Entre avisos mientras la temperatura sigue fuera de umbral (tras el 1er aviso del episodio). */
+const REPEAT_TEMP_BREACH_MS = 60 * 1000;
 
 interface IngestPayload {
   moduleId: string;
@@ -209,17 +211,54 @@ Deno.serve(async (req) => {
           ? Math.max(MIN_TEMP_PUSH_COOLDOWN_MS, Math.round(th.temp_push_cooldown_ms))
           : TEMP_PUSH_COOLDOWN_MS;
       const now = Date.now();
-      const lastTempMs = th.last_push_temp_breach_at
-        ? new Date(th.last_push_temp_breach_at).getTime()
-        : null;
-      const tempCooldownOk = lastTempMs == null || now - lastTempMs > configuredCooldown;
+
+      /** Temperatura volvió a rango: se resetea el episodio; el próximo fallo vuelve a exigir el retardo completo. */
+      if (!tempBreach) {
+        const tr = th as Record<string, unknown>;
+        const ep = tr['temp_breach_episode_started_at'];
+        if (typeof ep === 'string' || th.last_push_temp_breach_at) {
+          await supabase
+            .from('device_thresholds')
+            .update({
+              temp_breach_episode_started_at: null,
+              last_push_temp_breach_at: null,
+            })
+            .eq('device_id', device.id);
+        }
+      }
+
+      let shouldSendTemp = false;
+      if (tempBreach) {
+        const tr = th as Record<string, unknown>;
+        const episodeRaw = tr['temp_breach_episode_started_at'];
+        let episodeStartMs =
+          typeof episodeRaw === 'string' ? new Date(episodeRaw).getTime() : null;
+
+        if (episodeStartMs == null) {
+          const t0 = new Date().toISOString();
+          await supabase
+            .from('device_thresholds')
+            .update({ temp_breach_episode_started_at: t0 })
+            .eq('device_id', device.id);
+          episodeStartMs = now;
+        }
+
+        const lastTempMs = th.last_push_temp_breach_at
+          ? new Date(th.last_push_temp_breach_at).getTime()
+          : null;
+
+        if (lastTempMs == null) {
+          shouldSendTemp = now - episodeStartMs >= configuredCooldown;
+        } else {
+          shouldSendTemp = now - lastTempMs >= REPEAT_TEMP_BREACH_MS;
+        }
+      }
 
       const lastCurrentRaw = (th as Record<string, unknown>)['last_push_current_breach_at'];
       const lastCurrentMs =
         typeof lastCurrentRaw === 'string' ? new Date(lastCurrentRaw).getTime() : null;
       const currentCooldownOk = lastCurrentMs == null || now - lastCurrentMs > configuredCooldown;
 
-      const shouldSendTemp = tempBreach && tempCooldownOk;
       const shouldSendCurr = currentBreach && currentCooldownOk;
       const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
       const when = formatEsArDateTime(new Date());

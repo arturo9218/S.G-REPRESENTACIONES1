@@ -560,12 +560,45 @@ export class DeviceStoreService {
     return { rows, error: null };
   }
 
-  async deleteAlarmEvent(id: string): Promise<{ error: string | null }> {
-    if (!this.isCloudSyncEnabled() || !id) {
+  /**
+   * Borra fila del historial y, según el tipo, resetea marcas de push en `device_thresholds`
+   * (como si la condición se hubiera “cerrado”): el próximo aviso vuelve a exigir umbral + retardo.
+   */
+  async deleteAlarmEvent(ev: Pick<DeviceAlarmEvent, 'id' | 'deviceId' | 'kind'>): Promise<{
+    error: string | null;
+  }> {
+    if (!this.isCloudSyncEnabled() || !ev.id) {
       return { error: null };
     }
-    const { error } = await this.auth.client.from('device_alarm_events').delete().eq('id', id);
-    return { error: error?.message ?? null };
+    const { error } = await this.auth.client.from('device_alarm_events').delete().eq('id', ev.id);
+    if (error) {
+      return { error: error.message ?? null };
+    }
+
+    if (!this.isUuid(ev.deviceId)) {
+      return { error: null };
+    }
+
+    const patch: Record<string, null> = {};
+    if (ev.kind === 'temp_breach') {
+      patch.temp_breach_episode_started_at = null;
+      patch.last_push_temp_breach_at = null;
+    } else if (ev.kind === 'current_breach') {
+      patch.last_push_current_breach_at = null;
+    } else if (ev.kind === 'offline') {
+      patch.last_push_offline_at = null;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      const { error: uerr } = await this.auth.client
+        .from('device_thresholds')
+        .update(patch)
+        .eq('device_id', ev.deviceId);
+      if (uerr) {
+        console.warn('[device-store] reset umbrales tras borrar alarma:', uerr.message);
+      }
+    }
+    return { error: null };
   }
 
   private isUuid(id: string): boolean {

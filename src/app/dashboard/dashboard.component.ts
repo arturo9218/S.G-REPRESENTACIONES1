@@ -335,8 +335,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   async deleteAlarmHistoryRow(ev: DeviceAlarmEvent): Promise<void> {
-    if (!window.confirm('¿Eliminar este registro del historial?')) return;
-    const { error } = await this.deviceStore.deleteAlarmEvent(ev.id);
+    if (
+      !window.confirm(
+        '¿Eliminar este registro del historial? También se reinicia el aviso: la próxima notificación volverá a esperar el umbral y el retardo configurado.'
+      )
+    ) {
+      return;
+    }
+    const { error } = await this.deviceStore.deleteAlarmEvent(ev);
     if (error) {
       alert(error);
       return;
