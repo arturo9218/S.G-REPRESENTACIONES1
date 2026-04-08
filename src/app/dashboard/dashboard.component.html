@@ -9,6 +9,7 @@
         type="button"
         class="shell__nav-item"
         [class.shell__nav-item--active]="shellRoute === 'dashboard'"
+        [attr.aria-current]="shellRoute === 'dashboard' ? 'page' : null"
         (click)="scrollToSection('dashboard')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -21,6 +22,7 @@
         type="button"
         class="shell__nav-item"
         [class.shell__nav-item--active]="shellRoute === 'devices'"
+        [attr.aria-current]="shellRoute === 'devices' ? 'page' : null"
         (click)="scrollToSection('devices')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -33,6 +35,7 @@
         type="button"
         class="shell__nav-item"
         [class.shell__nav-item--active]="shellRoute === 'alerts'"
+        [attr.aria-current]="shellRoute === 'alerts' ? 'page' : null"
         (click)="scrollToSection('alerts')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -45,6 +48,7 @@
         type="button"
         class="shell__nav-item"
         [class.shell__nav-item--active]="shellRoute === 'settings'"
+        [attr.aria-current]="shellRoute === 'settings' ? 'page' : null"
         (click)="scrollToSection('settings')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -54,7 +58,13 @@
         <span>Configuración</span>
       </button>
     </nav>
-    <button type="button" class="shell__nav-btn shell__nav-btn--bottom" title="Cerrar sesión" (click)="logout()">
+    <button
+      type="button"
+      class="shell__nav-btn shell__nav-btn--bottom"
+      title="Cerrar sesión"
+      aria-label="Cerrar sesión"
+      (click)="logout()"
+    >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
         <polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
@@ -81,13 +91,16 @@
           type="search"
           class="topbar__search"
           placeholder="Buscar dispositivo…"
+          aria-label="Buscar dispositivo por nombre"
           [(ngModel)]="searchQuery"
           [disabled]="!hasDevices"
         />
       </div>
       <div class="topbar__right">
-        <button type="button" class="btn btn--primary" (click)="openAddDeviceModal()">+ Dispositivo</button>
-        <button type="button" class="btn btn--ghost" (click)="logout()">Cerrar sesión</button>
+        <button type="button" class="btn btn--primary" aria-label="Agregar dispositivo" (click)="openAddDeviceModal()">
+          + Dispositivo
+        </button>
+        <button type="button" class="btn btn--ghost" aria-label="Cerrar sesión" (click)="logout()">Cerrar sesión</button>
         <button
           type="button"
           class="topbar__icon-btn topbar__icon-btn--alerts"
@@ -563,8 +576,22 @@
                 <span class="device-card__meta" *ngIf="d.batteryPct != null">{{ d.batteryPct }}%</span>
               </footer>
               <div class="device-card__actions">
-                <button type="button" class="device-card__btn" (click)="openEditDeviceModal(d); $event.stopPropagation()">Editar</button>
-                <button type="button" class="device-card__btn device-card__btn--danger" (click)="confirmDeleteDevice(d); $event.stopPropagation()">Eliminar</button>
+                <button
+                  type="button"
+                  class="device-card__btn"
+                  [attr.aria-label]="'Editar ' + d.name"
+                  (click)="openEditDeviceModal(d); $event.stopPropagation()"
+                >
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  class="device-card__btn device-card__btn--danger"
+                  [attr.aria-label]="'Eliminar dispositivo ' + d.name"
+                  (click)="confirmDeleteDevice(d); $event.stopPropagation()"
+                >
+                  Eliminar
+                </button>
               </div>
             </article>
           </div>
@@ -574,11 +601,23 @@
           <article
             id="section-alerts"
             class="card card--alerts-panel"
+            role="region"
+            aria-labelledby="alerts-active-heading"
             *ngIf="shellRoute === 'dashboard' || shellRoute === 'alerts'"
           >
-            <h2 class="card__title card__title--sm">Alertas activas</h2>
-            <ul class="alert-list" *ngIf="activeAlerts.length; else noAlerts">
-              <li class="alert-item" *ngFor="let al of activeAlerts" [class.alert-item--critical]="al.severity === 'critical'">
+            <h2 id="alerts-active-heading" class="card__title card__title--sm">Alertas activas</h2>
+            <ul
+              class="alert-list"
+              *ngIf="activeAlerts.length; else noAlerts"
+              aria-live="polite"
+              aria-relevant="additions removals"
+            >
+              <li
+                class="alert-item"
+                *ngFor="let al of activeAlerts"
+                [class.alert-item--critical]="al.severity === 'critical'"
+                role="status"
+              >
                 <span class="alert-item__icon" [class.alert-item__icon--critical]="al.severity === 'critical'">
                   <svg *ngIf="al.severity === 'warning'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                   <svg *ngIf="al.severity === 'critical'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
@@ -598,16 +637,19 @@
 
           <article
             class="card card--alarm-history"
+            role="region"
+            aria-labelledby="alarm-history-heading"
             *ngIf="(shellRoute === 'dashboard' || shellRoute === 'alerts') && deviceStore.isCloudSyncActive()"
           >
             <div class="card__title-row">
-              <h2 class="card__title card__title--sm">Historial de alarmas (nube)</h2>
+              <h2 id="alarm-history-heading" class="card__title card__title--sm">Historial de alarmas (nube)</h2>
               <button
                 type="button"
                 class="btn btn--ghost btn--sm"
                 (click)="loadAlarmHistory()"
                 [disabled]="alarmHistoryLoading"
                 title="Actualizar lista"
+                aria-label="Actualizar historial de alarmas"
               >
                 {{ alarmHistoryLoading ? '…' : 'Actualizar' }}
               </button>
@@ -632,6 +674,7 @@
                   class="btn btn--ghost alarm-history-item__del"
                   (click)="deleteAlarmHistoryRow(ev)"
                   title="Eliminar este registro"
+                  [attr.aria-label]="'Quitar del historial: ' + (alarmKindLabel(ev.kind)) + ' en ' + deviceNameForAlarm(ev.deviceId)"
                 >
                   Quitar
                 </button>
@@ -726,8 +769,8 @@
       </ng-container>
 
       <ng-container *ngIf="shellRoute === 'settings'">
-        <div class="settings-page">
-          <h1 class="settings-page__title">Configuración</h1>
+        <div class="settings-page" role="region" aria-labelledby="settings-page-title">
+          <h1 id="settings-page-title" class="settings-page__title">Configuración</h1>
 
           <article class="card card--admin-roster" *ngIf="isAdminView">
             <h2 class="card__title card__title--sm">Administradores</h2>
@@ -906,8 +949,8 @@
             </button>
           </article>
 
-          <article id="section-settings" class="card">
-            <h2 class="card__title card__title--sm">Notificaciones temperatura y corriente</h2>
+          <article id="section-settings" class="card" aria-labelledby="settings-notify-heading">
+            <h2 id="settings-notify-heading" class="card__title card__title--sm">Notificaciones temperatura y corriente</h2>
             <div class="notify-panel" *ngIf="selectedDevice as sd; else noDeviceSelectedSettings">
               <p class="notify-panel__device">{{ sd.name }}</p>
               <label class="notify-panel__toggle">

@@ -2622,3 +2622,64 @@ $border: rgba(148, 163, 184, 0.18);
     grid-template-columns: 1fr;
   }
 }
+
+/* Accesibilidad: foco visible con teclado (no solo :focus para no afectar clic con mouse) */
+.shell__nav-item:focus-visible,
+.shell__nav-btn:focus-visible,
+.btn:focus-visible,
+.device-card__btn:focus-visible,
+.chart-expand-btn:focus-visible,
+.chart-open-btn:focus-visible,
+.topbar__icon-btn:focus-visible,
+.topbar__search:focus-visible,
+.alarm-history-item__del:focus-visible,
+.notify-panel__toggle input:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.65);
+  outline-offset: 2px;
+}
+
+.device-card__chart-link:focus-visible,
+.telemetry__chart-link:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.55);
+  outline-offset: 2px;
+}
+
+/* Objetivos táctiles ≥ 44px (WCAG 2.5.5) en dispositivos táctiles */
+@media (pointer: coarse) {
+  .shell__nav-item {
+    min-height: 44px;
+  }
+
+  .device-card__btn {
+    min-height: 44px;
+  }
+
+  .btn {
+    min-height: 44px;
+  }
+
+  .btn--sm {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .topbar__icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .topbar__search {
+    min-height: 44px;
+  }
+
+  .alarm-history-item__del {
+    min-height: 44px;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .chart-expand-btn,
+  .chart-open-btn {
+    min-height: 44px;
+  }
+}
