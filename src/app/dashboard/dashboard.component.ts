@@ -30,6 +30,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Expuesto al template (intervalo de actualización de lecturas). */
   readonly environment = environment;
 
+  /** Sin clave pública VAPID en el build, Web Push no puede registrarse (VAPID_PUBLIC_KEY en build / Vercel). */
+  get webPushPublicKeyConfigured(): boolean {
+    return typeof this.environment.vapidPublicKey === 'string' && this.environment.vapidPublicKey.trim().length > 0;
+  }
+
   email: string | null = null;
   userInitial = '?';
   searchQuery = '';
@@ -40,6 +45,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   alertsEnabledForm = true;
   tempLowForm = '';
   tempHighForm = '';
+  /** Corriente máxima RMS (A); vacío = sin límite */
+  currentMaxForm = '';
   tempPushDelayMinForm = '15';
   /** Retardo entre avisos de “desconectado” (min), independiente del de temperatura */
   offlinePushDelayMinForm = '15';
@@ -338,7 +345,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   alarmKindLabel(kind: DeviceAlarmEvent['kind']): string {
-    return kind === 'offline' ? 'Desconectado' : 'Umbral temperatura';
+    if (kind === 'offline') return 'Desconectado';
+    if (kind === 'current_breach') return 'Corriente';
+    return 'Umbral temperatura';
   }
 
   get hasDevices(): boolean {
@@ -456,19 +465,22 @@ export class DashboardComponent implements OnInit, OnDestroy {
       typeof environment.deviceOfflineAfterMs === 'number' && environment.deviceOfflineAfterMs > 0
         ? environment.deviceOfflineAfterMs
         : 90000;
-    const latestByDevice = new Map<string, number>();
+    const latestReadingByDevice = new Map<string, TemperatureReading>();
     for (const r of this.readings) {
       const t = new Date(r.at).getTime();
       if (!Number.isFinite(t)) continue;
-      const prev = latestByDevice.get(r.deviceId);
-      if (prev == null || t > prev) latestByDevice.set(r.deviceId, t);
+      const prev = latestReadingByDevice.get(r.deviceId);
+      if (!prev || t > new Date(prev.at).getTime()) {
+        latestReadingByDevice.set(r.deviceId, r);
+      }
     }
 
     for (const d of this.devices) {
       /** Solo si está explícitamente en false se silencian alarmas y notificaciones del navegador. */
       const alertsOn = d.alertsEnabled !== false;
 
-      const latestAt = latestByDevice.get(d.id);
+      const latest = latestReadingByDevice.get(d.id);
+      const latestAt = latest ? new Date(latest.at).getTime() : undefined;
       const disconnected = latestAt == null || nowMs - latestAt > offlineAfterMs;
       if (disconnected) {
         if (alertsOn) {
@@ -489,33 +501,85 @@ export class DashboardComponent implements OnInit, OnDestroy {
         continue;
       }
 
-      const t = d.temperatureC;
-      if (t == null || d.alertsEnabled === false) continue;
+      if (d.alertsEnabled === false) continue;
+
       const low = d.tempLowC ?? null;
       const high = d.tempHighC ?? null;
       const readingLabel =
         latestAt != null
           ? `Medición: ${this.formatFullDateTime(latestAt)}`
           : `Ahora: ${this.formatFullDateTime(nowMs)}`;
-      if (high != null && t >= high) {
+      const s1Name = d.sensor1Label?.trim() || 'Sensor 1';
+      const s2Name = d.sensor2Label?.trim() || 'Sensor 2';
+
+      const t1 = d.temperatureC;
+      if (t1 != null) {
+        if (high != null && t1 >= high) {
+          out.push({
+            id: `${d.id}-t1-high`,
+            deviceName: d.name,
+            temperatureC: t1,
+            message: `${s1Name}: por encima del umbral`,
+            detail: `${t1.toFixed(1)} °C (máx. ${high} °C) · ${readingLabel}`,
+            kind: 'temp_high',
+            severity: 'critical',
+          });
+        } else if (low != null && t1 <= low) {
+          out.push({
+            id: `${d.id}-t1-low`,
+            deviceName: d.name,
+            temperatureC: t1,
+            message: `${s1Name}: por debajo del umbral`,
+            detail: `${t1.toFixed(1)} °C (mín. ${low} °C) · ${readingLabel}`,
+            kind: 'temp_low',
+            severity: 'warning',
+          });
+        }
+      }
+
+      const t2 = d.temperature2C;
+      if (t2 != null) {
+        if (high != null && t2 >= high) {
+          out.push({
+            id: `${d.id}-t2-high`,
+            deviceName: d.name,
+            temperatureC: t2,
+            message: `${s2Name}: por encima del umbral`,
+            detail: `${t2.toFixed(1)} °C (máx. ${high} °C) · ${readingLabel}`,
+            kind: 'temp_high',
+            severity: 'critical',
+          });
+        } else if (low != null && t2 <= low) {
+          out.push({
+            id: `${d.id}-t2-low`,
+            deviceName: d.name,
+            temperatureC: t2,
+            message: `${s2Name}: por debajo del umbral`,
+            detail: `${t2.toFixed(1)} °C (mín. ${low} °C) · ${readingLabel}`,
+            kind: 'temp_low',
+            severity: 'warning',
+          });
+        }
+      }
+
+      const maxA = d.currentMaxA ?? null;
+      const ia = latest ? effectiveCurrentA(latest) : null;
+      if (
+        ia != null &&
+        Number.isFinite(ia) &&
+        maxA != null &&
+        Number.isFinite(maxA) &&
+        ia > maxA
+      ) {
         out.push({
-          id: `${d.id}-crit`,
+          id: `${d.id}-current`,
           deviceName: d.name,
-          temperatureC: t,
-          message: 'Temperatura por encima del umbral',
-          detail: `${t.toFixed(1)} °C (máx. ${high} °C) · ${readingLabel}`,
-          kind: 'temp_high',
+          temperatureC: null,
+          currentA: ia,
+          message: 'Corriente por encima del umbral',
+          detail: `${ia.toFixed(2)} A (máx. ${maxA.toFixed(2)} A) · ${readingLabel}`,
+          kind: 'current_high',
           severity: 'critical',
-        });
-      } else if (low != null && t <= low) {
-        out.push({
-          id: `${d.id}-low`,
-          deviceName: d.name,
-          temperatureC: t,
-          message: 'Temperatura por debajo del umbral',
-          detail: `${t.toFixed(1)} °C (mín. ${low} °C) · ${readingLabel}`,
-          kind: 'temp_low',
-          severity: 'warning',
         });
       }
     }
@@ -1265,12 +1329,23 @@ export class DashboardComponent implements OnInit, OnDestroy {
       }
     }
     if (!this.alertsEnabledForm) {
+      let currentMaxA: number | null;
+      try {
+        currentMaxA = this.parseCurrentMaxA(this.currentMaxForm);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.notificationSettingsFeedbackIsError = true;
+        this.notificationSettingsFeedback = `Revisá corriente máx. (A): ${msg}`;
+        this.scheduleNotificationFeedbackClear();
+        return;
+      }
       this.notificationSettingsSaving = true;
       try {
         const result = await this.deviceStore.updateDeviceNotificationConfig(device.id, {
           alertsEnabled: false,
           tempLowC: null,
           tempHighC: null,
+          currentMaxA,
           tempPushCooldownMs: this.parseDelayMinutesToMs(this.tempPushDelayMinForm),
           offlinePushCooldownMs: this.parseDelayMinutesToMs(this.offlinePushDelayMinForm),
         });
@@ -1295,17 +1370,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     let low: number | null;
     let high: number | null;
+    let currentMaxA: number | null;
     let delayMs: number;
     let offlineDelayMs: number;
     try {
       low = this.parseTempValue(this.tempLowForm);
       high = this.parseTempValue(this.tempHighForm);
+      currentMaxA = this.parseCurrentMaxA(this.currentMaxForm);
       delayMs = this.parseDelayMinutesToMs(this.tempPushDelayMinForm);
       offlineDelayMs = this.parseDelayMinutesToMs(this.offlinePushDelayMinForm);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.notificationSettingsFeedbackIsError = true;
-      this.notificationSettingsFeedback = `Revisá los valores (min/máx/retardo): ${msg}`;
+      this.notificationSettingsFeedback = `Revisá los valores (min/máx/retardo/corriente): ${msg}`;
       this.scheduleNotificationFeedbackClear();
       return;
     }
@@ -1322,6 +1399,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         alertsEnabled: true,
         tempLowC: low,
         tempHighC: high,
+        currentMaxA,
         tempPushCooldownMs: delayMs,
         offlinePushCooldownMs: offlineDelayMs,
       });
@@ -1945,6 +2023,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.alertsEnabledForm = false;
       this.tempLowForm = '';
       this.tempHighForm = '';
+      this.currentMaxForm = '';
       this.tempPushDelayMinForm = '15';
       this.offlinePushDelayMinForm = '15';
       this.temp1OffsetForm = '0';
@@ -1966,6 +2045,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
           device.tempLowC == null || Number.isNaN(device.tempLowC) ? '' : String(device.tempLowC);
         this.tempHighForm =
           device.tempHighC == null || Number.isNaN(device.tempHighC) ? '' : String(device.tempHighC);
+        this.currentMaxForm =
+          device.currentMaxA == null || Number.isNaN(device.currentMaxA as number)
+            ? ''
+            : String(device.currentMaxA);
         this.tempPushDelayMinForm = String(
           this.cooldownMsToMinutes(device.tempPushCooldownMs ?? 15 * 60 * 1000)
         );
@@ -2009,6 +2092,26 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!s) return null;
     const n = Number.parseFloat(s);
     return Number.isNaN(n) ? null : n;
+  }
+
+  /** Vacío = sin límite; valor en A debe ser ≥ 0. */
+  private parseCurrentMaxA(value: string | number | null | undefined): number | null {
+    const s = value == null ? '' : String(value).trim().replace(',', '.');
+    if (!s) return null;
+    const n = Number.parseFloat(s);
+    if (Number.isNaN(n)) throw new Error('Corriente máx. inválida');
+    if (n < 0) throw new Error('La corriente máx. no puede ser negativa');
+    return n;
+  }
+
+  /** Texto principal en la lista de alertas (°C o A). */
+  formatAlertPrimary(al: DashboardAlert): string {
+    if (al.kind === 'current_high') {
+      return al.currentA != null && Number.isFinite(al.currentA)
+        ? `${al.currentA.toFixed(2)} A`
+        : '—';
+    }
+    return this.formatTemp(al.temperatureC);
   }
 
   /** Offset en °C (puede ser negativo). Vacío = 0. */
@@ -2186,9 +2289,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private deviceIdFromAlertId(alertId: string): string | null {
-    if (alertId.endsWith('-offline')) return alertId.slice(0, -'-offline'.length);
-    if (alertId.endsWith('-crit')) return alertId.slice(0, -'-crit'.length);
-    if (alertId.endsWith('-low')) return alertId.slice(0, -'-low'.length);
+    const suf = [
+      '-t1-high',
+      '-t1-low',
+      '-t2-high',
+      '-t2-low',
+      '-offline',
+      '-current',
+      '-power',
+      '-crit',
+      '-low',
+    ];
+    for (const s of suf) {
+      if (alertId.endsWith(s)) return alertId.slice(0, -s.length);
+    }
     return null;
   }
 
@@ -2230,43 +2344,49 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private tryBrowserNotification(newAlertIds: string[]): void {
     if (typeof window === 'undefined' || !('Notification' in window)) return;
     if (newAlertIds.length === 0) return;
-    if (Notification.permission === 'default') {
-      void Notification.requestPermission();
-      return;
-    }
-    if (Notification.permission !== 'granted') return;
-    const byId = new Map(this.activeAlerts.map((a) => [a.id, a]));
-    for (const alertId of newAlertIds) {
-      const al = byId.get(alertId);
-      if (!al) continue;
-      const did = this.deviceIdFromAlertId(alertId);
-      const cooldownMs = this.panelAlarmCooldownMsForDeviceAndKind(did, al.kind);
-      try {
-        const key = `ar_browser_notif_${alertId}`;
-        const raw = sessionStorage.getItem(key);
-        const last = raw ? Number.parseInt(raw, 10) : 0;
-        if (Number.isFinite(last) && last > 0 && Date.now() - last < cooldownMs) {
-          continue;
+
+    void (async () => {
+      let perm = Notification.permission;
+      if (perm === 'default') {
+        perm = await Notification.requestPermission();
+      }
+      if (perm !== 'granted') return;
+
+      const byId = new Map(this.activeAlerts.map((a) => [a.id, a]));
+      for (const alertId of newAlertIds) {
+        const al = byId.get(alertId);
+        if (!al) continue;
+        const did = this.deviceIdFromAlertId(alertId);
+        const cooldownMs = this.panelAlarmCooldownMsForDeviceAndKind(did, al.kind);
+        try {
+          const key = `ar_browser_notif_${alertId}`;
+          const raw = sessionStorage.getItem(key);
+          const last = raw ? Number.parseInt(raw, 10) : 0;
+          if (Number.isFinite(last) && last > 0 && Date.now() - last < cooldownMs) {
+            continue;
+          }
+          sessionStorage.setItem(key, String(Date.now()));
+        } catch {
+          /* seguir: no bloquear notificación */
         }
-        sessionStorage.setItem(key, String(Date.now()));
-      } catch {
-        /* seguir: no bloquear notificación */
+        let title = 'Alarma';
+        if (al.kind === 'offline') {
+          title = `${al.deviceName}: desconectado`;
+        } else if (al.kind === 'temp_high') {
+          title = `${al.deviceName}: temperatura alta`;
+        } else if (al.kind === 'temp_low') {
+          title = `${al.deviceName}: temperatura baja`;
+        } else if (al.kind === 'current_high') {
+          title = `${al.deviceName}: corriente alta`;
+        }
+        const body = al.detail ? `${al.message}\n${al.detail}` : al.message;
+        try {
+          new Notification(title, { body, tag: al.id });
+        } catch {
+          // no-op
+        }
       }
-      let title = 'Alarma';
-      if (al.kind === 'offline') {
-        title = `${al.deviceName}: desconectado`;
-      } else if (al.kind === 'temp_high') {
-        title = `${al.deviceName}: temperatura alta`;
-      } else if (al.kind === 'temp_low') {
-        title = `${al.deviceName}: temperatura baja`;
-      }
-      const body = al.detail ? `${al.message}\n${al.detail}` : al.message;
-      try {
-        new Notification(title, { body, tag: al.id });
-      } catch {
-        // no-op
-      }
-    }
+    })();
   }
 
   /** Fecha/hora en zona Argentina (alineado con textos de push). */
@@ -2310,7 +2430,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   private pickAlarmContext(): 'offline' | 'temp_hot' | 'temp_cold' {
     if (this.activeAlerts.some((a) => a.kind === 'offline')) return 'offline';
-    if (this.activeAlerts.some((a) => a.kind === 'temp_high')) return 'temp_hot';
+    if (this.activeAlerts.some((a) => a.kind === 'temp_high' || a.kind === 'current_high'))
+      return 'temp_hot';
     if (this.activeAlerts.some((a) => a.kind === 'temp_low')) return 'temp_cold';
     return 'temp_hot';
   }

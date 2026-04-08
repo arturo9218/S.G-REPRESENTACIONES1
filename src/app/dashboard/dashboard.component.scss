@@ -1899,6 +1899,10 @@ $border: rgba(148, 163, 184, 0.18);
   }
 }
 
+.notify-panel__field--span2 {
+  grid-column: 1 / -1;
+}
+
 .notify-panel__field {
   display: flex;
   flex-direction: column;
@@ -1965,6 +1969,17 @@ $border: rgba(148, 163, 184, 0.18);
   margin: 0.65rem 0 0;
   font-size: 0.78rem;
   color: $muted;
+
+  &--warn {
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    background: rgba(245, 158, 11, 0.08);
+    color: lighten($text, 4%);
+    code {
+      font-size: 0.85em;
+    }
+  }
 }
 
 .notify-panel__actions {

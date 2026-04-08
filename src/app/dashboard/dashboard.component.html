@@ -585,7 +585,7 @@
                 </span>
                 <div>
                 <p class="alert-item__device">{{ al.deviceName }}</p>
-                <p class="alert-item__temp">{{ formatTemp(al.temperatureC) }}</p>
+                <p class="alert-item__temp">{{ formatAlertPrimary(al) }}</p>
                 <p class="alert-item__msg">{{ al.message }}</p>
                 <p class="alert-item__detail" *ngIf="al.detail">{{ al.detail }}</p>
                 </div>
@@ -907,7 +907,7 @@
           </article>
 
           <article id="section-settings" class="card">
-            <h2 class="card__title card__title--sm">Notificaciones temperatura</h2>
+            <h2 class="card__title card__title--sm">Notificaciones temperatura y corriente</h2>
             <div class="notify-panel" *ngIf="selectedDevice as sd; else noDeviceSelectedSettings">
               <p class="notify-panel__device">{{ sd.name }}</p>
               <label class="notify-panel__toggle">
@@ -941,6 +941,20 @@
                     autocorrect="off"
                     spellcheck="false"
                     name="temp-threshold-high"
+                  />
+                </label>
+                <label class="notify-panel__field notify-panel__field--span2">
+                  <span>Corriente máxima (A RMS)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="currentMaxForm"
+                    (ngModelChange)="onNotificationFormChange()"
+                    [disabled]="!alertsEnabledForm"
+                    placeholder="Sin límite"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    name="current-threshold-max-a"
                   />
                 </label>
                 <label class="notify-panel__field">
@@ -977,7 +991,7 @@
                 </label>
               </div>
               <p class="notify-panel__hint" *ngIf="alertsEnabledForm">
-                Retardo temperatura: entre avisos si el °C está fuera de rango. Retardo desconectado: entre avisos si no hay datos del equipo. Podés usar valores distintos.
+                Los mín./máx. en °C aplican al sensor 1 y al sensor 2. Corriente: el ESP debe enviar <code>current_a</code> (A RMS); en el panel, si falta corriente y hay potencia, se muestra I estimada (P/220 V). Retardo temperatura: entre avisos si °C o corriente superan el máximo. Retardo desconectado: entre avisos si no hay datos del equipo.
               </p>
               <p class="notify-panel__hint" *ngIf="!alertsEnabledForm">
                 Sin alertas para este dispositivo: no suena el pitido, no aparecen en el panel ni avisos del navegador (tras guardar).
@@ -1006,6 +1020,15 @@
           <article class="card" *ngIf="environment.deviceCloudSync">
             <h2 class="card__title card__title--sm">Avisos con la app cerrada</h2>
             <div class="notify-panel">
+              <p
+                class="notify-panel__hint notify-panel__hint--warn"
+                *ngIf="!webPushPublicKeyConfigured"
+              >
+                <strong>Web Push desactivado en este build:</strong> falta la clave pública VAPID. Definí
+                <code>VAPID_PUBLIC_KEY</code> al construir (Vercel / local: antes de
+                <code>npm run build</code> corre <code>inject-vapid</code>). En Supabase → Edge Functions → Secrets deben existir
+                <code>VAPID_PUBLIC_KEY</code>, <code>VAPID_PRIVATE_KEY</code> y <code>VAPID_SUBJECT</code> (mismo par que en el front).
+              </p>
               <p class="notify-panel__hint">
                 Avisos del sistema (Web Push) aunque la app esté en segundo plano o cerrada: umbrales de temperatura y equipo sin datos.
                 Tenés que pulsar “Activar en este navegador” <strong>en cada dispositivo</strong> (PC y celular por separado). En Android/Chrome aceptá notificaciones del sitio; en iPhone (iOS 16.4+), instalá la PWA en inicio y activá avisos ahí.

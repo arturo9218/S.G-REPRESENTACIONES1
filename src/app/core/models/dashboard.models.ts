@@ -23,6 +23,8 @@ export interface DashboardDevice {
   tempLowC?: number | null;
   /** Umbral de temperatura alta (>=), null = sin umbral */
   tempHighC?: number | null;
+  /** Corriente máxima RMS (A); superarla dispara alarma; null = sin umbral */
+  currentMaxA?: number | null;
   /** Retardo entre alertas push de temperatura para este equipo (ms) */
   tempPushCooldownMs?: number | null;
   /** Retardo entre avisos de “desconectado” (ms); independiente del de temperatura */
@@ -63,7 +65,7 @@ export interface TemperatureReading {
 }
 
 /** Tipo de alarma en panel y sonido */
-export type DashboardAlertKind = 'offline' | 'temp_high' | 'temp_low';
+export type DashboardAlertKind = 'offline' | 'temp_high' | 'temp_low' | 'current_high';
 
 /** Preset de pitido (localStorage `ar_alarm_sound_v1`) */
 export type AlarmSoundPreset = 'classic' | 'buzzer' | 'chime' | 'low';
@@ -75,6 +77,8 @@ export interface DashboardAlert {
   id: string;
   deviceName: string;
   temperatureC: number | null;
+  /** Corriente (A) cuando kind === current_high */
+  currentA?: number | null;
   /** Título corto del problema */
   message: string;
   /** Línea secundaria: umbral, °C, fecha/hora */
@@ -88,10 +92,14 @@ export interface DeviceAlarmEvent {
   id: string;
   deviceId: string;
   triggeredAt: string;
-  kind: 'temp_breach' | 'offline';
+  kind: 'temp_breach' | 'offline' | 'current_breach';
   message: string;
   detail: string | null;
   temp1C: number | null;
+  temp2C?: number | null;
+  /** Corriente al disparar (eventos current_breach); legacy power_breach puede traer power_w */
+  currentA?: number | null;
+  powerW?: number | null;
 }
 
 export interface ActivityItem {

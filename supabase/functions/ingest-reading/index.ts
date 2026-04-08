@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
 
     const { data: device, error: devErr } = await supabase
       .from('devices')
-      .select('id, device_token_hash, active, owner_user_id, name, sensor_1_label')
+      .select('id, device_token_hash, active, owner_user_id, name, sensor_1_label, sensor_2_label')
       .eq('module_id', moduleId)
       .single();
 
@@ -91,13 +91,15 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: th } = await supabase
+    /** `select('*')`: si falta una migración SQL, no rompe la lectura de umbrales (columnas opcionales). */
+    const { data: th, error: thErr } = await supabase
       .from('device_thresholds')
-      .select(
-        'notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms, last_push_temp_breach_at, temp1_offset_c, temp2_offset_c, temp3_offset_c'
-      )
+      .select('*')
       .eq('device_id', device.id)
       .maybeSingle();
+    if (thErr) {
+      console.warn('[ingest-reading] device_thresholds:', thErr.message);
+    }
 
     const num = (v: unknown): number =>
       typeof v === 'number' && Number.isFinite(v) ? v : 0;
@@ -146,76 +148,155 @@ Deno.serve(async (req) => {
     /** Diagnóstico push (útil si no llegan notificaciones); no afecta al ESP. */
     let pushDiag: { sent: number; skipped?: string; lastError?: string } | undefined;
 
-    if (th?.notifications_enabled) {
-      const t = temp1Corrected;
-      const sensorLabel =
+    if (th?.notifications_enabled && device.owner_user_id) {
+      const sensor1Label =
         typeof device.sensor_1_label === 'string' && device.sensor_1_label.trim()
           ? device.sensor_1_label.trim()
-          : 'Cámara 1';
-      let breach = false;
-      let msg = '';
-      if (th.temp1_min_c != null && t < th.temp1_min_c) {
-        breach = true;
-        msg = `${sensorLabel}: ${t.toFixed(1)} °C, por debajo del mínimo configurado (${th.temp1_min_c} °C).`;
+          : 'Sensor 1';
+      const sensor2Label =
+        typeof device.sensor_2_label === 'string' && device.sensor_2_label.trim()
+          ? device.sensor_2_label.trim()
+          : 'Sensor 2';
+
+      const t1 = temp1Corrected;
+      const tempMsgs: string[] = [];
+      if (th.temp1_min_c != null && t1 < th.temp1_min_c) {
+        tempMsgs.push(
+          `${sensor1Label}: ${t1.toFixed(1)} °C, por debajo del mínimo configurado (${th.temp1_min_c} °C).`
+        );
       }
-      if (th.temp1_max_c != null && t > th.temp1_max_c) {
-        breach = true;
-        msg = `${sensorLabel}: ${t.toFixed(1)} °C, por encima del máximo configurado (${th.temp1_max_c} °C).`;
+      if (th.temp1_max_c != null && t1 > th.temp1_max_c) {
+        tempMsgs.push(
+          `${sensor1Label}: ${t1.toFixed(1)} °C, por encima del máximo configurado (${th.temp1_max_c} °C).`
+        );
       }
-      if (breach && device.owner_user_id) {
-        const lastMs = th.last_push_temp_breach_at
-          ? new Date(th.last_push_temp_breach_at).getTime()
+      if (temp2Corrected != null) {
+        const t2 = temp2Corrected;
+        if (th.temp2_min_c != null && t2 < th.temp2_min_c) {
+          tempMsgs.push(
+            `${sensor2Label}: ${t2.toFixed(1)} °C, por debajo del mínimo configurado (${th.temp2_min_c} °C).`
+          );
+        }
+        if (th.temp2_max_c != null && t2 > th.temp2_max_c) {
+          tempMsgs.push(
+            `${sensor2Label}: ${t2.toFixed(1)} °C, por encima del máximo configurado (${th.temp2_max_c} °C).`
+          );
+        }
+      }
+
+      /** Umbral de corriente: solo con `current_a` del ESP (SCT); no estimar desde W en la nube. */
+      const currentA: number | null =
+        payload.current_a != null && Number.isFinite(payload.current_a as number)
+          ? (payload.current_a as number)
           : null;
-        const configuredCooldown =
-          typeof th.temp_push_cooldown_ms === 'number' &&
-          Number.isFinite(th.temp_push_cooldown_ms)
-            ? Math.max(MIN_TEMP_PUSH_COOLDOWN_MS, Math.round(th.temp_push_cooldown_ms))
-            : TEMP_PUSH_COOLDOWN_MS;
-        const now = Date.now();
-        // Antes: last=0 si null ⇒ Date.now()-0 siempre > cooldown ⇒ reintento cada lectura.
-        if (lastMs != null && now - lastMs <= configuredCooldown) {
-          // Aún en retardo respecto al último aviso (o intento).
-        } else {
-          const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
-          const when = formatEsArDateTime(new Date());
-          const pushResult = await sendPushToUser(supabase, device.owner_user_id, {
-            title: `${deviceName} · ${sensorLabel}: superó el umbral`,
-            body: `${msg}\nDetectado: ${when}`,
-            data: { type: 'temp_breach', deviceId: device.id },
-            tag: `temp-${device.id}`,
-            navigate: `/alertas?deviceId=${encodeURIComponent(device.id)}`,
-            requireInteraction: true,
-          });
-          pushDiag = {
-            sent: pushResult.sent,
-            skipped: pushResult.skipped,
-            lastError: pushResult.lastError,
-          };
-          // Siempre marcar último intento para respetar el retardo aunque falle Web Push (VAPID, sin suscripción, etc.).
-          await supabase
-            .from('device_thresholds')
-            .update({ last_push_temp_breach_at: new Date().toISOString() })
-            .eq('device_id', device.id);
-          const { error: alarmInsErr } = await supabase.from('device_alarm_events').insert({
+      let currentMsg = '';
+      let currentBreach = false;
+      const maxA = (th as Record<string, unknown>)['current_max_a'];
+      if (
+        currentA != null &&
+        maxA != null &&
+        typeof maxA === 'number' &&
+        Number.isFinite(maxA) &&
+        currentA > maxA
+      ) {
+        currentBreach = true;
+        currentMsg = `Corriente: ${currentA.toFixed(2)} A supera el máximo configurado (${maxA.toFixed(2)} A).`;
+      }
+
+      const tempBreach = tempMsgs.length > 0;
+      const configuredCooldown =
+        typeof th.temp_push_cooldown_ms === 'number' && Number.isFinite(th.temp_push_cooldown_ms)
+          ? Math.max(MIN_TEMP_PUSH_COOLDOWN_MS, Math.round(th.temp_push_cooldown_ms))
+          : TEMP_PUSH_COOLDOWN_MS;
+      const now = Date.now();
+      const lastTempMs = th.last_push_temp_breach_at
+        ? new Date(th.last_push_temp_breach_at).getTime()
+        : null;
+      const tempCooldownOk = lastTempMs == null || now - lastTempMs > configuredCooldown;
+
+      const lastCurrentRaw = (th as Record<string, unknown>)['last_push_current_breach_at'];
+      const lastCurrentMs =
+        typeof lastCurrentRaw === 'string' ? new Date(lastCurrentRaw).getTime() : null;
+      const currentCooldownOk = lastCurrentMs == null || now - lastCurrentMs > configuredCooldown;
+
+      const shouldSendTemp = tempBreach && tempCooldownOk;
+      const shouldSendCurr = currentBreach && currentCooldownOk;
+      const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
+      const when = formatEsArDateTime(new Date());
+
+      if (shouldSendTemp || shouldSendCurr) {
+        const lines: string[] = [];
+        if (shouldSendTemp) lines.push(...tempMsgs);
+        if (shouldSendCurr) lines.push(currentMsg);
+        const bodyText = `${lines.join('\n\n')}\n\nDetectado: ${when}`;
+        let title: string;
+        if (shouldSendTemp && shouldSendCurr) title = `${deviceName} · alertas`;
+        else if (shouldSendTemp) title = `${deviceName} · temperatura`;
+        else title = `${deviceName} · corriente`;
+
+        const pushResult = await sendPushToUser(supabase, device.owner_user_id, {
+          title,
+          body: bodyText,
+          data: {
+            type: shouldSendCurr && !shouldSendTemp ? 'current_breach' : 'temp_breach',
+            deviceId: device.id,
+          },
+          tag: `alarm-${device.id}`,
+          navigate: `/alertas?deviceId=${encodeURIComponent(device.id)}`,
+          requireInteraction: true,
+        });
+
+        const nowIso = new Date().toISOString();
+        const patch: Record<string, string> = {};
+        if (shouldSendTemp) patch.last_push_temp_breach_at = nowIso;
+        if (shouldSendCurr) patch.last_push_current_breach_at = nowIso;
+        await supabase.from('device_thresholds').update(patch).eq('device_id', device.id);
+
+        if (shouldSendTemp) {
+          const combinedMsg = tempMsgs.join('\n');
+          const { error: e1 } = await supabase.from('device_alarm_events').insert({
             device_id: device.id,
             owner_user_id: device.owner_user_id,
-            triggered_at: new Date().toISOString(),
+            triggered_at: nowIso,
             kind: 'temp_breach',
-            message: msg,
+            message: combinedMsg,
             detail: null,
-            temp1_c: t,
+            temp1_c: t1,
+            temp2_c: temp2Corrected,
           });
-          if (alarmInsErr) {
-            console.warn('[ingest-reading] device_alarm_events:', alarmInsErr.message);
-          }
-          if (pushResult.sent === 0) {
-            console.warn('[ingest-reading] alarma temp sin push entregado:', pushResult);
-          }
+          if (e1) console.warn('[ingest-reading] device_alarm_events temp:', e1.message);
+        }
+        if (shouldSendCurr) {
+          const { error: e2 } = await supabase.from('device_alarm_events').insert({
+            device_id: device.id,
+            owner_user_id: device.owner_user_id,
+            triggered_at: nowIso,
+            kind: 'current_breach',
+            message: currentMsg,
+            detail: null,
+            temp1_c: null,
+            temp2_c: null,
+            current_a: currentA,
+          });
+          if (e2) console.warn('[ingest-reading] device_alarm_events current:', e2.message);
+        }
+
+        pushDiag = {
+          sent: pushResult.sent,
+          skipped: pushResult.skipped,
+          lastError: pushResult.lastError,
+        };
+        if (pushResult.sent === 0) {
+          console.warn('[ingest-reading] alarma sin push entregado:', pushResult);
         }
       }
     }
 
-    return new Response(JSON.stringify(pushDiag ? { ok: true, push: pushDiag } : { ok: true }), {
+    const out: Record<string, unknown> = { ok: true };
+    if (pushDiag) out.push = pushDiag;
+    if (thErr) out.thresholdsWarning = thErr.message;
+
+    return new Response(JSON.stringify(out), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

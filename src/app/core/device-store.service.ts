@@ -78,6 +78,8 @@ export interface DeviceNotificationConfigInput {
   alertsEnabled: boolean;
   tempLowC: number | null;
   tempHighC: number | null;
+  /** Corriente máx. RMS (A); null = sin límite */
+  currentMaxA: number | null;
   tempPushCooldownMs: number | null;
   offlinePushCooldownMs: number | null;
 }
@@ -225,12 +227,14 @@ export class DeviceStoreService {
         notifications_enabled: true,
         temp1_min_c: 2,
         temp1_max_c: 8,
+        temp2_min_c: 2,
+        temp2_max_c: 8,
         temp_push_cooldown_ms: 15 * 60 * 1000,
         offline_push_cooldown_ms: 15 * 60 * 1000,
         temp1_offset_c: 0,
         temp2_offset_c: 0,
         temp3_offset_c: 0,
-        power_max_w: 350,
+        current_max_a: null,
         press1_min_bar: 1.8,
         press1_max_bar: 2.8,
         press2_min_bar: 1.8,
@@ -262,6 +266,7 @@ export class DeviceStoreService {
         temp3OffsetC: 0,
         tempPushCooldownMs: 15 * 60 * 1000,
         offlinePushCooldownMs: 15 * 60 * 1000,
+        currentMaxA: null,
       };
 
       this.persistDevices([...this.snapshot.filter((d) => d.id !== id), device]);
@@ -309,6 +314,12 @@ export class DeviceStoreService {
         typeof d['tempLowC'] === 'number' && !Number.isNaN(d['tempLowC']) ? d['tempLowC'] : 2,
       tempHighC:
         typeof d['tempHighC'] === 'number' && !Number.isNaN(d['tempHighC']) ? d['tempHighC'] : 8,
+      currentMaxA:
+        d['currentMaxA'] === null
+          ? null
+          : typeof d['currentMaxA'] === 'number' && !Number.isNaN(d['currentMaxA'] as number)
+            ? (d['currentMaxA'] as number)
+            : null,
       cloudSynced: typeof d['cloudSynced'] === 'boolean' ? d['cloudSynced'] : undefined,
       deviceToken: typeof d['deviceToken'] === 'string' ? d['deviceToken'] : undefined,
       sensor1Label:
@@ -499,7 +510,7 @@ export class DeviceStoreService {
     }
     const { data, error } = await this.auth.client
       .from('device_alarm_events')
-      .select('id, device_id, triggered_at, kind, message, detail, temp1_c')
+      .select('id, device_id, triggered_at, kind, message, detail, temp1_c, temp2_c, power_w, current_a')
       .order('triggered_at', { ascending: false })
       .limit(200);
     if (error) {
@@ -513,8 +524,13 @@ export class DeviceStoreService {
       return { rows: [], error: error.message };
     }
     const rows: DeviceAlarmEvent[] = (data as Record<string, unknown>[]).map((row) => {
+      const rawKind = row['kind'];
       const kind: DeviceAlarmEvent['kind'] =
-        row['kind'] === 'offline' ? 'offline' : 'temp_breach';
+        rawKind === 'offline'
+          ? 'offline'
+          : rawKind === 'current_breach' || rawKind === 'power_breach'
+            ? 'current_breach'
+            : 'temp_breach';
       return {
         id: String(row['id'] ?? ''),
         deviceId: String(row['device_id'] ?? ''),
@@ -526,6 +542,18 @@ export class DeviceStoreService {
         temp1C:
           typeof row['temp1_c'] === 'number' && Number.isFinite(row['temp1_c'] as number)
             ? (row['temp1_c'] as number)
+            : null,
+        temp2C:
+          typeof row['temp2_c'] === 'number' && Number.isFinite(row['temp2_c'] as number)
+            ? (row['temp2_c'] as number)
+            : null,
+        currentA:
+          typeof row['current_a'] === 'number' && Number.isFinite(row['current_a'] as number)
+            ? (row['current_a'] as number)
+            : null,
+        powerW:
+          typeof row['power_w'] === 'number' && Number.isFinite(row['power_w'] as number)
+            ? (row['power_w'] as number)
             : null,
       };
     });
@@ -914,6 +942,7 @@ export class DeviceStoreService {
         enabled: boolean;
         low: number | null;
         high: number | null;
+        currentMax: number | null;
         cooldownMs: number | null;
         offlineCooldownMs: number | null;
         o1: number;
@@ -925,7 +954,7 @@ export class DeviceStoreService {
       const { data: thData } = await this.auth.client
         .from('device_thresholds')
         .select(
-          'device_id, notifications_enabled, temp1_min_c, temp1_max_c, temp_push_cooldown_ms, offline_push_cooldown_ms, temp1_offset_c, temp2_offset_c, temp3_offset_c'
+          'device_id, notifications_enabled, temp1_min_c, temp1_max_c, current_max_a, temp_push_cooldown_ms, offline_push_cooldown_ms, temp1_offset_c, temp2_offset_c, temp3_offset_c'
         )
         .in('device_id', ids);
       for (const th of (thData ?? []) as Record<string, unknown>[]) {
@@ -942,6 +971,10 @@ export class DeviceStoreService {
           high:
             typeof th['temp1_max_c'] === 'number' && !Number.isNaN(th['temp1_max_c'] as number)
               ? (th['temp1_max_c'] as number)
+              : null,
+          currentMax:
+            typeof th['current_max_a'] === 'number' && !Number.isNaN(th['current_max_a'] as number)
+              ? (th['current_max_a'] as number)
               : null,
           cooldownMs:
             typeof th['temp_push_cooldown_ms'] === 'number' &&
@@ -985,6 +1018,7 @@ export class DeviceStoreService {
         alertsEnabled: th?.enabled ?? (prev?.alertsEnabled !== false),
         tempLowC: th?.low ?? (prev?.tempLowC ?? 2),
         tempHighC: th?.high ?? (prev?.tempHighC ?? 8),
+        currentMaxA: th?.currentMax ?? prev?.currentMaxA ?? null,
         tempPushCooldownMs: th?.cooldownMs ?? (prev?.tempPushCooldownMs ?? 15 * 60 * 1000),
         offlinePushCooldownMs:
           th?.offlineCooldownMs ??
@@ -1312,6 +1346,7 @@ export class DeviceStoreService {
   ): Promise<{ cloudError?: string }> {
     const low = input.tempLowC;
     const high = input.tempHighC;
+    const currentMaxA = input.currentMaxA;
     let cloudError: string | undefined;
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
       const nowIso = new Date().toISOString();
@@ -1323,6 +1358,9 @@ export class DeviceStoreService {
             notifications_enabled: input.alertsEnabled,
             temp1_min_c: low,
             temp1_max_c: high,
+            temp2_min_c: low,
+            temp2_max_c: high,
+            current_max_a: currentMaxA,
             temp_push_cooldown_ms: input.tempPushCooldownMs,
             offline_push_cooldown_ms: input.offlinePushCooldownMs,
             updated_at: nowIso,
@@ -1341,6 +1379,7 @@ export class DeviceStoreService {
               alertsEnabled: input.alertsEnabled,
               tempLowC: low,
               tempHighC: high,
+              currentMaxA,
               tempPushCooldownMs: input.tempPushCooldownMs,
               offlinePushCooldownMs: input.offlinePushCooldownMs,
             }
@@ -1386,6 +1425,9 @@ export class DeviceStoreService {
           notifications_enabled: dev?.alertsEnabled !== false,
           temp1_min_c: dev?.tempLowC ?? null,
           temp1_max_c: dev?.tempHighC ?? null,
+          temp2_min_c: dev?.tempLowC ?? null,
+          temp2_max_c: dev?.tempHighC ?? null,
+          current_max_a: dev?.currentMaxA ?? null,
           temp_push_cooldown_ms: dev?.tempPushCooldownMs ?? 15 * 60 * 1000,
           offline_push_cooldown_ms:
             dev?.offlinePushCooldownMs ?? dev?.tempPushCooldownMs ?? 15 * 60 * 1000,
@@ -1527,6 +1569,7 @@ export class DeviceStoreService {
       alertsEnabled: true,
       tempLowC: 2,
       tempHighC: 8,
+      currentMaxA: null,
       sensor1Label: DEFAULT_SENSOR_1_LABEL,
       sensor2Label: DEFAULT_SENSOR_2_LABEL,
     };

@@ -750,6 +750,7 @@ void sendTelemetry() {
   readTemps12(&t1, &t2);
   float amps = readSctAmpsRms();
   float p = MAINS_V_RMS * amps;
+  /* ingest-reading: umbral de corriente usa JSON "current_a" (A RMS). power_w es V*I para el panel. */
 
   if (isnan(t1)) {
     Serial.println(F("[TMP] Sensor 1 desconectado (GPIO2)"));
