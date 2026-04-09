@@ -1,0 +1,854 @@
+%PDF-1.3
+%ºß¬à
+3 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 4 0 R
+>>
+endobj
+4 0 obj
+<<
+/Length 5090
+>>
+stream
+0.5670000000000001 w
+0 G
+BT
+/F2 14 Tf
+16.0999999999999979 TL
+0 g
+45.354330708661422 782.3624409448818824 Td
+(Manual de uso — AR Monitoreo) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 749.0553543307086102 Td
+(Guía para usuarios y técnicos que operan el panel web. No incluye detalles de programación ni de infraestructura.) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 722.1262204724408775 Td
+(1. Para qué sirve esta aplicación) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 693.0711023622046696 Td
+(AR Monitoreo es un panel en internet para seguir equipos en frío \(cámaras, exhibidores, bodegas, etc.\) y, cuando) Tj
+T* (el hardware lo permite, corriente eléctrica en el tablero.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 656.9293700787401349 Td
+(En la práctica permite:) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 634.9608661417322537 Td
+(• Ver si el equipo está en línea y cuándo fue la última lectura.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 617.952992125984224 Td
+(• Ver una o dos temperaturas por equipo \(según sensores instalados\).) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 600.9451181102361943 Td
+(• Ver corriente y una estimación de potencia si hay pinza amperométrica o datos de potencia.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 583.9372440944881646 Td
+(• Consultar gráficos de evolución en el tiempo.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 566.9293700787401349 Td
+(• Recibir avisos cuando la temperatura o la corriente salen de rango, o cuando el equipo deja de mandar datos.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 549.9214960629921052 Td
+(• Guardar un historial de alarmas cuando la cuenta está vinculada a la nube.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 527.952992125984224 Td
+(Sirve para control remoto, registro y respuesta rápida ante fallas o desvíos de temperatura.) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 501.0238582677164914 Td
+(2. Requisitos para usar el panel) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 471.9687401574802834 Td
+(• Navegador actualizado \(Chrome, Edge, Firefox o Safari recientes\).) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 454.9608661417322537 Td
+(• Cuenta de usuario \(correo y contraseña\) dada de alta en el sistema.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 437.952992125984224 Td
+(• Conexión a internet en el dispositivo desde el que consultás \(PC, tablet o celular\).) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 420.9451181102361375 Td
+(• Para avisos aunque la app esté cerrada, el sitio debe estar configurado para ello y el navegador debe permitir) Tj
+T* (notificaciones \(especialmente en celular\).) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 384.8033858267716028 Td
+(El equipo en campo \(por ejemplo un control con sensores\) debe estar configurado por el técnico para enviar datos) Tj
+T* (al servicio; eso no se hace desde este manual, pero sí se refleja acá como temperaturas y estado.) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 343.7010236220471597 Td
+(3. Cómo entrar y salir) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 314.6459055118109518 Td
+(1. Abrí la URL del panel que te indique el administrador.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 297.6380314960629221 Td
+(2. Iniciá sesión con correo y contraseña.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 280.6301574803148924 Td
+(3. Si olvidaste la contraseña, usá la opción de recuperar contraseña desde la pantalla de inicio de sesión.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 263.6222834645668627 Td
+(4. Para cerrar sesión, usá la opción de salir en la barra superior \(según el diseño actual del sitio\).) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 236.69314960629913 Td
+(4. Partes principales del panel) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 207.6380314960629221 Td
+(El menú lateral \(o el menú móvil\) suele agrupar:) Tj
+ET
+BT
+/F3 10 Tf
+11.5 TL
+0 g
+45.354330708661422 185.6695275590550409 Td
+(Sección — Uso típico) Tj
+ET
+BT
+/F3 10 Tf
+11.5 TL
+0 g
+45.354330708661422 168.6616535433070112 Td
+(Dashboard / Inicio — Vista general: tarjetas de equipos, gráfico reciente, resumen.) Tj
+ET
+BT
+/F3 10 Tf
+11.5 TL
+0 g
+45.354330708661422 151.6537795275589815 Td
+(Dispositivos — Listado y tarjetas por equipo; seleccionar un equipo para ver detalle y acciones.) Tj
+ET
+BT
+/F3 10 Tf
+11.5 TL
+0 g
+45.354330708661422 134.6459055118109518 Td
+(Alertas — Alarmas activas e historial de eventos guardados en la nube \(si está habilitado\).) Tj
+ET
+BT
+/F3 10 Tf
+11.5 TL
+0 g
+45.354330708661422 117.6380314960629221 Td
+(Configuración — Umbrales, nombres de sensores, corrección de lectura, notificaciones, consumo aproximado del) Tj
+T* (día, etc.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 81.4962992125983874 Td
+(Análisis / Gráfico puede abrirse desde un enlace tipo “ver gráfico” en la tarjeta del equipo: permite elegir rango de) Tj
+T* (fechas, canal \(temperatura 1, 2 o corriente\) y exportar a PDF en muchos casos.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/Length 4653
+>>
+stream
+0.5670000000000001 w
+0 G
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 782.3624409448818824 Td
+(5. Tarjetas de equipo \(lo que ves en pantalla\)) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 753.3073228346456744 Td
+(En cada tarjeta suele mostrarse:) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 731.3388188976377933 Td
+(• Nombre y ubicación del equipo.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 714.3309448818897636 Td
+(• Estado en línea / fuera de línea según la última comunicación recibida.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 697.3230708661417339 Td
+(• Temperatura\(es\) con la unidad en grados Celsius.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 680.3151968503937042 Td
+(• Opcionalmente un bloque “Pinza / corriente” con amperaje, potencia estimada y tensión de referencia que) Tj
+T* (configuraste.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 649.1340944881889072 Td
+(• Última hora de actualización.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 632.1262204724408775 Td
+(• Botones para editar o eliminar el equipo \(según permisos\).) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 610.1577165354329964 Td
+(Si tu cuenta es de administrador de la plataforma, puede aparecer información de la cuenta dueña del equipo; eso) Tj
+T* (sirve para soporte y auditoría.) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 569.0553543307086102 Td
+(6. Umbrales y notificaciones) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 540.0002362204724022 Td
+(En Configuración \(con un equipo seleccionado\) podés definir, entre otras cosas:) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 518.0317322834645211 Td
+(• Temperatura mínima y máxima para disparar alertas.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 501.0238582677164914 Td
+(• Corriente máxima si medís amperaje.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 484.0159842519684616 Td
+(• Tensión nominal del tablero \(por ejemplo 220 V o 380 V\): sirve para estimar potencia cuando solo hay corriente o) Tj
+T* (potencia parcial, y para el consumo aproximado del día en kilovatios-hora.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 452.8348818897637216 Td
+(• Tiempos de espera entre avisos repetidos \(para no spamear alertas\).) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 430.8663779527558404 Td
+(Podés activar o desactivar las notificaciones por equipo.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 408.8978740157479592 Td
+(Avisos con la app cerrada \(navegador\) requieren que actives la opción en ese navegador y que el sitio tenga) Tj
+T* (habilitado el servicio; en celular a veces hace falta instalar la app como acceso en inicio \(PWA\) para recibir avisos) Tj
+T* (de forma fiable.) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 353.6222834645668627 Td
+(7. Corrección de sensores) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 324.5671653543306547 Td
+(Si un sensor marca sistemáticamente de más o de menos, en Configuración puede existir una corrección en) Tj
+T* (grados por sensor. Eso ajusta lo que se guarda y se muestra a partir de las nuevas lecturas que lleguen.) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 283.4648031496062686 Td
+(8. Consumo eléctrico aproximado “del día”) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 254.4096850393700606 Td
+(Si el servicio lo tiene activo, podés pedir un cálculo aproximado del consumo desde la medianoche hasta el) Tj
+T* (momento actual. Depende de que existan lecturas con potencia o corriente en el historial y de la tensión nominal) Tj
+T* (configurada. Es una estimación, no un medidor fiscal certificado.) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 199.1340944881889072 Td
+(9. Gráficos y exportación) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 170.0789763779526993 Td
+(• En análisis / gráfico podés cambiar rango de fechas, estilo de curva y qué magnitud mirar.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 153.0711023622046696 Td
+(• Donde esté disponible, podés exportar a PDF el cuadro de valores y, a veces, una captura del gráfico.) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 126.1419685039369369 Td
+(10. Roles: usuario y administrador) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 97.086850393700729 Td
+(• Usuario normal: ve y configura sus propios equipos.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 80.0789763779526993 Td
+(• Administrador de la aplicación \(según lo defina tu organización\): puede ver todos los equipos y, donde esté) Tj
+T* (permitido, gestionar la lista de correos administradores.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 8 0 R
+>>
+endobj
+8 0 obj
+<<
+/Length 3940
+>>
+stream
+0.5670000000000001 w
+0 G
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 782.3624409448818824 Td
+(Si alguien fue agregado como administrador y no ve todo, el responsable del sistema debe verificar que su correo) Tj
+T* (esté correctamente habilitado en el servicio \(soporte interno\).) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 741.2600787401574962 Td
+(11. Qué se puede implementar a futuro \(ideas\)) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 712.2049606299212883 Td
+(Esta sección describe funcionalidades posibles; no implica que todas estén disponibles hoy. Sirve para planificar) Tj
+T* (mejoras con el proveedor o el técnico de campo.) Tj
+ET
+BT
+/F2 11 Tf
+12.6499999999999986 TL
+0 g
+45.354330708661422 677.480551181102328 Td
+(11.1 Control de puerta abierta con interruptor magnético) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 651.2600787401574962 Td
+(Idea: colocar un sensor de apertura \(par magnético: una parte en el marco y otra en la puerta\). Cuando la puerta) Tj
+T* (está abierta, el circuito cambia de estado.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 615.1183464566928478 Td
+(En el panel podría mostrarse: “Puerta cerrada / abierta”, tiempo abierta, o alerta “puerta abierta demasiado) Tj
+T* (tiempo”.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 578.9766141732283131 Td
+(En campo: el equipo debería leer esa entrada digital y enviar el estado junto con el resto de datos \(según acuerdo) Tj
+T* (con quien mantenga el firmware\).) Tj
+ET
+BT
+/F2 11 Tf
+12.6499999999999986 TL
+0 g
+45.354330708661422 544.2522047244094665 Td
+(11.2 Otras mejoras habituales en frío industrial) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 518.0317322834645211 Td
+(• Humedad relativa en cámara o vitrina.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 501.0238582677164914 Td
+(• Segunda o tercera zona de temperatura en el mismo equipo.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 484.0159842519684616 Td
+(• Presiones de succión / descarga en instalaciones con frío mecánico.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 467.0081102362204319 Td
+(• Horarios de funcionamiento y reportes de desconexiones programadas.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 450.0002362204724022 Td
+(• Informes mensuales automáticos \(PDF o correo\) con mínimos, máximos y incidentes.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 432.9923622047243725 Td
+(• Etiquetas y turnos \(mañana/noche\) para plantas con varios operadores.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 415.9844881889763428 Td
+(• Integración con otros sistemas \(por ejemplo ERP\) solo a nivel de exportación o API, según política de la) Tj
+T* (empresa.) Tj
+ET
+BT
+/F2 11 Tf
+12.6499999999999986 TL
+0 g
+45.354330708661422 381.2600787401574394 Td
+(11.3 Buenas prácticas operativas) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 355.0396062992125508 Td
+(• Revisar periódicamente que los umbrales reflejen la temperatura segura del producto almacenado.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 338.0317322834645211 Td
+(• Mantener nombres claros de equipos y ubicaciones.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 321.0238582677164914 Td
+(• Capacitar al personal en reconocer alertas y en no ignorar avisos repetidos de “fuera de línea”.) Tj
+ET
+BT
+/F2 12 Tf
+13.7999999999999989 TL
+0 g
+45.354330708661422 294.0947244094487587 Td
+(12. Soporte) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 265.0396062992125508 Td
+(Ante fallas de visualización, datos que no llegan o dudas de permisos, contactá al administrador del sistema o al) Tj
+T* (proveedor que instaló el monitoreo, indicando: equipo afectado, horario aproximado del problema y captura de) Tj
+T* (pantalla si es posible.) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0 g
+45.354330708661422 209.7640157480313974 Td
+(Documento orientado al uso del producto. Las pantallas exactas pueden variar ligeramente según la versión) Tj
+T* (desplegada.) Tj
+ET
+endstream
+endobj
+1 0 obj
+<</Type /Pages
+/Kids [3 0 R 5 0 R 7 0 R ]
+/Count 3
+>>
+endobj
+9 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+10 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+11 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+12 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+13 0 obj
+<<
+/Type /Font
+/BaseFont /Courier
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+15 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+16 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+17 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+18 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+19 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Italic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+20 0 obj
+<<
+/Type /Font
+/BaseFont /Times-BoldItalic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+21 0 obj
+<<
+/Type /Font
+/BaseFont /ZapfDingbats
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+22 0 obj
+<<
+/Type /Font
+/BaseFont /Symbol
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+2 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/Font <<
+/F1 9 0 R
+/F2 10 0 R
+/F3 11 0 R
+/F4 12 0 R
+/F5 13 0 R
+/F6 14 0 R
+/F7 15 0 R
+/F8 16 0 R
+/F9 17 0 R
+/F10 18 0 R
+/F11 19 0 R
+/F12 20 0 R
+/F13 21 0 R
+/F14 22 0 R
+>>
+/XObject <<
+>>
+>>
+endobj
+23 0 obj
+<<
+/Producer (jsPDF 4.2.1)
+/CreationDate (D:20260408213202-03'00')
+>>
+endobj
+24 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/OpenAction [3 0 R /FitH null]
+/PageLayout /OneColumn
+>>
+endobj
+xref
+0 25
+0000000000 65535 f 
+0000014265 00000 n 
+0000016098 00000 n 
+0000000015 00000 n 
+0000000152 00000 n 
+0000005294 00000 n 
+0000005431 00000 n 
+0000010136 00000 n 
+0000010273 00000 n 
+0000014334 00000 n 
+0000014459 00000 n 
+0000014590 00000 n 
+0000014724 00000 n 
+0000014862 00000 n 
+0000014986 00000 n 
+0000015115 00000 n 
+0000015247 00000 n 
+0000015383 00000 n 
+0000015511 00000 n 
+0000015638 00000 n 
+0000015767 00000 n 
+0000015900 00000 n 
+0000016002 00000 n 
+0000016350 00000 n 
+0000016436 00000 n 
+trailer
+<<
+/Size 25
+/Root 24 0 R
+/Info 23 0 R
+/ID [ <6ECF9F961B26B1D39EBA13734F9423E2> <6ECF9F961B26B1D39EBA13734F9423E2> ]
+>>
+startxref
+16540
+%%EOF
