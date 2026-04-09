@@ -2,6 +2,17 @@
 
 This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 16.2.16.
 
+## Comandos npm (carpeta correcta)
+
+Los scripts (`npm run build`, `npm start`, `npm run manual:pdf`, etc.) deben ejecutarse **desde esta carpeta `FRONTEND`**, donde está el `package.json` principal:
+
+```bash
+cd FRONTEND
+npm run manual:pdf
+```
+
+Si la terminal está abierta en la **carpeta padre** (la que contiene `FRONTEND`), podés usar `cd FRONTEND && npm run manual:pdf`, o bien `npm run manual:pdf` **desde esa carpeta padre** si allí existe un `package.json` con ese script (metapackage en la raíz del workspace).
+
 ## Development server
 
 Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
