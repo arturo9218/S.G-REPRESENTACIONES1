@@ -1611,22 +1611,22 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   formatTemp(c: number | null): string {
     if (c == null || Number.isNaN(c)) return '—';
-    const sign = c > 0 ? '+' : '';
-    return `${sign}${c.toFixed(1)}°C`;
+    const sign = c < 0 ? '-' : '';
+    return `${sign}${Math.abs(c).toFixed(1)}°C`;
   }
 
   /** Tarjetas / widgets grandes: dos decimales (mejor lectura en pantalla). */
   formatTempCard(c: number | null): string {
     if (c == null || Number.isNaN(c)) return '—';
-    const sign = c > 0 ? '+' : '';
-    return `${sign}${c.toFixed(2)}°C`;
+    const sign = c < 0 ? '-' : '';
+    return `${sign}${Math.abs(c).toFixed(2)}°C`;
   }
 
-  /** Solo el número con signo; la unidad va en un <span> aparte para evitar recortes/° mal leídos. */
+  /** Solo el número; signo solo si es negativo; la unidad va en un <span> aparte. */
   formatTempCardValueOnly(c: number | null): string {
     if (c == null || Number.isNaN(c)) return '—';
-    const sign = c > 0 ? '+' : '';
-    return `${sign}${c.toFixed(2)}`;
+    const sign = c < 0 ? '-' : '';
+    return `${sign}${Math.abs(c).toFixed(2)}`;
   }
 
   formatDeviceClampAmpNum(d: DashboardDevice): string {

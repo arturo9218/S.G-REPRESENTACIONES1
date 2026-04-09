@@ -1372,8 +1372,9 @@ $border: rgba(148, 163, 184, 0.18);
 
 .device-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 1rem;
+  /* Tarjetas más anchas en PC: menos columnas, más aire para dos sensores + °C */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 1.15rem;
 }
 
 .device-card {
