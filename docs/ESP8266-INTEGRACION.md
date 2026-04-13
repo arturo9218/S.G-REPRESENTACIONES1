@@ -57,9 +57,13 @@ El sketch define **`#define LANG_ES`** antes de incluir `WiFiManager.h` para usa
 
 El portal usa **CSS propio** (`setCustomHeadElement` y `setTitle`) para acercarlo al estilo del panel **AR Monitoreo** (fondo oscuro, acento azul). Si `setTitle` no existe en tu versión muy antigua de WiFiManager, comentá esa línea en `applyWiFiManagerTheme` y dejá solo `setCustomHeadElement`.
 
+## Ficha del equipo (panel web)
+
+En la app, pestaña **Ficha equipo** (`/ficha-equipo`), el técnico puede cargar **datos fijos del sistema frigorífico**, **bitácora** de visitas, **fotos** y **mantenimiento**; también **exportar PDF**. Solo aplica a dispositivos creados en la nube (ID de panel UUID). Requiere ejecutar en Supabase el SQL `supabase/sql/021_device_equipment_ficha.sql` (tablas + bucket Storage `equipment-photos`). Desde cada tarjeta de dispositivo en **Dispositivos** aparece el botón **Ficha** cuando el equipo es elegible.
+
 ## SQL y Function
 
-- SQL: `supabase/sql/001_devices_and_readings.sql` (+ migraciones posteriores para umbrales y alarmas)
+- SQL: `supabase/sql/001_devices_and_readings.sql` (+ migraciones posteriores para umbrales, alarmas, calibración 020 y ficha 021)
 - Function: `supabase/functions/ingest-reading/index.ts`
 
 ## Nota de seguridad

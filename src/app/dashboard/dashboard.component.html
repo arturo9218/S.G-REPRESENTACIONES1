@@ -34,6 +34,22 @@
       <button
         type="button"
         class="shell__nav-item"
+        [class.shell__nav-item--active]="shellRoute === 'equipment'"
+        [attr.aria-current]="shellRoute === 'equipment' ? 'page' : null"
+        (click)="scrollToSection('equipment')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+          <polyline points="10 9 9 9 8 9" />
+        </svg>
+        <span>Ficha equipo</span>
+      </button>
+      <button
+        type="button"
+        class="shell__nav-item"
         [class.shell__nav-item--active]="shellRoute === 'alerts'"
         [attr.aria-current]="shellRoute === 'alerts' ? 'page' : null"
         (click)="scrollToSection('alerts')"
@@ -128,7 +144,7 @@
     </div>
 
     <div class="shell__content" *ngIf="hasDevices; else emptyState">
-      <ng-container *ngIf="shellRoute !== 'settings'">
+      <ng-container *ngIf="shellRoute !== 'settings' && shellRoute !== 'equipment'">
       <section id="section-kpi" class="kpi-row" aria-label="Resumen">
         <article class="kpi-card">
           <div class="kpi-card__icon kpi-card__icon--slate">
@@ -643,6 +659,16 @@
                 <button
                   type="button"
                   class="device-card__btn"
+                  *ngIf="deviceCanOpenEquipmentSheet(d)"
+                  title="Ficha técnica, bitácora y fotos"
+                  [attr.aria-label]="'Ir a ficha del equipo ' + d.name"
+                  (click)="goToEquipmentSheet(d.id, $event)"
+                >
+                  Ficha
+                </button>
+                <button
+                  type="button"
+                  class="device-card__btn"
                   [attr.aria-label]="'Editar ' + d.name"
                   (click)="openEditDeviceModal(d); $event.stopPropagation()"
                 >
@@ -909,6 +935,286 @@
           </div>
         </div>
       </ng-container>
+
+      <ng-container *ngIf="shellRoute === 'equipment'">
+        <div class="settings-page equipment-page" role="region" aria-labelledby="equipment-page-title">
+          <h1 id="equipment-page-title" class="settings-page__title">Ficha del equipo</h1>
+          <p class="card__hint card__hint--tight equipment-page__lead">
+            Registro técnico del sistema frigorífico, bitácora de visitas y fotos. Requiere equipo creado en la nube (ID
+            UUID).
+          </p>
+
+          <article class="card settings-page__device-pick">
+            <h2 class="card__title card__title--sm">Equipo</h2>
+            <label class="notify-panel__field notify-panel__field--full">
+              <span>Dispositivo</span>
+              <select
+                class="notify-panel__select"
+                [ngModel]="selectedDeviceId"
+                (ngModelChange)="selectDevice($event)"
+                name="equipment-device-pick"
+              >
+                <option *ngFor="let d of devices" [ngValue]="d.id">
+                  {{ d.name }} — {{ d.online ? 'Online' : 'Sin conexión' }}
+                </option>
+              </select>
+            </label>
+          </article>
+
+          <div *ngIf="!equipmentSheetAvailable()" class="card">
+            <p class="card__empty">
+              La ficha en la nube solo está disponible para dispositivos con ID de panel UUID y con sincronización
+              activa. Agregá un equipo desde “+ Dispositivo” con cuenta en Supabase.
+            </p>
+          </div>
+
+          <ng-container *ngIf="equipmentSheetAvailable()">
+            <p class="equipment-page__loading" *ngIf="equipmentLoading">Cargando ficha…</p>
+
+            <div class="settings-page__stack" *ngIf="!equipmentLoading">
+              <article
+                class="card equipment-page__banner"
+                *ngIf="equipmentMaintenanceStatusLabel() as st"
+                [class.equipment-page__banner--urgent]="st === 'vencido'"
+              >
+                <p class="equipment-page__banner-text">
+                  <ng-container *ngIf="st === 'vencido'">Próximo mantenimiento: <strong>vencido</strong>.</ng-container>
+                  <ng-container *ngIf="st === 'próximo'">Próximo mantenimiento: <strong>cercano</strong> (72 h).</ng-container>
+                </p>
+              </article>
+
+              <article class="card">
+                <h2 class="card__title card__title--sm">Datos fijos del equipo</h2>
+                <p class="card__hint card__hint--tight">Campos estandarizados para informes y PDF.</p>
+                <div class="notify-panel notify-panel__grid">
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Compresor</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="eqCompressorForm"
+                      name="eq-compressor"
+                      maxlength="200"
+                      autocomplete="off"
+                      placeholder="Ej. Dorin 7 HP"
+                    />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Potencia (HP)</span>
+                    <input type="text" [(ngModel)]="eqHpForm" name="eq-hp" maxlength="20" autocomplete="off" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Refrigerante</span>
+                    <select class="notify-panel__select" [(ngModel)]="eqRefrigerantForm" name="eq-ref">
+                      <option value="">—</option>
+                      <option value="R404A">R404A</option>
+                      <option value="R134a">R134a</option>
+                      <option value="R507">R507</option>
+                      <option value="R448A">R448A</option>
+                      <option value="R449A">R449A</option>
+                      <option value="otro">Otro</option>
+                    </select>
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Condensador</span>
+                    <input type="text" [(ngModel)]="eqCondenserForm" name="eq-cond" maxlength="200" autocomplete="off" />
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Evaporador / forzadores</span>
+                    <input type="text" [(ngModel)]="eqEvaporatorForm" name="eq-evap" maxlength="200" autocomplete="off" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Alimentación</span>
+                    <select class="notify-panel__select" [(ngModel)]="eqSupplyForm" name="eq-supply">
+                      <option value="">—</option>
+                      <option value="three_phase">Trifásico</option>
+                      <option value="single_phase">Monofásico</option>
+                    </select>
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--checkbox">
+                    <input type="checkbox" [(ngModel)]="eqPumpDownForm" name="eq-pump" />
+                    <span>Pump down</span>
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Descongelamiento</span>
+                    <select class="notify-panel__select" [(ngModel)]="eqDefrostForm" name="eq-defrost">
+                      <option value="">—</option>
+                      <option value="hot_gas">Gas caliente</option>
+                      <option value="resistance">Resistencia</option>
+                      <option value="both">Ambos</option>
+                    </select>
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Tipo de cámara</span>
+                    <select class="notify-panel__select" [(ngModel)]="eqChamberForm" name="eq-chamber">
+                      <option value="">—</option>
+                      <option value="frozen">Congelado</option>
+                      <option value="refrigerated">Refrigerado</option>
+                      <option value="other">Otro</option>
+                    </select>
+                  </label>
+                </div>
+              </article>
+
+              <article class="card">
+                <h2 class="card__title card__title--sm">Descripción libre</h2>
+                <label class="notify-panel__field notify-panel__field--full">
+                  <span>Observaciones de instalación, accesorios, particularidades</span>
+                  <textarea
+                    class="notify-panel__textarea"
+                    [(ngModel)]="eqFreeNotesForm"
+                    name="eq-notes"
+                    rows="5"
+                    maxlength="4000"
+                    placeholder="Texto libre…"
+                  ></textarea>
+                </label>
+              </article>
+
+              <article class="card">
+                <h2 class="card__title card__title--sm">Mantenimiento</h2>
+                <div class="notify-panel notify-panel__grid">
+                  <label class="notify-panel__field">
+                    <span>Último mantenimiento — fecha</span>
+                    <input type="date" [(ngModel)]="eqLastMaintDate" name="eq-lm-d" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Hora</span>
+                    <input type="time" [(ngModel)]="eqLastMaintTime" name="eq-lm-t" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Próximo — fecha</span>
+                    <input type="date" [(ngModel)]="eqNextMaintDate" name="eq-nm-d" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Hora</span>
+                    <input type="time" [(ngModel)]="eqNextMaintTime" name="eq-nm-t" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Repetir cada (días)</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="eqMaintIntervalForm"
+                      name="eq-int"
+                      placeholder="Ej. 90"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--checkbox">
+                    <input type="checkbox" [(ngModel)]="eqMaintNotifyForm" name="eq-notify" />
+                    <span>Notificación local al vencer o estar cerca</span>
+                  </label>
+                </div>
+              </article>
+
+              <article class="card">
+                <h2 class="card__title card__title--sm">Bitácora</h2>
+                <p class="card__hint card__hint--tight">Registro cronológico de visitas e intervenciones.</p>
+                <div class="notify-panel notify-panel__grid equipment-log-add">
+                  <label class="notify-panel__field">
+                    <span>Fecha</span>
+                    <input type="date" [(ngModel)]="logDateForm" name="log-d" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Hora</span>
+                    <input type="time" [(ngModel)]="logTimeForm" name="log-t" />
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Observación</span>
+                    <input type="text" [(ngModel)]="logNoteForm" name="log-note" maxlength="2000" />
+                  </label>
+                  <button type="button" class="btn btn--primary notify-panel__save" (click)="addEquipmentLogEntry()">
+                    Agregar entrada
+                  </button>
+                </div>
+                <ul class="equipment-log-list" *ngIf="equipmentLogRows.length">
+                  <li class="equipment-log-list__item" *ngFor="let log of equipmentLogRows">
+                    <div>
+                      <span class="equipment-log-list__time">{{ log.occurredAt | date:'dd/MM/yyyy HH:mm' }}</span>
+                      <p class="equipment-log-list__note">{{ log.note }}</p>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm"
+                      (click)="deleteEquipmentLogEntry(log)"
+                      title="Eliminar"
+                    >
+                      Quitar
+                    </button>
+                  </li>
+                </ul>
+                <p class="card__empty" *ngIf="!equipmentLogRows.length">Sin entradas todavía.</p>
+              </article>
+
+              <article class="card">
+                <h2 class="card__title card__title--sm">Fotos</h2>
+                <p class="card__hint card__hint--tight">
+                  Desde el celular podés usar cámara o galería. Tamaño máx. 5 MB por archivo (JPEG, PNG, WebP).
+                </p>
+                <div class="notify-panel equipment-photos-add">
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Leyenda (opcional)</span>
+                    <input type="text" [(ngModel)]="photoCaptionForm" name="ph-cap" maxlength="120" />
+                  </label>
+                  <label class="btn btn--ghost equipment-photos-add__file">
+                    Elegir foto
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      (change)="onEquipmentPhotoSelected($event)"
+                      [disabled]="equipmentPhotoUploading"
+                    />
+                  </label>
+                  <span class="equipment-photos-add__hint" *ngIf="equipmentPhotoUploading">Subiendo…</span>
+                </div>
+                <div class="equipment-photo-grid" *ngIf="equipmentPhotos.length">
+                  <figure class="equipment-photo-grid__cell" *ngFor="let ph of equipmentPhotos">
+                    <img [src]="ph.publicUrl" [alt]="ph.caption || 'Foto equipo'" loading="lazy" />
+                    <figcaption *ngIf="ph.caption">{{ ph.caption }}</figcaption>
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm equipment-photo-grid__del"
+                      (click)="deleteEquipmentPhoto(ph)"
+                    >
+                      Quitar
+                    </button>
+                  </figure>
+                </div>
+                <p class="card__empty" *ngIf="!equipmentPhotos.length">Sin fotos.</p>
+              </article>
+
+              <p
+                class="sensor-labels-feedback"
+                *ngIf="equipmentFeedback && !equipmentSaving && !equipmentPhotoUploading"
+                [class.sensor-labels-feedback--warn]="
+                  equipmentFeedback.includes('No se pudo') || equipmentFeedback.includes('Ejecutá')
+                "
+              >
+                {{ equipmentFeedback }}
+              </p>
+
+              <div class="equipment-page__actions">
+                <button
+                  type="button"
+                  class="btn btn--primary"
+                  [disabled]="equipmentSaving"
+                  (click)="saveEquipmentSheet()"
+                >
+                  {{ equipmentSaving ? 'Guardando…' : 'Guardar ficha' }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn--ghost"
+                  [disabled]="equipmentPdfExporting"
+                  (click)="exportEquipmentPdf()"
+                >
+                  {{ equipmentPdfExporting ? 'Generando PDF…' : 'Descargar PDF' }}
+                </button>
+              </div>
+            </div>
+          </ng-container>
+        </div>
+      </ng-container>
+
       <ng-template #settingsPanelsContent>
           <article class="card card--sensor-labels" *ngIf="selectedDevice">
             <h2 class="card__title card__title--sm">Nombres de sensores</h2>
@@ -1338,6 +1644,20 @@
           <rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
         </svg>
         <span>Dispositivos</span>
+      </button>
+      <button
+        type="button"
+        class="mobile-nav__btn"
+        [class.mobile-nav__btn--active]="shellRoute === 'equipment'"
+        (click)="scrollToSection('equipment')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+        </svg>
+        <span>Ficha</span>
       </button>
       <button
         type="button"

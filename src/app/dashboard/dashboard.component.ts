@@ -19,6 +19,12 @@ import {
 import { environment } from '../../environments/environment';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
 import { effectiveCurrentAWithNominal } from '../core/reading.utils';
+import {
+  DeviceEquipmentLogRow,
+  DeviceEquipmentPhotoRow,
+  DeviceEquipmentSheetRow,
+  EquipmentSheetService,
+} from '../core/equipment-sheet.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -133,7 +139,36 @@ export class DashboardComponent implements OnInit, OnDestroy {
    * Vista según la URL: panel principal, dispositivos, alertas o configuración.
    * Sidebar y barra móvil reflejan este valor (sincronizado en `syncShellRoute`).
    */
-  shellRoute: 'dashboard' | 'devices' | 'alerts' | 'settings' = 'dashboard';
+  shellRoute: 'dashboard' | 'devices' | 'equipment' | 'alerts' | 'settings' = 'dashboard';
+
+  /** Ficha técnica / bitácora (solo nube + UUID). */
+  equipmentLoading = false;
+  equipmentSaving = false;
+  equipmentFeedback = '';
+  equipmentLogRows: DeviceEquipmentLogRow[] = [];
+  equipmentPhotos: DeviceEquipmentPhotoRow[] = [];
+  eqCompressorForm = '';
+  eqHpForm = '';
+  eqRefrigerantForm = '';
+  eqCondenserForm = '';
+  eqEvaporatorForm = '';
+  eqSupplyForm = '';
+  eqPumpDownForm = false;
+  eqDefrostForm = '';
+  eqChamberForm = '';
+  eqFreeNotesForm = '';
+  eqLastMaintDate = '';
+  eqLastMaintTime = '';
+  eqNextMaintDate = '';
+  eqNextMaintTime = '';
+  eqMaintIntervalForm = '';
+  eqMaintNotifyForm = true;
+  logNoteForm = '';
+  logDateForm = '';
+  logTimeForm = '';
+  photoCaptionForm = '';
+  equipmentPdfExporting = false;
+  equipmentPhotoUploading = false;
   alarmEventsCount = 0;
   /** Registros en la nube (device_alarm_events); solo con sesión Supabase + SQL 013. */
   alarmHistoryItems: DeviceAlarmEvent[] = [];
@@ -189,7 +224,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     private readonly router: Router,
     private readonly route: ActivatedRoute,
     readonly deviceStore: DeviceStoreService,
-    private readonly webPush: WebPushService
+    private readonly webPush: WebPushService,
+    private readonly equipmentSheet: EquipmentSheetService
   ) {
     void this.auth.getSession().then((s) => {
       this.email = s?.user.email ?? null;
@@ -282,6 +318,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (path === '/dispositivos') {
       this.shellRoute = 'devices';
+      return;
+    }
+    if (path === '/ficha-equipo') {
+      this.shellRoute = 'equipment';
+      void this.loadEquipmentPage();
       return;
     }
     if (path === '/alertas') {
@@ -1204,10 +1245,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   /** Navegación lateral / móvil: cada ítem va a su ruta dedicada. */
-  scrollToSection(section: 'dashboard' | 'devices' | 'alerts' | 'settings'): void {
+  scrollToSection(section: 'dashboard' | 'devices' | 'equipment' | 'alerts' | 'settings'): void {
     const paths: Record<typeof section, string> = {
       dashboard: '/dashboard',
       devices: '/dispositivos',
+      equipment: '/ficha-equipo',
       alerts: '/alertas',
       settings: '/configuracion',
     };
@@ -1239,9 +1281,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.dailyEnergyError = '';
     this.syncNotificationFormWithSelected();
     this.syncPdfExportDateDefaults();
+    if (this.shellRoute === 'equipment') {
+      void this.loadEquipmentPage();
+    }
     if (syncQueryToUrl) {
       const path = this.router.url.split('?')[0];
-      const shellPaths = ['/dashboard', '/dispositivos', '/alertas', '/configuracion'];
+      const shellPaths = ['/dashboard', '/dispositivos', '/ficha-equipo', '/alertas', '/configuracion'];
       if (shellPaths.includes(path)) {
         this.skipQueryParamDeviceSync = true;
         void this.router
@@ -2669,6 +2714,449 @@ export class DashboardComponent implements OnInit, OnDestroy {
     } catch {
       // no-op
     }
+  }
+
+  equipmentSheetAvailable(): boolean {
+    return (
+      this.environment.deviceCloudSync &&
+      !!this.selectedDeviceId &&
+      this.isUuidDeviceId(this.selectedDeviceId)
+    );
+  }
+
+  private isUuidDeviceId(id: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id
+    );
+  }
+
+  /** Ficha técnica en la nube solo para equipos con UUID de panel. */
+  deviceCanOpenEquipmentSheet(device: DashboardDevice): boolean {
+    return this.environment.deviceCloudSync && this.isUuidDeviceId(device.id);
+  }
+
+  goToEquipmentSheet(deviceId: string, e?: Event): void {
+    e?.stopPropagation();
+    void this.router.navigate(['/ficha-equipo'], {
+      queryParams: { deviceId },
+      replaceUrl: true,
+    });
+  }
+
+  async loadEquipmentPage(): Promise<void> {
+    if (!this.equipmentSheetAvailable()) {
+      this.equipmentLogRows = [];
+      this.equipmentPhotos = [];
+      return;
+    }
+    const id = this.selectedDeviceId as string;
+    this.equipmentLoading = true;
+    this.equipmentFeedback = '';
+    try {
+      const { row, error: errSheet } = await this.equipmentSheet.fetchSheet(id);
+      if (errSheet) {
+        const low = errSheet.toLowerCase();
+        this.equipmentFeedback =
+          low.includes('does not exist') ||
+          low.includes('schema cache') ||
+          low.includes('could not find the table')
+            ? 'Ejecutá en Supabase el SQL: FRONTEND/supabase/sql/021_device_equipment_ficha.sql'
+            : errSheet;
+        return;
+      }
+      this.hydrateEquipmentFormsFromRow(row);
+      const { rows: logs, error: errLog } = await this.equipmentSheet.listLog(id);
+      this.equipmentLogRows = errLog ? [] : logs;
+      if (errLog && !this.equipmentFeedback) {
+        this.equipmentFeedback = errLog;
+      }
+      const { rows: photos, error: errPh } = await this.equipmentSheet.listPhotos(id);
+      this.equipmentPhotos = errPh ? [] : photos;
+      if (errPh && !this.equipmentFeedback) {
+        this.equipmentFeedback = errPh;
+      }
+      this.initLogDateTimeDefaults();
+    } finally {
+      this.equipmentLoading = false;
+    }
+  }
+
+  private hydrateEquipmentFormsFromRow(row: DeviceEquipmentSheetRow | null): void {
+    if (!row) {
+      this.eqCompressorForm = '';
+      this.eqHpForm = '';
+      this.eqRefrigerantForm = '';
+      this.eqCondenserForm = '';
+      this.eqEvaporatorForm = '';
+      this.eqSupplyForm = '';
+      this.eqPumpDownForm = false;
+      this.eqDefrostForm = '';
+      this.eqChamberForm = '';
+      this.eqFreeNotesForm = '';
+      this.eqLastMaintDate = '';
+      this.eqLastMaintTime = '';
+      this.eqNextMaintDate = '';
+      this.eqNextMaintTime = '';
+      this.eqMaintIntervalForm = '';
+      this.eqMaintNotifyForm = true;
+      return;
+    }
+    this.eqCompressorForm = row.compressorText ?? '';
+    this.eqHpForm = row.hp != null && Number.isFinite(row.hp) ? String(row.hp) : '';
+    this.eqRefrigerantForm = row.refrigerant ?? '';
+    this.eqCondenserForm = row.condenserText ?? '';
+    this.eqEvaporatorForm = row.evaporatorText ?? '';
+    this.eqSupplyForm = row.supply ?? '';
+    this.eqPumpDownForm = row.pumpDown;
+    this.eqDefrostForm = row.defrost ?? '';
+    this.eqChamberForm = row.chamberType ?? '';
+    this.eqFreeNotesForm = row.freeNotes ?? '';
+    this.eqLastMaintDate = this.isoToDateInput(row.lastMaintenanceAt);
+    this.eqLastMaintTime = this.isoToTimeInput(row.lastMaintenanceAt);
+    this.eqNextMaintDate = this.isoToDateInput(row.nextMaintenanceAt);
+    this.eqNextMaintTime = this.isoToTimeInput(row.nextMaintenanceAt);
+    this.eqMaintIntervalForm =
+      row.maintenanceIntervalDays != null && Number.isFinite(row.maintenanceIntervalDays)
+        ? String(row.maintenanceIntervalDays)
+        : '';
+    this.eqMaintNotifyForm = row.maintenanceNotifyEnabled !== false;
+  }
+
+  private isoToDateInput(iso: string | null): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  private isoToTimeInput(iso: string | null): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  private combineDateTimeToIso(dateStr: string, timeStr: string): string | null {
+    const d = dateStr.trim();
+    if (!d) return null;
+    const t = timeStr.trim() || '00:00';
+    const iso = new Date(`${d}T${t}:00`);
+    if (Number.isNaN(iso.getTime())) return null;
+    return iso.toISOString();
+  }
+
+  private initLogDateTimeDefaults(): void {
+    const now = new Date();
+    this.logDateForm = this.isoToDateInput(now.toISOString());
+    this.logTimeForm = this.isoToTimeInput(now.toISOString());
+    this.logNoteForm = '';
+  }
+
+  async saveEquipmentSheet(): Promise<void> {
+    if (!this.equipmentSheetAvailable()) return;
+    this.equipmentSaving = true;
+    this.equipmentFeedback = '';
+    try {
+      const hpRaw = this.eqHpForm.trim().replace(',', '.');
+      const hp = hpRaw ? Number.parseFloat(hpRaw) : null;
+      const intRaw = this.eqMaintIntervalForm.trim();
+      const interval = intRaw ? Number.parseInt(intRaw, 10) : null;
+      const { error } = await this.equipmentSheet.upsertSheet({
+        deviceId: this.selectedDeviceId!,
+        compressorText: this.eqCompressorForm.trim() || null,
+        hp: hp != null && Number.isFinite(hp) ? hp : null,
+        refrigerant: this.eqRefrigerantForm.trim() || null,
+        condenserText: this.eqCondenserForm.trim() || null,
+        evaporatorText: this.eqEvaporatorForm.trim() || null,
+        supply: this.eqSupplyForm.trim() || null,
+        pumpDown: this.eqPumpDownForm,
+        defrost: this.eqDefrostForm.trim() || null,
+        chamberType: this.eqChamberForm.trim() || null,
+        freeNotes: this.eqFreeNotesForm.trim() || null,
+        lastMaintenanceAt: this.combineDateTimeToIso(this.eqLastMaintDate, this.eqLastMaintTime),
+        nextMaintenanceAt: this.combineDateTimeToIso(this.eqNextMaintDate, this.eqNextMaintTime),
+        maintenanceIntervalDays:
+          interval != null && Number.isFinite(interval) && interval > 0 ? interval : null,
+        maintenanceNotifyEnabled: this.eqMaintNotifyForm,
+      });
+      if (error) {
+        this.equipmentFeedback = error;
+        return;
+      }
+      this.equipmentFeedback = 'Ficha guardada.';
+      window.setTimeout(() => {
+        this.equipmentFeedback = '';
+      }, 4000);
+      void this.maybeNotifyMaintenanceDue();
+    } finally {
+      this.equipmentSaving = false;
+    }
+  }
+
+  /** Aviso local del navegador si el próximo mantenimiento está vencido o mañana (una vez por día por dispositivo). */
+  private maybeNotifyMaintenanceDue(): void {
+    if (!this.eqMaintNotifyForm || typeof window === 'undefined' || !('Notification' in window)) {
+      return;
+    }
+    const next = this.combineDateTimeToIso(this.eqNextMaintDate, this.eqNextMaintTime);
+    if (!next) return;
+    const due = new Date(next).getTime();
+    const now = Date.now();
+    if (due > now + 48 * 3600 * 1000) return;
+    const id = this.selectedDeviceId ?? '';
+    const key = `ar_maint_notified_${id}_${this.isoToDateInput(new Date(now).toISOString())}`;
+    try {
+      if (localStorage.getItem(key)) return;
+    } catch {
+      /* */
+    }
+    if (Notification.permission === 'default') {
+      void Notification.requestPermission();
+    }
+    if (Notification.permission !== 'granted') return;
+    const name = this.selectedDevice?.name ?? 'Equipo';
+    new Notification('Mantenimiento', {
+      body:
+        due < now
+          ? `${name}: mantenimiento vencido (revisá la ficha).`
+          : `${name}: próximo mantenimiento cercano.`,
+      tag: `maint-${id}`,
+    });
+    try {
+      localStorage.setItem(key, '1');
+    } catch {
+      /* */
+    }
+  }
+
+  async addEquipmentLogEntry(): Promise<void> {
+    if (!this.equipmentSheetAvailable()) return;
+    const note = this.logNoteForm.trim();
+    if (!note) {
+      this.equipmentFeedback = 'Escribí una observación para la bitácora.';
+      return;
+    }
+    const iso = this.combineDateTimeToIso(this.logDateForm, this.logTimeForm);
+    if (!iso) {
+      this.equipmentFeedback = 'Revisá fecha y hora de la bitácora.';
+      return;
+    }
+    const { error } = await this.equipmentSheet.insertLog(this.selectedDeviceId!, iso, note);
+    if (error) {
+      this.equipmentFeedback = error;
+      return;
+    }
+    this.equipmentFeedback = 'Entrada agregada a la bitácora.';
+    window.setTimeout(() => {
+      this.equipmentFeedback = '';
+    }, 3000);
+    void this.loadEquipmentPage();
+  }
+
+  async deleteEquipmentLogEntry(row: DeviceEquipmentLogRow): Promise<void> {
+    if (!confirm('¿Eliminar esta entrada de la bitácora?')) return;
+    const { error } = await this.equipmentSheet.deleteLog(row.id);
+    if (error) {
+      this.equipmentFeedback = error;
+      return;
+    }
+    void this.loadEquipmentPage();
+  }
+
+  async onEquipmentPhotoSelected(ev: Event): Promise<void> {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || !this.equipmentSheetAvailable()) return;
+    this.equipmentPhotoUploading = true;
+    this.equipmentFeedback = '';
+    try {
+      const cap = this.photoCaptionForm.trim() || null;
+      const { error } = await this.equipmentSheet.uploadPhoto(this.selectedDeviceId!, file, cap);
+      if (error) {
+        this.equipmentFeedback = error;
+        return;
+      }
+      this.photoCaptionForm = '';
+      void this.loadEquipmentPage();
+    } finally {
+      this.equipmentPhotoUploading = false;
+    }
+  }
+
+  async deleteEquipmentPhoto(p: DeviceEquipmentPhotoRow): Promise<void> {
+    if (!confirm('¿Quitar esta foto?')) return;
+    const { error } = await this.equipmentSheet.deletePhoto(p);
+    if (error) {
+      this.equipmentFeedback = error;
+      return;
+    }
+    void this.loadEquipmentPage();
+  }
+
+  equipmentMaintenanceStatusLabel(): string {
+    const next = this.combineDateTimeToIso(this.eqNextMaintDate, this.eqNextMaintTime);
+    if (!next) return '';
+    const t = new Date(next).getTime();
+    if (Number.isNaN(t)) return '';
+    if (t < Date.now()) return 'vencido';
+    if (t < Date.now() + 72 * 3600 * 1000) return 'próximo';
+    return '';
+  }
+
+  async exportEquipmentPdf(): Promise<void> {
+    if (!this.equipmentSheetAvailable() || !this.selectedDevice) return;
+    this.equipmentPdfExporting = true;
+    this.equipmentFeedback = '';
+    try {
+      const [jspdfMod] = await Promise.all([import('jspdf')]);
+      const JsPDF = jspdfMod.default;
+      const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const dev = this.selectedDevice;
+      let y = 14;
+      doc.setFontSize(14);
+      doc.text('AR Monitoreo — Ficha del equipo', 14, y);
+      y += 8;
+      doc.setFontSize(10);
+      doc.text(`Dispositivo: ${dev.name}`, 14, y);
+      y += 6;
+      doc.setFontSize(8);
+      doc.setTextColor(80);
+      doc.text(`Generado: ${new Date().toLocaleString('es-AR')}`, 14, y);
+      doc.setTextColor(0);
+      y += 10;
+
+      const lines: string[] = [];
+      const push = (label: string, val: string) => {
+        if (val.trim()) lines.push(`${label}: ${val}`);
+      };
+      push('Compresor', this.eqCompressorForm);
+      push('HP', this.eqHpForm);
+      push('Refrigerante', this.eqRefrigerantForm);
+      push('Condensador', this.eqCondenserForm);
+      push('Evaporador / forzadores', this.eqEvaporatorForm);
+      push('Alimentación', this.eqSupplyForm);
+      push('Pump down', this.eqPumpDownForm ? 'Sí' : 'No');
+      push('Descongelamiento', this.eqDefrostForm);
+      push('Tipo de cámara', this.eqChamberForm);
+      if (this.eqFreeNotesForm.trim()) {
+        lines.push(`Descripción: ${this.eqFreeNotesForm.trim()}`);
+      }
+      push(
+        'Último mantenimiento',
+        this.eqLastMaintDate
+          ? `${this.eqLastMaintDate} ${this.eqLastMaintTime || ''}`.trim()
+          : ''
+      );
+      push(
+        'Próximo mantenimiento',
+        this.eqNextMaintDate
+          ? `${this.eqNextMaintDate} ${this.eqNextMaintTime || ''}`.trim()
+          : ''
+      );
+      if (this.eqMaintIntervalForm.trim()) {
+        push('Intervalo (días)', this.eqMaintIntervalForm);
+      }
+
+      doc.setFontSize(9);
+      for (const line of lines) {
+        const parts = doc.splitTextToSize(line, 182);
+        for (const p of parts) {
+          if (y > 270) {
+            doc.addPage();
+            y = 14;
+          }
+          doc.text(p, 14, y);
+          y += 4.5;
+        }
+        y += 2;
+      }
+
+      y += 4;
+      doc.setFontSize(10);
+      doc.text('Bitácora', 14, y);
+      y += 6;
+      doc.setFontSize(8);
+      for (const log of [...this.equipmentLogRows].sort(
+        (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
+      )) {
+        const dt = new Date(log.occurredAt).toLocaleString('es-AR');
+        const block = `${dt} — ${log.note}`;
+        const parts = doc.splitTextToSize(block, 182);
+        for (const p of parts) {
+          if (y > 270) {
+            doc.addPage();
+            y = 14;
+          }
+          doc.text(p, 14, y);
+          y += 4;
+        }
+        y += 2;
+      }
+
+      let imgY = y + 6;
+      for (const ph of this.equipmentPhotos) {
+        try {
+          const dataUrl = await this.loadImageAsDataUrl(ph.publicUrl);
+          if (!dataUrl) continue;
+          const pageW = 180;
+          const imgProps = doc.getImageProperties(dataUrl);
+          const ratio = imgProps.height / imgProps.width;
+          const h = Math.min(90, pageW * ratio);
+          if (imgY + h > 280) {
+            doc.addPage();
+            imgY = 14;
+          }
+          doc.addImage(dataUrl, 'JPEG', 14, imgY, pageW, h, undefined, 'FAST');
+          imgY += h + 4;
+          if (ph.caption?.trim()) {
+            doc.setFontSize(7);
+            doc.setTextColor(80);
+            doc.text(ph.caption.trim(), 14, imgY);
+            doc.setTextColor(0);
+            imgY += 5;
+          }
+        } catch {
+          /* omitir imagen si falla CORS o formato */
+        }
+      }
+
+      const safe = dev.name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);
+      doc.save(`ficha_equipo_${safe}_${this.pdfDateStamp()}.pdf`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.equipmentFeedback = `No se pudo generar el PDF: ${msg}`;
+    } finally {
+      this.equipmentPdfExporting = false;
+    }
+  }
+
+  private loadImageAsDataUrl(url: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth;
+          c.height = img.naturalHeight;
+          const ctx = c.getContext('2d');
+          if (!ctx) {
+            resolve(null);
+            return;
+          }
+          ctx.drawImage(img, 0, 0);
+          resolve(c.toDataURL('image/jpeg', 0.85));
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
   }
 
   private setupAlarmAudioUnlock(): void {

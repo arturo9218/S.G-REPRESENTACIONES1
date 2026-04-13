@@ -21,6 +21,7 @@ const routes: Routes = [
   { path: 'restablecer-contrasena', component: ResetPasswordComponent },
   { path: 'dashboard', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'dispositivos', component: DashboardComponent, canActivate: [authGuard] },
+  { path: 'ficha-equipo', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'alertas', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'configuracion', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'chart', component: ChartAnalysisComponent },

@@ -2549,20 +2549,20 @@ $border: rgba(148, 163, 184, 0.18);
 
   .mobile-nav__btn {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 0.2rem;
-    padding: 0.35rem 0.25rem;
+    padding: 0.35rem 0.15rem;
     border: none;
     border-radius: 10px;
     background: transparent;
     color: $muted;
     font-family: inherit;
-    font-size: 0.62rem;
+    font-size: 0.58rem;
     font-weight: 600;
     cursor: pointer;
-    max-width: 88px;
     transition: color 0.15s ease, background 0.15s ease;
 
     svg {
@@ -2738,5 +2738,172 @@ $border: rgba(148, 163, 184, 0.18);
   .chart-expand-btn,
   .chart-open-btn {
     min-height: 44px;
+  }
+}
+
+/* Ficha del equipo (misma base que settings-page) */
+.equipment-page__lead {
+  margin: 0 0 1rem;
+  max-width: 52rem;
+}
+
+.equipment-page__loading {
+  margin: 0 0 1rem;
+  color: $muted;
+  font-size: 0.9rem;
+}
+
+.equipment-page__banner {
+  border-left: 3px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+
+  &--urgent {
+    border-left-color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+  }
+}
+
+.equipment-page__banner-text {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #fcd34d;
+}
+
+.equipment-page__banner--urgent .equipment-page__banner-text {
+  color: #fecaca;
+}
+
+.notify-panel__textarea {
+  width: 100%;
+  min-height: 6rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid $border;
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  font-family: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
+.notify-panel__field--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+
+  input[type='checkbox'] {
+    width: 1.1rem;
+    height: 1.1rem;
+    accent-color: #3b82f6;
+  }
+}
+
+.equipment-log-add {
+  margin-bottom: 1rem;
+}
+
+.equipment-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.equipment-log-list__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid $border;
+}
+
+.equipment-log-list__time {
+  display: block;
+  font-size: 0.75rem;
+  color: $muted;
+  font-variant-numeric: tabular-nums;
+}
+
+.equipment-log-list__note {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.equipment-photos-add {
+  margin-bottom: 1rem;
+}
+
+.equipment-photos-add__file {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  input[type='file'] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    font-size: 0;
+  }
+}
+
+.equipment-photos-add__hint {
+  font-size: 0.85rem;
+  color: $muted;
+}
+
+.equipment-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.equipment-photo-grid__cell {
+  margin: 0;
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid $border;
+  background: rgba(0, 0, 0, 0.2);
+
+  img {
+    display: block;
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+  }
+
+  figcaption {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.72rem;
+    color: $muted;
+  }
+}
+
+.equipment-photo-grid__del {
+  margin: 0.35rem 0.5rem 0.5rem;
+}
+
+.equipment-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  margin-bottom: 2rem;
+}
+
+@media (max-width: 900px) {
+  .equipment-page__actions {
+    padding-bottom: 0.5rem;
   }
 }
