@@ -938,16 +938,21 @@
 
       <ng-container *ngIf="shellRoute === 'equipment'">
         <div class="settings-page equipment-page" role="region" aria-labelledby="equipment-page-title">
-          <h1 id="equipment-page-title" class="settings-page__title">Ficha del equipo</h1>
-          <p class="card__hint card__hint--tight equipment-page__lead">
-            Registro técnico del sistema frigorífico, bitácora de visitas y fotos. Requiere equipo creado en la nube (ID
-            UUID).
-          </p>
-
-          <article class="card settings-page__device-pick">
-            <h2 class="card__title card__title--sm">Equipo</h2>
-            <label class="notify-panel__field notify-panel__field--full">
-              <span>Dispositivo</span>
+          <article class="card card--equipment-hero">
+            <div class="equipment-page__hero-top">
+              <div>
+                <h1 id="equipment-page-title" class="equipment-page__title">Ficha del equipo</h1>
+                <p class="card__hint card__hint--tight equipment-page__hint">
+                  Planilla técnica: instalación, bitácora, fotos y mantenimiento (nube + UUID de panel).
+                </p>
+              </div>
+              <div class="equipment-page__hero-badge" *ngIf="selectedDevice as sd">
+                <span class="equipment-page__hero-badge-dot" [class.equipment-page__hero-badge-dot--off]="!sd.online"></span>
+                <span class="equipment-page__hero-badge-text">{{ sd.online ? 'Online' : 'Sin conexión' }}</span>
+              </div>
+            </div>
+            <label class="notify-panel__field equipment-page__hero-field">
+              <span>Equipo a documentar</span>
               <select
                 class="notify-panel__select"
                 [ngModel]="selectedDeviceId"
@@ -955,13 +960,18 @@
                 name="equipment-device-pick"
               >
                 <option *ngFor="let d of devices" [ngValue]="d.id">
-                  {{ d.name }} — {{ d.online ? 'Online' : 'Sin conexión' }}
+                  {{ d.name }} — {{ d.location || 'Sin ubicación' }}
                 </option>
               </select>
             </label>
+            <p class="equipment-page__hero-meta" *ngIf="selectedDevice as sd2">
+              <span class="equipment-page__hero-meta-name">{{ sd2.name }}</span>
+              <span class="equipment-page__hero-meta-loc" *ngIf="sd2.location">{{ sd2.location }}</span>
+              <span class="equipment-page__hero-meta-id" *ngIf="sd2.moduleId">ID módulo: {{ sd2.moduleId }}</span>
+            </p>
           </article>
 
-          <div *ngIf="!equipmentSheetAvailable()" class="card">
+          <div *ngIf="!equipmentSheetAvailable()" class="card card--ficha-section">
             <p class="card__empty">
               La ficha en la nube solo está disponible para dispositivos con ID de panel UUID y con sincronización
               activa. Agregá un equipo desde “+ Dispositivo” con cuenta en Supabase.
@@ -971,21 +981,81 @@
           <ng-container *ngIf="equipmentSheetAvailable()">
             <p class="equipment-page__loading" *ngIf="equipmentLoading">Cargando ficha…</p>
 
-            <div class="settings-page__stack" *ngIf="!equipmentLoading">
+            <div class="settings-page__stack equipment-page__stack" *ngIf="!equipmentLoading">
               <article
                 class="card equipment-page__banner"
                 *ngIf="equipmentMaintenanceStatusLabel() as st"
-                [class.equipment-page__banner--urgent]="st === 'vencido'"
+                [class.equipment-page__banner--due]="st === 'vencido'"
+                [class.equipment-page__banner--soon]="st === 'próximo'"
               >
+                <div class="equipment-page__banner-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 6v6l4 2" />
+                  </svg>
+                </div>
                 <p class="equipment-page__banner-text">
-                  <ng-container *ngIf="st === 'vencido'">Próximo mantenimiento: <strong>vencido</strong>.</ng-container>
-                  <ng-container *ngIf="st === 'próximo'">Próximo mantenimiento: <strong>cercano</strong> (72 h).</ng-container>
+                  <ng-container *ngIf="st === 'vencido'">Mantenimiento programado: <strong>fecha vencida</strong> — revisá la sección Mantenimiento.</ng-container>
+                  <ng-container *ngIf="st === 'próximo'">Mantenimiento programado: <strong>próximos 72 h</strong>.</ng-container>
                 </p>
               </article>
 
-              <article class="card">
-                <h2 class="card__title card__title--sm">Datos fijos del equipo</h2>
-                <p class="card__hint card__hint--tight">Campos estandarizados para informes y PDF.</p>
+              <article class="card card--ficha-section">
+                <h2 class="card__title card__title--sm">Ficha / cámara</h2>
+                <p class="card__hint card__hint--tight">
+                  Un mismo dispositivo puede tener varias instalaciones (ej. dos cámaras). Cada ficha tiene su bitácora, fotos y mantenimiento.
+                </p>
+                <div class="notify-panel notify-panel__grid equipment-page__ficha-toolbar">
+                  <label class="notify-panel__field">
+                    <span>Editar ficha</span>
+                    <select
+                      class="notify-panel__select"
+                      [ngModel]="selectedFichaId"
+                      (ngModelChange)="onEquipmentFichaChange($event)"
+                      name="eq-ficha-pick"
+                    >
+                      <option *ngFor="let f of equipmentFichas" [ngValue]="f.id">{{ f.label }}</option>
+                    </select>
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Nombre identificador (ej. Cámara 1, Cámara congelados)</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="eqFichaLabelForm"
+                      name="eq-ficha-label"
+                      maxlength="80"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <div class="equipment-page__ficha-actions">
+                    <button type="button" class="btn btn--ghost" (click)="addEquipmentFicha()">
+                      + Agregar otra ficha
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn--ghost"
+                      *ngIf="equipmentFichas.length > 1"
+                      (click)="deleteEquipmentFicha()"
+                    >
+                      Eliminar esta ficha
+                    </button>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card card--ficha-section">
+                <div class="equipment-page__section-head">
+                  <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Compresión y circuito</h2>
+                    <p class="card__hint card__hint--tight">Compresor, refrigerante y configuración general.</p>
+                  </div>
+                </div>
                 <div class="notify-panel notify-panel__grid">
                   <label class="notify-panel__field notify-panel__field--full">
                     <span>Compresor</span>
@@ -1014,23 +1084,15 @@
                       <option value="otro">Otro</option>
                     </select>
                   </label>
-                  <label class="notify-panel__field notify-panel__field--full">
-                    <span>Condensador</span>
-                    <input type="text" [(ngModel)]="eqCondenserForm" name="eq-cond" maxlength="200" autocomplete="off" />
-                  </label>
-                  <label class="notify-panel__field notify-panel__field--full">
-                    <span>Evaporador / forzadores</span>
-                    <input type="text" [(ngModel)]="eqEvaporatorForm" name="eq-evap" maxlength="200" autocomplete="off" />
-                  </label>
                   <label class="notify-panel__field">
-                    <span>Alimentación</span>
+                    <span>Alimentación (compresor / general)</span>
                     <select class="notify-panel__select" [(ngModel)]="eqSupplyForm" name="eq-supply">
                       <option value="">—</option>
                       <option value="three_phase">Trifásico</option>
                       <option value="single_phase">Monofásico</option>
                     </select>
                   </label>
-                  <label class="notify-panel__field notify-panel__field--checkbox">
+                  <label class="notify-panel__field notify-panel__field--checkbox notify-panel__field--span2">
                     <input type="checkbox" [(ngModel)]="eqPumpDownForm" name="eq-pump" />
                     <span>Pump down</span>
                   </label>
@@ -1055,23 +1117,234 @@
                 </div>
               </article>
 
-              <article class="card">
-                <h2 class="card__title card__title--sm">Descripción libre</h2>
+              <article class="card card--ficha-section">
+                <div class="equipment-page__section-head">
+                  <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="3" />
+                      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Condensador</h2>
+                    <p class="card__hint card__hint--tight">
+                      Ventilación forzada (forzadores, palas, monofásico/trifásico y capacitor si aplica) o enfriado por agua.
+                    </p>
+                  </div>
+                </div>
+                <div class="notify-panel notify-panel__grid">
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Tipo</span>
+                    <select class="notify-panel__select" [(ngModel)]="eqCondenserCoolingForm" name="eq-cond-type">
+                      <option value="">— Elegir —</option>
+                      <option value="forced_air">Ventilación forzada</option>
+                      <option value="water">Enfriado por agua</option>
+                    </select>
+                  </label>
+
+                  <ng-container *ngIf="eqCondenserCoolingForm === 'forced_air'">
+                    <label class="notify-panel__field">
+                      <span>Cantidad de forzadores</span>
+                      <input
+                        type="text"
+                        [(ngModel)]="eqCondenserFanCountForm"
+                        name="eq-cond-fan-n"
+                        inputmode="numeric"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <label class="notify-panel__field notify-panel__field--full">
+                      <span>Diámetro de pala / observaciones (ej. Ø 910 mm)</span>
+                      <input type="text" [(ngModel)]="eqCondenserBladeForm" name="eq-cond-blade" maxlength="120" />
+                    </label>
+                    <label class="notify-panel__field">
+                      <span>Motores forzadores</span>
+                      <select class="notify-panel__select" [(ngModel)]="eqCondenserFanPhasesForm" name="eq-cond-ph">
+                        <option value="">—</option>
+                        <option value="three_phase">Trifásico</option>
+                        <option value="single_phase">Monofásico</option>
+                      </select>
+                    </label>
+                    <label class="notify-panel__field" *ngIf="eqCondenserFanPhasesForm === 'single_phase'">
+                      <span>Capacitor (µF) — monofásico</span>
+                      <input
+                        type="text"
+                        [(ngModel)]="eqCondenserCapacitorForm"
+                        name="eq-cond-cap"
+                        maxlength="40"
+                        placeholder="Ej. 35 µF"
+                      />
+                    </label>
+                  </ng-container>
+
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Notas adicionales condensador</span>
+                    <input type="text" [(ngModel)]="eqCondenserNotesForm" name="eq-cond-notes" maxlength="300" />
+                  </label>
+                </div>
+              </article>
+
+              <article class="card card--ficha-section">
+                <div class="equipment-page__section-head">
+                  <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="3" />
+                      <path d="M12 2v4M12 14v6M6.34 6.34l2.83 2.83M12 12h.01M14.83 14.83l2.83 2.83" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Expansión</h2>
+                    <p class="card__hint card__hint--tight">
+                      Tubo capilar (medida) o válvula de expansión (marca y modelo).
+                    </p>
+                  </div>
+                </div>
+                <div class="notify-panel notify-panel__grid">
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Tipo</span>
+                    <select class="notify-panel__select" [(ngModel)]="eqExpansionTypeForm" name="eq-exp-type">
+                      <option value="">— Elegir —</option>
+                      <option value="capillary">Capilar</option>
+                      <option value="valve">Válvula</option>
+                    </select>
+                  </label>
+                  <ng-container *ngIf="eqExpansionTypeForm === 'capillary'">
+                    <label class="notify-panel__field notify-panel__field--full">
+                      <span>Medida del capilar</span>
+                      <input
+                        type="text"
+                        [(ngModel)]="eqExpansionCapillaryForm"
+                        name="eq-exp-cap"
+                        maxlength="120"
+                        placeholder="Ej. 0,65 m / Ø interior"
+                      />
+                    </label>
+                  </ng-container>
+                  <ng-container *ngIf="eqExpansionTypeForm === 'valve'">
+                    <label class="notify-panel__field">
+                      <span>Marca</span>
+                      <input
+                        type="text"
+                        [(ngModel)]="eqExpansionValveBrandForm"
+                        name="eq-exp-brand"
+                        maxlength="120"
+                      />
+                    </label>
+                    <label class="notify-panel__field">
+                      <span>Modelo</span>
+                      <input
+                        type="text"
+                        [(ngModel)]="eqExpansionValveModelForm"
+                        name="eq-exp-model"
+                        maxlength="120"
+                      />
+                    </label>
+                  </ng-container>
+                </div>
+              </article>
+
+              <article class="card card--ficha-section">
+                <div class="equipment-page__section-head">
+                  <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Evaporador</h2>
+                    <p class="card__hint card__hint--tight">
+                      Con forzadores (cantidad, trifásico/monofásico; si monofásico, capacitor o dato del motor) o estático (sin forzadores).
+                    </p>
+                  </div>
+                </div>
+                <div class="notify-panel notify-panel__grid">
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Tipo</span>
+                    <select class="notify-panel__select" [(ngModel)]="eqEvapAirTypeForm" name="eq-evap-type">
+                      <option value="">— Elegir —</option>
+                      <option value="forced">Con forzadores</option>
+                      <option value="static">Estático (sin forzadores)</option>
+                    </select>
+                  </label>
+
+                  <ng-container *ngIf="eqEvapAirTypeForm === 'forced'">
+                    <label class="notify-panel__field">
+                      <span>Cantidad de forzadores</span>
+                      <input
+                        type="text"
+                        [(ngModel)]="eqEvapFanCountForm"
+                        name="eq-evap-fan-n"
+                        inputmode="numeric"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <label class="notify-panel__field">
+                      <span>Motores forzadores</span>
+                      <select class="notify-panel__select" [(ngModel)]="eqEvapFanPhasesForm" name="eq-evap-ph">
+                        <option value="">—</option>
+                        <option value="three_phase">Trifásico</option>
+                        <option value="single_phase">Monofásico</option>
+                      </select>
+                    </label>
+                    <label class="notify-panel__field notify-panel__field--full" *ngIf="eqEvapFanPhasesForm === 'single_phase'">
+                      <span>Capacitor / detalle monofásico (µF, modelo, etc.)</span>
+                      <input
+                        type="text"
+                        [(ngModel)]="eqEvapSingleDetailForm"
+                        name="eq-evap-cap"
+                        maxlength="120"
+                      />
+                    </label>
+                  </ng-container>
+
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Notas adicionales evaporador</span>
+                    <input type="text" [(ngModel)]="eqEvapNotesForm" name="eq-evap-notes" maxlength="300" />
+                  </label>
+                </div>
+              </article>
+
+              <article class="card card--ficha-section">
+                <div class="equipment-page__section-head">
+                  <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Descripción libre</h2>
+                    <p class="card__hint card__hint--tight">Instalación, accesorios, particularidades.</p>
+                  </div>
+                </div>
                 <label class="notify-panel__field notify-panel__field--full">
-                  <span>Observaciones de instalación, accesorios, particularidades</span>
+                  <span>Texto</span>
                   <textarea
                     class="notify-panel__textarea"
                     [(ngModel)]="eqFreeNotesForm"
                     name="eq-notes"
                     rows="5"
                     maxlength="4000"
-                    placeholder="Texto libre…"
+                    placeholder="Ej. líneas de servicio, válvulas, reformas…"
                   ></textarea>
                 </label>
               </article>
 
-              <article class="card">
-                <h2 class="card__title card__title--sm">Mantenimiento</h2>
+              <article class="card card--ficha-section">
+                <div class="equipment-page__section-head">
+                  <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                      <line x1="16" y1="2" x2="16" y2="6" />
+                      <line x1="8" y1="2" x2="8" y2="6" />
+                      <line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Mantenimiento</h2>
+                    <p class="card__hint card__hint--tight">Última y próxima visita; intervalo y aviso en el dispositivo (navegador o PWA en el celular, con permiso de notificaciones).</p>
+                  </div>
+                </div>
                 <div class="notify-panel notify-panel__grid">
                   <label class="notify-panel__field">
                     <span>Último mantenimiento — fecha</span>
@@ -1106,9 +1379,23 @@
                 </div>
               </article>
 
-              <article class="card">
-                <h2 class="card__title card__title--sm">Bitácora</h2>
-                <p class="card__hint card__hint--tight">Registro cronológico de visitas e intervenciones.</p>
+              <article class="card card--ficha-section">
+                <div class="equipment-page__section-head">
+                  <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="8" y1="6" x2="21" y2="6" />
+                      <line x1="8" y1="12" x2="21" y2="12" />
+                      <line x1="8" y1="18" x2="21" y2="18" />
+                      <line x1="3" y1="6" x2="3.01" y2="6" />
+                      <line x1="3" y1="12" x2="3.01" y2="12" />
+                      <line x1="3" y1="18" x2="3.01" y2="18" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Bitácora</h2>
+                    <p class="card__hint card__hint--tight">Visitas e intervenciones (más reciente arriba).</p>
+                  </div>
+                </div>
                 <div class="notify-panel notify-panel__grid equipment-log-add">
                   <label class="notify-panel__field">
                     <span>Fecha</span>
@@ -1122,34 +1409,56 @@
                     <span>Observación</span>
                     <input type="text" [(ngModel)]="logNoteForm" name="log-note" maxlength="2000" />
                   </label>
-                  <button type="button" class="btn btn--primary notify-panel__save" (click)="addEquipmentLogEntry()">
-                    Agregar entrada
-                  </button>
-                </div>
-                <ul class="equipment-log-list" *ngIf="equipmentLogRows.length">
-                  <li class="equipment-log-list__item" *ngFor="let log of equipmentLogRows">
-                    <div>
-                      <span class="equipment-log-list__time">{{ log.occurredAt | date:'dd/MM/yyyy HH:mm' }}</span>
-                      <p class="equipment-log-list__note">{{ log.note }}</p>
-                    </div>
-                    <button
-                      type="button"
-                      class="btn btn--ghost btn--sm"
-                      (click)="deleteEquipmentLogEntry(log)"
-                      title="Eliminar"
-                    >
-                      Quitar
+                  <div class="equipment-log-add__submit">
+                    <button type="button" class="btn btn--primary" (click)="addEquipmentLogEntry()">
+                      + Agregar entrada
                     </button>
-                  </li>
-                </ul>
+                  </div>
+                </div>
+                <div class="equipment-log-table-wrap" *ngIf="equipmentLogRows.length">
+                  <table class="equipment-log-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha y hora</th>
+                        <th>Observación</th>
+                        <th class="equipment-log-table__col-actions"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr *ngFor="let log of equipmentLogRows">
+                        <td class="equipment-log-table__time">{{ log.occurredAt | date:'dd/MM/yyyy HH:mm' }}</td>
+                        <td class="equipment-log-table__note">{{ log.note }}</td>
+                        <td class="equipment-log-table__actions">
+                          <button
+                            type="button"
+                            class="btn btn--ghost btn--sm"
+                            (click)="deleteEquipmentLogEntry(log)"
+                            title="Eliminar"
+                          >
+                            Quitar
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
                 <p class="card__empty" *ngIf="!equipmentLogRows.length">Sin entradas todavía.</p>
               </article>
 
-              <article class="card">
-                <h2 class="card__title card__title--sm">Fotos</h2>
-                <p class="card__hint card__hint--tight">
-                  Desde el celular podés usar cámara o galería. Tamaño máx. 5 MB por archivo (JPEG, PNG, WebP).
-                </p>
+              <article class="card card--ficha-section">
+                <div class="equipment-page__section-head">
+                  <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Fotos</h2>
+                    <p class="card__hint card__hint--tight">Cámara o archivos; máx. 5 MB (JPEG, PNG, WebP, GIF).</p>
+                  </div>
+                </div>
                 <div class="notify-panel equipment-photos-add">
                   <label class="notify-panel__field notify-panel__field--full">
                     <span>Leyenda (opcional)</span>
@@ -1192,7 +1501,7 @@
                 {{ equipmentFeedback }}
               </p>
 
-              <div class="equipment-page__actions">
+              <div class="equipment-page__actions card card--ficha-section">
                 <button
                   type="button"
                   class="btn btn--primary"

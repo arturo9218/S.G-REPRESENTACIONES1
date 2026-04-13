@@ -3,13 +3,30 @@ import { AuthService } from './auth.service';
 
 const BUCKET = 'equipment-photos';
 
-export interface DeviceEquipmentSheetRow {
+export interface DeviceEquipmentFichaRow {
+  id: string;
   deviceId: string;
+  sortOrder: number;
+  label: string;
   compressorText: string | null;
   hp: number | null;
   refrigerant: string | null;
-  condenserText: string | null;
-  evaporatorText: string | null;
+  condenserCoolingType: string | null;
+  condenserFanCount: number | null;
+  condenserBladeDiameterText: string | null;
+  condenserFanMotorPhases: string | null;
+  condenserFanCapacitorUf: string | null;
+  condenserNotes: string | null;
+  /** capillary | valve */
+  expansionType: string | null;
+  expansionCapillaryMeasure: string | null;
+  expansionValveBrand: string | null;
+  expansionValveModel: string | null;
+  evaporatorAirType: string | null;
+  evaporatorFanCount: number | null;
+  evaporatorFanMotorPhases: string | null;
+  evaporatorFanSinglePhaseDetail: string | null;
+  evaporatorNotes: string | null;
   supply: string | null;
   pumpDown: boolean;
   defrost: string | null;
@@ -25,6 +42,7 @@ export interface DeviceEquipmentSheetRow {
 export interface DeviceEquipmentLogRow {
   id: string;
   deviceId: string;
+  fichaId: string | null;
   occurredAt: string;
   note: string;
   createdAt: string;
@@ -33,6 +51,7 @@ export interface DeviceEquipmentLogRow {
 export interface DeviceEquipmentPhotoRow {
   id: string;
   deviceId: string;
+  fichaId: string | null;
   storagePath: string;
   sortOrder: number;
   caption: string | null;
@@ -40,8 +59,8 @@ export interface DeviceEquipmentPhotoRow {
   publicUrl: string;
 }
 
-export type EquipmentSheetPayload = Omit<
-  DeviceEquipmentSheetRow,
+export type EquipmentFichaPayload = Omit<
+  DeviceEquipmentFichaRow,
   'deviceId' | 'updatedAt'
 > & { deviceId: string };
 
@@ -51,14 +70,32 @@ export type EquipmentSheetPayload = Omit<
 export class EquipmentSheetService {
   constructor(private readonly auth: AuthService) {}
 
-  private mapSheet(r: Record<string, unknown>): DeviceEquipmentSheetRow {
+  private mapFicha(r: Record<string, unknown>): DeviceEquipmentFichaRow {
     return {
+      id: r['id'] as string,
       deviceId: r['device_id'] as string,
+      sortOrder: typeof r['sort_order'] === 'number' ? (r['sort_order'] as number) : 0,
+      label: (r['label'] as string) || 'Instalación',
       compressorText: (r['compressor_text'] as string) ?? null,
       hp: typeof r['hp'] === 'number' ? (r['hp'] as number) : null,
       refrigerant: (r['refrigerant'] as string) ?? null,
-      condenserText: (r['condenser_text'] as string) ?? null,
-      evaporatorText: (r['evaporator_text'] as string) ?? null,
+      condenserCoolingType: (r['condenser_cooling_type'] as string) ?? null,
+      condenserFanCount:
+        typeof r['condenser_fan_count'] === 'number' ? (r['condenser_fan_count'] as number) : null,
+      condenserBladeDiameterText: (r['condenser_blade_diameter_text'] as string) ?? null,
+      condenserFanMotorPhases: (r['condenser_fan_motor_phases'] as string) ?? null,
+      condenserFanCapacitorUf: (r['condenser_fan_capacitor_uf'] as string) ?? null,
+      condenserNotes: (r['condenser_notes'] as string) ?? null,
+      expansionType: (r['expansion_type'] as string) ?? null,
+      expansionCapillaryMeasure: (r['expansion_capillary_measure'] as string) ?? null,
+      expansionValveBrand: (r['expansion_valve_brand'] as string) ?? null,
+      expansionValveModel: (r['expansion_valve_model'] as string) ?? null,
+      evaporatorAirType: (r['evaporator_air_type'] as string) ?? null,
+      evaporatorFanCount:
+        typeof r['evaporator_fan_count'] === 'number' ? (r['evaporator_fan_count'] as number) : null,
+      evaporatorFanMotorPhases: (r['evaporator_fan_motor_phases'] as string) ?? null,
+      evaporatorFanSinglePhaseDetail: (r['evaporator_fan_single_phase_detail'] as string) ?? null,
+      evaporatorNotes: (r['evaporator_notes'] as string) ?? null,
       supply: (r['supply'] as string) ?? null,
       pumpDown: Boolean(r['pump_down']),
       defrost: (r['defrost'] as string) ?? null,
@@ -75,30 +112,46 @@ export class EquipmentSheetService {
     };
   }
 
-  async fetchSheet(deviceId: string): Promise<{ row: DeviceEquipmentSheetRow | null; error: string | null }> {
+  async listFichas(
+    deviceId: string
+  ): Promise<{ rows: DeviceEquipmentFichaRow[]; error: string | null }> {
     const { data, error } = await this.auth.client
-      .from('device_equipment_sheets')
+      .from('device_equipment_fichas')
       .select('*')
       .eq('device_id', deviceId)
-      .maybeSingle();
+      .order('sort_order', { ascending: true })
+      .order('label', { ascending: true });
     if (error) {
-      return { row: null, error: error.message };
+      return { rows: [], error: error.message };
     }
-    if (!data) {
-      return { row: null, error: null };
-    }
-    return { row: this.mapSheet(data as Record<string, unknown>), error: null };
+    return { rows: (data ?? []).map((r) => this.mapFicha(r as Record<string, unknown>)), error: null };
   }
 
-  async upsertSheet(payload: EquipmentSheetPayload): Promise<{ error: string | null }> {
+  async upsertFicha(payload: EquipmentFichaPayload): Promise<{ error: string | null }> {
     const now = new Date().toISOString();
     const row = {
+      id: payload.id,
       device_id: payload.deviceId,
+      sort_order: payload.sortOrder,
+      label: payload.label.trim() || 'Sin nombre',
       compressor_text: payload.compressorText || null,
       hp: payload.hp,
       refrigerant: payload.refrigerant || null,
-      condenser_text: payload.condenserText || null,
-      evaporator_text: payload.evaporatorText || null,
+      condenser_cooling_type: payload.condenserCoolingType || null,
+      condenser_fan_count: payload.condenserFanCount,
+      condenser_blade_diameter_text: payload.condenserBladeDiameterText || null,
+      condenser_fan_motor_phases: payload.condenserFanMotorPhases || null,
+      condenser_fan_capacitor_uf: payload.condenserFanCapacitorUf || null,
+      condenser_notes: payload.condenserNotes || null,
+      expansion_type: payload.expansionType || null,
+      expansion_capillary_measure: payload.expansionCapillaryMeasure || null,
+      expansion_valve_brand: payload.expansionValveBrand || null,
+      expansion_valve_model: payload.expansionValveModel || null,
+      evaporator_air_type: payload.evaporatorAirType || null,
+      evaporator_fan_count: payload.evaporatorFanCount,
+      evaporator_fan_motor_phases: payload.evaporatorFanMotorPhases || null,
+      evaporator_fan_single_phase_detail: payload.evaporatorFanSinglePhaseDetail || null,
+      evaporator_notes: payload.evaporatorNotes || null,
       supply: payload.supply || null,
       pump_down: payload.pumpDown,
       defrost: payload.defrost || null,
@@ -110,17 +163,70 @@ export class EquipmentSheetService {
       maintenance_notify_enabled: payload.maintenanceNotifyEnabled,
       updated_at: now,
     };
-    const { error } = await this.auth.client.from('device_equipment_sheets').upsert(row, {
-      onConflict: 'device_id',
+    const { error } = await this.auth.client.from('device_equipment_fichas').upsert(row, {
+      onConflict: 'id',
     });
     return { error: error?.message ?? null };
   }
 
-  async listLog(deviceId: string): Promise<{ rows: DeviceEquipmentLogRow[]; error: string | null }> {
+  async createFicha(
+    deviceId: string,
+    label: string
+  ): Promise<{ id: string | null; error: string | null }> {
+    const { data: maxRows } = await this.auth.client
+      .from('device_equipment_fichas')
+      .select('sort_order')
+      .eq('device_id', deviceId)
+      .order('sort_order', { ascending: false })
+      .limit(1);
+    const maxSo =
+      maxRows?.length && typeof maxRows[0]['sort_order'] === 'number'
+        ? (maxRows[0]['sort_order'] as number)
+        : -1;
+    const sortOrder = maxSo + 1;
+    const { data, error } = await this.auth.client
+      .from('device_equipment_fichas')
+      .insert({
+        device_id: deviceId,
+        sort_order: sortOrder,
+        label: label.trim() || `Cámara ${sortOrder + 1}`,
+        maintenance_notify_enabled: true,
+      })
+      .select('id')
+      .single();
+    if (error || !data) {
+      return { id: null, error: error?.message ?? 'No se pudo crear la ficha' };
+    }
+    return { id: data['id'] as string, error: null };
+  }
+
+  async deleteFicha(fichaId: string): Promise<{ error: string | null }> {
+    const { data: photos, error: pe } = await this.auth.client
+      .from('device_equipment_photos')
+      .select('storage_path')
+      .eq('ficha_id', fichaId);
+    if (pe) {
+      return { error: pe.message };
+    }
+    const paths = (photos ?? []).map((p) => p['storage_path'] as string);
+    if (paths.length) {
+      await this.auth.client.storage.from(BUCKET).remove(paths);
+    }
+    await this.auth.client.from('device_equipment_photos').delete().eq('ficha_id', fichaId);
+    await this.auth.client.from('device_equipment_log').delete().eq('ficha_id', fichaId);
+    const { error } = await this.auth.client.from('device_equipment_fichas').delete().eq('id', fichaId);
+    return { error: error?.message ?? null };
+  }
+
+  async listLog(
+    deviceId: string,
+    fichaId: string
+  ): Promise<{ rows: DeviceEquipmentLogRow[]; error: string | null }> {
     const { data, error } = await this.auth.client
       .from('device_equipment_log')
       .select('*')
       .eq('device_id', deviceId)
+      .eq('ficha_id', fichaId)
       .order('occurred_at', { ascending: false });
     if (error) {
       return { rows: [], error: error.message };
@@ -133,15 +239,22 @@ export class EquipmentSheetService {
     return {
       id: r['id'] as string,
       deviceId: r['device_id'] as string,
+      fichaId: (r['ficha_id'] as string) ?? null,
       occurredAt: r['occurred_at'] as string,
       note: r['note'] as string,
       createdAt: r['created_at'] as string,
     };
   }
 
-  async insertLog(deviceId: string, occurredAtIso: string, note: string): Promise<{ error: string | null }> {
+  async insertLog(
+    deviceId: string,
+    fichaId: string,
+    occurredAtIso: string,
+    note: string
+  ): Promise<{ error: string | null }> {
     const { error } = await this.auth.client.from('device_equipment_log').insert({
       device_id: deviceId,
+      ficha_id: fichaId,
       occurred_at: occurredAtIso,
       note: note.trim(),
     });
@@ -153,11 +266,15 @@ export class EquipmentSheetService {
     return { error: error?.message ?? null };
   }
 
-  async listPhotos(deviceId: string): Promise<{ rows: DeviceEquipmentPhotoRow[]; error: string | null }> {
+  async listPhotos(
+    deviceId: string,
+    fichaId: string
+  ): Promise<{ rows: DeviceEquipmentPhotoRow[]; error: string | null }> {
     const { data, error } = await this.auth.client
       .from('device_equipment_photos')
       .select('*')
       .eq('device_id', deviceId)
+      .eq('ficha_id', fichaId)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true });
     if (error) {
@@ -173,6 +290,7 @@ export class EquipmentSheetService {
     return {
       id: r['id'] as string,
       deviceId: r['device_id'] as string,
+      fichaId: (r['ficha_id'] as string) ?? null,
       storagePath: path,
       sortOrder: typeof r['sort_order'] === 'number' ? (r['sort_order'] as number) : 0,
       caption: (r['caption'] as string) ?? null,
@@ -183,13 +301,14 @@ export class EquipmentSheetService {
 
   async uploadPhoto(
     deviceId: string,
+    fichaId: string,
     file: File,
     caption: string | null
   ): Promise<{ error: string | null }> {
     const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
     const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
     const name = `${crypto.randomUUID()}.${safeExt}`;
-    const path = `${deviceId}/${name}`;
+    const path = `${deviceId}/${fichaId}/${name}`;
     const { error: upErr } = await this.auth.client.storage.from(BUCKET).upload(path, file, {
       cacheControl: '3600',
       upsert: false,
@@ -202,6 +321,7 @@ export class EquipmentSheetService {
       .from('device_equipment_photos')
       .select('sort_order')
       .eq('device_id', deviceId)
+      .eq('ficha_id', fichaId)
       .order('sort_order', { ascending: false })
       .limit(1);
     const maxSo =
@@ -211,6 +331,7 @@ export class EquipmentSheetService {
     const sortOrder = maxSo + 1;
     const { error: insErr } = await this.auth.client.from('device_equipment_photos').insert({
       device_id: deviceId,
+      ficha_id: fichaId,
       storage_path: path,
       sort_order: sortOrder,
       caption: caption?.trim() || null,

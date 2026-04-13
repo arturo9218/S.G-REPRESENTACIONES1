@@ -20,9 +20,9 @@ import { environment } from '../../environments/environment';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
 import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 import {
+  DeviceEquipmentFichaRow,
   DeviceEquipmentLogRow,
   DeviceEquipmentPhotoRow,
-  DeviceEquipmentSheetRow,
   EquipmentSheetService,
 } from '../core/equipment-sheet.service';
 
@@ -145,13 +145,29 @@ export class DashboardComponent implements OnInit, OnDestroy {
   equipmentLoading = false;
   equipmentSaving = false;
   equipmentFeedback = '';
+  equipmentFichas: DeviceEquipmentFichaRow[] = [];
+  selectedFichaId: string | null = null;
   equipmentLogRows: DeviceEquipmentLogRow[] = [];
   equipmentPhotos: DeviceEquipmentPhotoRow[] = [];
+  eqFichaLabelForm = '';
   eqCompressorForm = '';
   eqHpForm = '';
   eqRefrigerantForm = '';
-  eqCondenserForm = '';
-  eqEvaporatorForm = '';
+  eqCondenserCoolingForm = '';
+  eqCondenserFanCountForm = '';
+  eqCondenserBladeForm = '';
+  eqCondenserFanPhasesForm = '';
+  eqCondenserCapacitorForm = '';
+  eqCondenserNotesForm = '';
+  eqExpansionTypeForm = '';
+  eqExpansionCapillaryForm = '';
+  eqExpansionValveBrandForm = '';
+  eqExpansionValveModelForm = '';
+  eqEvapAirTypeForm = '';
+  eqEvapFanCountForm = '';
+  eqEvapFanPhasesForm = '';
+  eqEvapSingleDetailForm = '';
+  eqEvapNotesForm = '';
   eqSupplyForm = '';
   eqPumpDownForm = false;
   eqDefrostForm = '';
@@ -2745,6 +2761,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async loadEquipmentPage(): Promise<void> {
     if (!this.equipmentSheetAvailable()) {
+      this.equipmentFichas = [];
+      this.selectedFichaId = null;
       this.equipmentLogRows = [];
       this.equipmentPhotos = [];
       return;
@@ -2753,41 +2771,123 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.equipmentLoading = true;
     this.equipmentFeedback = '';
     try {
-      const { row, error: errSheet } = await this.equipmentSheet.fetchSheet(id);
-      if (errSheet) {
-        const low = errSheet.toLowerCase();
+      let { rows: fichas, error: errFichas } = await this.equipmentSheet.listFichas(id);
+      if (errFichas) {
+        const low = errFichas.toLowerCase();
         this.equipmentFeedback =
           low.includes('does not exist') ||
           low.includes('schema cache') ||
-          low.includes('could not find the table')
-            ? 'Ejecutá en Supabase el SQL: FRONTEND/supabase/sql/021_device_equipment_ficha.sql'
-            : errSheet;
+          low.includes('could not find') ||
+          low.includes('device_equipment_fichas')
+            ? 'Ejecutá en Supabase el SQL: 021_device_equipment_ficha.sql y 022_device_equipment_fichas.sql'
+            : errFichas;
         return;
       }
-      this.hydrateEquipmentFormsFromRow(row);
-      const { rows: logs, error: errLog } = await this.equipmentSheet.listLog(id);
-      this.equipmentLogRows = errLog ? [] : logs;
-      if (errLog && !this.equipmentFeedback) {
-        this.equipmentFeedback = errLog;
+      if (!fichas.length) {
+        const created = await this.equipmentSheet.createFicha(id, 'Instalación principal');
+        if (created.error || !created.id) {
+          this.equipmentFeedback = created.error ?? 'No se pudo crear la ficha inicial.';
+          return;
+        }
+        const again = await this.equipmentSheet.listFichas(id);
+        fichas = again.rows;
+        errFichas = again.error;
+        if (errFichas || !fichas.length) {
+          this.equipmentFeedback = errFichas ?? 'No se pudo cargar la ficha.';
+          return;
+        }
       }
-      const { rows: photos, error: errPh } = await this.equipmentSheet.listPhotos(id);
-      this.equipmentPhotos = errPh ? [] : photos;
-      if (errPh && !this.equipmentFeedback) {
-        this.equipmentFeedback = errPh;
+      this.equipmentFichas = fichas;
+      if (!this.selectedFichaId || !fichas.some((f) => f.id === this.selectedFichaId)) {
+        this.selectedFichaId = fichas[0]?.id ?? null;
       }
+      const active = fichas.find((f) => f.id === this.selectedFichaId) ?? fichas[0];
+      this.hydrateEquipmentFormsFromFicha(active ?? null);
+      await this.loadEquipmentLogsAndPhotos();
       this.initLogDateTimeDefaults();
+      void this.notifyMaintenanceForAllFichasIfDue(fichas);
     } finally {
       this.equipmentLoading = false;
     }
   }
 
-  private hydrateEquipmentFormsFromRow(row: DeviceEquipmentSheetRow | null): void {
+  async onEquipmentFichaChange(fichaId: string): Promise<void> {
+    this.selectedFichaId = fichaId;
+    const f = this.equipmentFichas.find((x) => x.id === fichaId);
+    if (f) {
+      this.hydrateEquipmentFormsFromFicha(f);
+    }
+    await this.loadEquipmentLogsAndPhotos();
+    this.initLogDateTimeDefaults();
+  }
+
+  private async loadEquipmentLogsAndPhotos(): Promise<void> {
+    const devId = this.selectedDeviceId;
+    const fid = this.selectedFichaId;
+    if (!devId || !fid) {
+      this.equipmentLogRows = [];
+      this.equipmentPhotos = [];
+      return;
+    }
+    const { rows: logs, error: errLog } = await this.equipmentSheet.listLog(devId, fid);
+    this.equipmentLogRows = errLog ? [] : logs;
+    if (errLog && !this.equipmentFeedback) {
+      this.equipmentFeedback = errLog;
+    }
+    const { rows: photos, error: errPh } = await this.equipmentSheet.listPhotos(devId, fid);
+    this.equipmentPhotos = errPh ? [] : photos;
+    if (errPh && !this.equipmentFeedback) {
+      this.equipmentFeedback = errPh;
+    }
+  }
+
+  async addEquipmentFicha(): Promise<void> {
+    if (!this.equipmentSheetAvailable() || !this.selectedDeviceId) return;
+    const n = this.equipmentFichas.length + 1;
+    const label = `Cámara ${n}`;
+    const { id, error } = await this.equipmentSheet.createFicha(this.selectedDeviceId, label);
+    if (error || !id) {
+      this.equipmentFeedback = error ?? 'No se pudo agregar la ficha.';
+      return;
+    }
+    this.selectedFichaId = id;
+    void this.loadEquipmentPage();
+  }
+
+  async deleteEquipmentFicha(): Promise<void> {
+    const fid = this.selectedFichaId;
+    if (!fid || this.equipmentFichas.length < 2) return;
+    if (!confirm('¿Eliminar esta ficha junto con su bitácora y fotos de esta ficha?')) return;
+    const { error } = await this.equipmentSheet.deleteFicha(fid);
+    if (error) {
+      this.equipmentFeedback = error;
+      return;
+    }
+    this.selectedFichaId = null;
+    void this.loadEquipmentPage();
+  }
+
+  private hydrateEquipmentFormsFromFicha(row: DeviceEquipmentFichaRow | null): void {
     if (!row) {
+      this.eqFichaLabelForm = '';
       this.eqCompressorForm = '';
       this.eqHpForm = '';
       this.eqRefrigerantForm = '';
-      this.eqCondenserForm = '';
-      this.eqEvaporatorForm = '';
+      this.eqCondenserCoolingForm = '';
+      this.eqCondenserFanCountForm = '';
+      this.eqCondenserBladeForm = '';
+      this.eqCondenserFanPhasesForm = '';
+      this.eqCondenserCapacitorForm = '';
+      this.eqCondenserNotesForm = '';
+      this.eqExpansionTypeForm = '';
+      this.eqExpansionCapillaryForm = '';
+      this.eqExpansionValveBrandForm = '';
+      this.eqExpansionValveModelForm = '';
+      this.eqEvapAirTypeForm = '';
+      this.eqEvapFanCountForm = '';
+      this.eqEvapFanPhasesForm = '';
+      this.eqEvapSingleDetailForm = '';
+      this.eqEvapNotesForm = '';
       this.eqSupplyForm = '';
       this.eqPumpDownForm = false;
       this.eqDefrostForm = '';
@@ -2801,11 +2901,31 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.eqMaintNotifyForm = true;
       return;
     }
+    this.eqFichaLabelForm = row.label ?? '';
     this.eqCompressorForm = row.compressorText ?? '';
     this.eqHpForm = row.hp != null && Number.isFinite(row.hp) ? String(row.hp) : '';
     this.eqRefrigerantForm = row.refrigerant ?? '';
-    this.eqCondenserForm = row.condenserText ?? '';
-    this.eqEvaporatorForm = row.evaporatorText ?? '';
+    this.eqCondenserCoolingForm = row.condenserCoolingType ?? '';
+    this.eqCondenserFanCountForm =
+      row.condenserFanCount != null && Number.isFinite(row.condenserFanCount)
+        ? String(row.condenserFanCount)
+        : '';
+    this.eqCondenserBladeForm = row.condenserBladeDiameterText ?? '';
+    this.eqCondenserFanPhasesForm = row.condenserFanMotorPhases ?? '';
+    this.eqCondenserCapacitorForm = row.condenserFanCapacitorUf ?? '';
+    this.eqCondenserNotesForm = row.condenserNotes ?? '';
+    this.eqExpansionTypeForm = row.expansionType ?? '';
+    this.eqExpansionCapillaryForm = row.expansionCapillaryMeasure ?? '';
+    this.eqExpansionValveBrandForm = row.expansionValveBrand ?? '';
+    this.eqExpansionValveModelForm = row.expansionValveModel ?? '';
+    this.eqEvapAirTypeForm = row.evaporatorAirType ?? '';
+    this.eqEvapFanCountForm =
+      row.evaporatorFanCount != null && Number.isFinite(row.evaporatorFanCount)
+        ? String(row.evaporatorFanCount)
+        : '';
+    this.eqEvapFanPhasesForm = row.evaporatorFanMotorPhases ?? '';
+    this.eqEvapSingleDetailForm = row.evaporatorFanSinglePhaseDetail ?? '';
+    this.eqEvapNotesForm = row.evaporatorNotes ?? '';
     this.eqSupplyForm = row.supply ?? '';
     this.eqPumpDownForm = row.pumpDown;
     this.eqDefrostForm = row.defrost ?? '';
@@ -2856,21 +2976,50 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   async saveEquipmentSheet(): Promise<void> {
-    if (!this.equipmentSheetAvailable()) return;
+    if (!this.equipmentSheetAvailable() || !this.selectedFichaId) return;
     this.equipmentSaving = true;
     this.equipmentFeedback = '';
     try {
+      const cur = this.equipmentFichas.find((f) => f.id === this.selectedFichaId);
       const hpRaw = this.eqHpForm.trim().replace(',', '.');
       const hp = hpRaw ? Number.parseFloat(hpRaw) : null;
       const intRaw = this.eqMaintIntervalForm.trim();
       const interval = intRaw ? Number.parseInt(intRaw, 10) : null;
-      const { error } = await this.equipmentSheet.upsertSheet({
+      const cfc = this.eqCondenserFanCountForm.trim();
+      const condFanCount = cfc ? Number.parseInt(cfc, 10) : null;
+      const efc = this.eqEvapFanCountForm.trim();
+      const evapFanCount = efc ? Number.parseInt(efc, 10) : null;
+      const expT = this.eqExpansionTypeForm.trim();
+      const expansionType = expT || null;
+      const expansionCapillaryMeasure =
+        expansionType === 'capillary' ? this.eqExpansionCapillaryForm.trim() || null : null;
+      const expansionValveBrand =
+        expansionType === 'valve' ? this.eqExpansionValveBrandForm.trim() || null : null;
+      const expansionValveModel =
+        expansionType === 'valve' ? this.eqExpansionValveModelForm.trim() || null : null;
+      const { error } = await this.equipmentSheet.upsertFicha({
+        id: this.selectedFichaId,
         deviceId: this.selectedDeviceId!,
+        sortOrder: cur?.sortOrder ?? 0,
+        label: this.eqFichaLabelForm.trim() || 'Sin nombre',
         compressorText: this.eqCompressorForm.trim() || null,
         hp: hp != null && Number.isFinite(hp) ? hp : null,
         refrigerant: this.eqRefrigerantForm.trim() || null,
-        condenserText: this.eqCondenserForm.trim() || null,
-        evaporatorText: this.eqEvaporatorForm.trim() || null,
+        condenserCoolingType: this.eqCondenserCoolingForm.trim() || null,
+        condenserFanCount: condFanCount != null && Number.isFinite(condFanCount) ? condFanCount : null,
+        condenserBladeDiameterText: this.eqCondenserBladeForm.trim() || null,
+        condenserFanMotorPhases: this.eqCondenserFanPhasesForm.trim() || null,
+        condenserFanCapacitorUf: this.eqCondenserCapacitorForm.trim() || null,
+        condenserNotes: this.eqCondenserNotesForm.trim() || null,
+        expansionType,
+        expansionCapillaryMeasure,
+        expansionValveBrand,
+        expansionValveModel,
+        evaporatorAirType: this.eqEvapAirTypeForm.trim() || null,
+        evaporatorFanCount: evapFanCount != null && Number.isFinite(evapFanCount) ? evapFanCount : null,
+        evaporatorFanMotorPhases: this.eqEvapFanPhasesForm.trim() || null,
+        evaporatorFanSinglePhaseDetail: this.eqEvapSingleDetailForm.trim() || null,
+        evaporatorNotes: this.eqEvapNotesForm.trim() || null,
         supply: this.eqSupplyForm.trim() || null,
         pumpDown: this.eqPumpDownForm,
         defrost: this.eqDefrostForm.trim() || null,
@@ -2890,50 +3039,89 @@ export class DashboardComponent implements OnInit, OnDestroy {
       window.setTimeout(() => {
         this.equipmentFeedback = '';
       }, 4000);
-      void this.maybeNotifyMaintenanceDue();
+      const { rows: refreshed } = await this.equipmentSheet.listFichas(this.selectedDeviceId!);
+      if (refreshed.length) {
+        this.equipmentFichas = refreshed;
+        void this.notifyMaintenanceForAllFichasIfDue(refreshed);
+      }
     } finally {
       this.equipmentSaving = false;
     }
   }
 
-  /** Aviso local del navegador si el próximo mantenimiento está vencido o mañana (una vez por día por dispositivo). */
-  private maybeNotifyMaintenanceDue(): void {
-    if (!this.eqMaintNotifyForm || typeof window === 'undefined' || !('Notification' in window)) {
-      return;
-    }
-    const next = this.combineDateTimeToIso(this.eqNextMaintDate, this.eqNextMaintTime);
-    if (!next) return;
-    const due = new Date(next).getTime();
+  /** Mantenimiento: notificación en celular (Service Worker) o navegador; una vez por día por ficha. */
+  private async notifyMaintenanceForAllFichasIfDue(fichas: DeviceEquipmentFichaRow[]): Promise<void> {
+    if (typeof window === 'undefined') return;
+    const devName = this.selectedDevice?.name ?? 'Equipo';
     const now = Date.now();
-    if (due > now + 48 * 3600 * 1000) return;
-    const id = this.selectedDeviceId ?? '';
-    const key = `ar_maint_notified_${id}_${this.isoToDateInput(new Date(now).toISOString())}`;
+    const dayKey = this.isoToDateInput(new Date(now).toISOString());
+
+    for (const f of fichas) {
+      if (!f.maintenanceNotifyEnabled) continue;
+      const next = f.nextMaintenanceAt ? new Date(f.nextMaintenanceAt).getTime() : NaN;
+      if (!Number.isFinite(next)) continue;
+      if (next > now + 48 * 3600 * 1000) continue;
+
+      const storageKey = `ar_maint_ficha_${f.id}_${dayKey}`;
+      try {
+        if (localStorage.getItem(storageKey)) continue;
+      } catch {
+        /* */
+      }
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+      const perm =
+        'Notification' in window
+          ? Notification.permission
+          : 'denied' as globalThis.NotificationPermission;
+      if (perm !== 'granted') continue;
+
+      const overdue = next < now;
+      const title = 'Mantenimiento AR Monitoreo';
+      const body = overdue
+        ? `${devName} · ${f.label}: fecha de mantenimiento vencida.`
+        : `${devName} · ${f.label}: mantenimiento en las próximas 48 h.`;
+
+      await this.showMaintenanceSystemNotification(title, body, `maint-ficha-${f.id}`);
+      try {
+        localStorage.setItem(storageKey, '1');
+      } catch {
+        /* */
+      }
+    }
+  }
+
+  private async showMaintenanceSystemNotification(
+    title: string,
+    body: string,
+    tag: string
+  ): Promise<void> {
+    if (typeof window === 'undefined') return;
     try {
-      if (localStorage.getItem(key)) return;
+      const reg = await navigator.serviceWorker?.ready;
+      if (reg && 'showNotification' in reg) {
+        await reg.showNotification(title, {
+          body,
+          tag,
+          icon: `${window.location.origin}/assets/icons/icon-192.svg`,
+          vibrate: [120, 80, 120],
+        });
+        return;
+      }
     } catch {
       /* */
     }
-    if (Notification.permission === 'default') {
-      void Notification.requestPermission();
-    }
-    if (Notification.permission !== 'granted') return;
-    const name = this.selectedDevice?.name ?? 'Equipo';
-    new Notification('Mantenimiento', {
-      body:
-        due < now
-          ? `${name}: mantenimiento vencido (revisá la ficha).`
-          : `${name}: próximo mantenimiento cercano.`,
-      tag: `maint-${id}`,
-    });
     try {
-      localStorage.setItem(key, '1');
+      new Notification(title, { body, tag });
     } catch {
       /* */
     }
   }
 
   async addEquipmentLogEntry(): Promise<void> {
-    if (!this.equipmentSheetAvailable()) return;
+    if (!this.equipmentSheetAvailable() || !this.selectedFichaId) return;
     const note = this.logNoteForm.trim();
     if (!note) {
       this.equipmentFeedback = 'Escribí una observación para la bitácora.';
@@ -2944,7 +3132,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.equipmentFeedback = 'Revisá fecha y hora de la bitácora.';
       return;
     }
-    const { error } = await this.equipmentSheet.insertLog(this.selectedDeviceId!, iso, note);
+    const { error } = await this.equipmentSheet.insertLog(
+      this.selectedDeviceId!,
+      this.selectedFichaId,
+      iso,
+      note
+    );
     if (error) {
       this.equipmentFeedback = error;
       return;
@@ -2970,12 +3163,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const input = ev.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
-    if (!file || !this.equipmentSheetAvailable()) return;
+    if (!file || !this.equipmentSheetAvailable() || !this.selectedFichaId) return;
     this.equipmentPhotoUploading = true;
     this.equipmentFeedback = '';
     try {
       const cap = this.photoCaptionForm.trim() || null;
-      const { error } = await this.equipmentSheet.uploadPhoto(this.selectedDeviceId!, file, cap);
+      const { error } = await this.equipmentSheet.uploadPhoto(
+        this.selectedDeviceId!,
+        this.selectedFichaId,
+        file,
+        cap
+      );
       if (error) {
         this.equipmentFeedback = error;
         return;
@@ -3016,6 +3214,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const JsPDF = jspdfMod.default;
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const dev = this.selectedDevice;
+      const devId = dev.id;
+      const { rows: allFichas, error: fe } = await this.equipmentSheet.listFichas(devId);
+      if (fe || !allFichas.length) {
+        this.equipmentFeedback = fe ?? 'No hay fichas para exportar.';
+        return;
+      }
+
       let y = 14;
       doc.setFontSize(14);
       doc.text('AR Monitoreo — Ficha del equipo', 14, y);
@@ -3029,99 +3234,176 @@ export class DashboardComponent implements OnInit, OnDestroy {
       doc.setTextColor(0);
       y += 10;
 
-      const lines: string[] = [];
-      const push = (label: string, val: string) => {
-        if (val.trim()) lines.push(`${label}: ${val}`);
+      const pushLine = (lines: string[], label: string, val: string | null | undefined) => {
+        if (val != null && String(val).trim()) {
+          lines.push(`${label}: ${String(val).trim()}`);
+        }
       };
-      push('Compresor', this.eqCompressorForm);
-      push('HP', this.eqHpForm);
-      push('Refrigerante', this.eqRefrigerantForm);
-      push('Condensador', this.eqCondenserForm);
-      push('Evaporador / forzadores', this.eqEvaporatorForm);
-      push('Alimentación', this.eqSupplyForm);
-      push('Pump down', this.eqPumpDownForm ? 'Sí' : 'No');
-      push('Descongelamiento', this.eqDefrostForm);
-      push('Tipo de cámara', this.eqChamberForm);
-      if (this.eqFreeNotesForm.trim()) {
-        lines.push(`Descripción: ${this.eqFreeNotesForm.trim()}`);
-      }
-      push(
-        'Último mantenimiento',
-        this.eqLastMaintDate
-          ? `${this.eqLastMaintDate} ${this.eqLastMaintTime || ''}`.trim()
-          : ''
-      );
-      push(
-        'Próximo mantenimiento',
-        this.eqNextMaintDate
-          ? `${this.eqNextMaintDate} ${this.eqNextMaintTime || ''}`.trim()
-          : ''
-      );
-      if (this.eqMaintIntervalForm.trim()) {
-        push('Intervalo (días)', this.eqMaintIntervalForm);
-      }
 
-      doc.setFontSize(9);
-      for (const line of lines) {
-        const parts = doc.splitTextToSize(line, 182);
-        for (const p of parts) {
-          if (y > 270) {
-            doc.addPage();
-            y = 14;
-          }
-          doc.text(p, 14, y);
-          y += 4.5;
+      for (const ficha of allFichas) {
+        if (y > 250) {
+          doc.addPage();
+          y = 14;
         }
-        y += 2;
-      }
+        doc.setFontSize(11);
+        doc.setTextColor(30, 64, 175);
+        doc.text(`Ficha: ${ficha.label}`, 14, y);
+        doc.setTextColor(0);
+        y += 7;
 
-      y += 4;
-      doc.setFontSize(10);
-      doc.text('Bitácora', 14, y);
-      y += 6;
-      doc.setFontSize(8);
-      for (const log of [...this.equipmentLogRows].sort(
-        (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
-      )) {
-        const dt = new Date(log.occurredAt).toLocaleString('es-AR');
-        const block = `${dt} — ${log.note}`;
-        const parts = doc.splitTextToSize(block, 182);
-        for (const p of parts) {
-          if (y > 270) {
-            doc.addPage();
-            y = 14;
-          }
-          doc.text(p, 14, y);
-          y += 4;
+        const lines: string[] = [];
+        pushLine(lines, 'Compresor', ficha.compressorText);
+        if (ficha.hp != null && Number.isFinite(ficha.hp)) {
+          pushLine(lines, 'HP', String(ficha.hp));
         }
-        y += 2;
-      }
+        pushLine(lines, 'Refrigerante', ficha.refrigerant);
+        const ct = ficha.condenserCoolingType;
+        if (ct === 'forced_air') {
+          pushLine(lines, 'Condensador', 'Ventilación forzada');
+          if (ficha.condenserFanCount != null) {
+            pushLine(lines, '  Cant. forzadores', String(ficha.condenserFanCount));
+          }
+          pushLine(lines, '  Ø palas / medida', ficha.condenserBladeDiameterText);
+          pushLine(
+            lines,
+            '  Motor forzadores',
+            ficha.condenserFanMotorPhases === 'three_phase'
+              ? 'Trifásico'
+              : ficha.condenserFanMotorPhases === 'single_phase'
+                ? 'Monofásico'
+                : ''
+          );
+          if (ficha.condenserFanMotorPhases === 'single_phase') {
+            pushLine(lines, '  Capacitor (µF)', ficha.condenserFanCapacitorUf);
+          }
+        } else if (ct === 'water') {
+          pushLine(lines, 'Condensador', 'Enfriado por agua');
+        }
+        pushLine(lines, 'Notas condensador', ficha.condenserNotes);
 
-      let imgY = y + 6;
-      for (const ph of this.equipmentPhotos) {
-        try {
-          const dataUrl = await this.loadImageAsDataUrl(ph.publicUrl);
-          if (!dataUrl) continue;
-          const pageW = 180;
-          const imgProps = doc.getImageProperties(dataUrl);
-          const ratio = imgProps.height / imgProps.width;
-          const h = Math.min(90, pageW * ratio);
-          if (imgY + h > 280) {
-            doc.addPage();
-            imgY = 14;
-          }
-          doc.addImage(dataUrl, 'JPEG', 14, imgY, pageW, h, undefined, 'FAST');
-          imgY += h + 4;
-          if (ph.caption?.trim()) {
-            doc.setFontSize(7);
-            doc.setTextColor(80);
-            doc.text(ph.caption.trim(), 14, imgY);
-            doc.setTextColor(0);
-            imgY += 5;
-          }
-        } catch {
-          /* omitir imagen si falla CORS o formato */
+        const ext = ficha.expansionType;
+        if (ext === 'capillary') {
+          pushLine(lines, 'Expansión', 'Capilar');
+          pushLine(lines, '  Medida', ficha.expansionCapillaryMeasure);
+        } else if (ext === 'valve') {
+          pushLine(lines, 'Expansión', 'Válvula');
+          pushLine(lines, '  Marca', ficha.expansionValveBrand);
+          pushLine(lines, '  Modelo', ficha.expansionValveModel);
         }
+
+        const eat = ficha.evaporatorAirType;
+        if (eat === 'static') {
+          pushLine(lines, 'Evaporador', 'Estático (sin forzadores)');
+        } else if (eat === 'forced') {
+          pushLine(lines, 'Evaporador', 'Con forzadores');
+          if (ficha.evaporatorFanCount != null) {
+            pushLine(lines, '  Cantidad forzadores', String(ficha.evaporatorFanCount));
+          }
+          pushLine(
+            lines,
+            '  Alimentación motores',
+            ficha.evaporatorFanMotorPhases === 'three_phase'
+              ? 'Trifásico'
+              : ficha.evaporatorFanMotorPhases === 'single_phase'
+                ? 'Monofásico'
+                : ''
+          );
+          if (ficha.evaporatorFanMotorPhases === 'single_phase') {
+            pushLine(lines, '  Capacitor / detalle monofásico', ficha.evaporatorFanSinglePhaseDetail);
+          }
+        }
+        pushLine(lines, 'Notas evaporador', ficha.evaporatorNotes);
+
+        pushLine(lines, 'Alimentación (general)', ficha.supply);
+        lines.push(`Pump down: ${ficha.pumpDown ? 'Sí' : 'No'}`);
+        pushLine(lines, 'Descongelamiento', ficha.defrost);
+        pushLine(lines, 'Tipo de cámara', ficha.chamberType);
+        if (ficha.freeNotes?.trim()) {
+          lines.push(`Descripción: ${ficha.freeNotes.trim()}`);
+        }
+        pushLine(
+          lines,
+          'Último mantenimiento',
+          ficha.lastMaintenanceAt
+            ? new Date(ficha.lastMaintenanceAt).toLocaleString('es-AR')
+            : ''
+        );
+        pushLine(
+          lines,
+          'Próximo mantenimiento',
+          ficha.nextMaintenanceAt
+            ? new Date(ficha.nextMaintenanceAt).toLocaleString('es-AR')
+            : ''
+        );
+        if (ficha.maintenanceIntervalDays != null) {
+          pushLine(lines, 'Intervalo (días)', String(ficha.maintenanceIntervalDays));
+        }
+
+        doc.setFontSize(9);
+        for (const line of lines) {
+          const parts = doc.splitTextToSize(line, 182);
+          for (const p of parts) {
+            if (y > 270) {
+              doc.addPage();
+              y = 14;
+            }
+            doc.text(p, 14, y);
+            y += 4.5;
+          }
+          y += 1;
+        }
+
+        const { rows: logs } = await this.equipmentSheet.listLog(devId, ficha.id);
+        y += 3;
+        doc.setFontSize(10);
+        doc.text(`Bitácora — ${ficha.label}`, 14, y);
+        y += 6;
+        doc.setFontSize(8);
+        for (const log of [...logs].sort(
+          (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
+        )) {
+          const dt = new Date(log.occurredAt).toLocaleString('es-AR');
+          const block = `${dt} — ${log.note}`;
+          const parts = doc.splitTextToSize(block, 182);
+          for (const p of parts) {
+            if (y > 270) {
+              doc.addPage();
+              y = 14;
+            }
+            doc.text(p, 14, y);
+            y += 4;
+          }
+          y += 1;
+        }
+
+        const { rows: photos } = await this.equipmentSheet.listPhotos(devId, ficha.id);
+        let imgY = y + 4;
+        for (const ph of photos) {
+          try {
+            const dataUrl = await this.loadImageAsDataUrl(ph.publicUrl);
+            if (!dataUrl) continue;
+            const pageW = 180;
+            const imgProps = doc.getImageProperties(dataUrl);
+            const ratio = imgProps.height / imgProps.width;
+            const h = Math.min(90, pageW * ratio);
+            if (imgY + h > 280) {
+              doc.addPage();
+              imgY = 14;
+            }
+            doc.addImage(dataUrl, 'JPEG', 14, imgY, pageW, h, undefined, 'FAST');
+            imgY += h + 4;
+            if (ph.caption?.trim()) {
+              doc.setFontSize(7);
+              doc.setTextColor(80);
+              doc.text(ph.caption.trim(), 14, imgY);
+              doc.setTextColor(0);
+              imgY += 5;
+            }
+          } catch {
+            /* */
+          }
+        }
+        y = imgY + 8;
       }
 
       const safe = dev.name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);

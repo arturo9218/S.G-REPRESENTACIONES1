@@ -59,11 +59,19 @@ El portal usa **CSS propio** (`setCustomHeadElement` y `setTitle`) para acercarl
 
 ## Ficha del equipo (panel web)
 
-En la app, pestaña **Ficha equipo** (`/ficha-equipo`), el técnico puede cargar **datos fijos del sistema frigorífico**, **bitácora** de visitas, **fotos** y **mantenimiento**; también **exportar PDF**. Solo aplica a dispositivos creados en la nube (ID de panel UUID). Requiere ejecutar en Supabase el SQL `supabase/sql/021_device_equipment_ficha.sql` (tablas + bucket Storage `equipment-photos`). Desde cada tarjeta de dispositivo en **Dispositivos** aparece el botón **Ficha** cuando el equipo es elegible.
+En la app, pestaña **Ficha equipo** (`/ficha-equipo`), el técnico puede cargar **datos fijos del sistema frigorífico** (incluido condensador y evaporador con detalle), **bitácora** de visitas, **fotos** y **mantenimiento**; también **exportar PDF**. Se pueden **varias fichas por dispositivo** (por ejemplo dos cámaras en un mismo equipo), cada una con nombre, bitácora y fotos propias.
+
+Solo aplica a dispositivos creados en la nube (ID de panel UUID). Requiere ejecutar en Supabase:
+
+- `supabase/sql/021_device_equipment_ficha.sql` — tablas base, bucket Storage `equipment-photos`.
+- `supabase/sql/022_device_equipment_fichas.sql` — varias fichas por dispositivo, columnas de condensador/evaporador ampliadas y vínculos de bitácora/fotos por ficha.
+- `supabase/sql/023_device_expansion_capillary_valve.sql` — tipo de expansión (capilar / válvula) en la ficha.
+
+Desde cada tarjeta de dispositivo en **Dispositivos** aparece el botón **Ficha** cuando el equipo es elegible.
 
 ## SQL y Function
 
-- SQL: `supabase/sql/001_devices_and_readings.sql` (+ migraciones posteriores para umbrales, alarmas, calibración 020 y ficha 021)
+- SQL: `supabase/sql/001_devices_and_readings.sql` (+ migraciones posteriores para umbrales, alarmas, calibración 020 y ficha 021, fichas múltiples 022)
 - Function: `supabase/functions/ingest-reading/index.ts`
 
 ## Nota de seguridad
