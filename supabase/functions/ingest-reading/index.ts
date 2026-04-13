@@ -108,6 +108,8 @@ Deno.serve(async (req) => {
     const o1 = num(th?.temp1_offset_c);
     const o2 = num(th?.temp2_offset_c);
     const o3 = num(th?.temp3_offset_c);
+    const oA = num(th?.current_offset_a);
+    const oP = num(th?.power_offset_w);
 
     const temp1Corrected = payload.temp1_c + o1;
     const temp2Corrected =
@@ -118,6 +120,17 @@ Deno.serve(async (req) => {
       payload.temp3_c == null || Number.isNaN(payload.temp3_c as number)
         ? null
         : (payload.temp3_c as number) + o3;
+
+    const iRaw =
+      payload.current_a != null && Number.isFinite(payload.current_a as number)
+        ? (payload.current_a as number)
+        : null;
+    const iCorr = iRaw != null ? iRaw + oA : null;
+    const pRaw =
+      payload.power_w != null && Number.isFinite(payload.power_w as number)
+        ? (payload.power_w as number)
+        : null;
+    const pCorr = pRaw != null ? pRaw + oP : null;
 
     const { error: insErr } = await supabase.from('device_readings').insert({
       device_id: device.id,
@@ -134,8 +147,10 @@ Deno.serve(async (req) => {
       temp1_c: temp1Corrected,
       temp2_c: temp2Corrected,
       temp3_c: temp3Corrected,
-      current_a: payload.current_a ?? null,
-      power_w: payload.power_w ?? null,
+      current_a_raw: iRaw,
+      power_w_raw: pRaw,
+      current_a: iCorr,
+      power_w: pCorr,
       press1_bar: payload.press1_bar ?? null,
       press2_bar: payload.press2_bar ?? null,
     });
@@ -186,11 +201,8 @@ Deno.serve(async (req) => {
         }
       }
 
-      /** Umbral de corriente: solo con `current_a` del ESP (SCT); no estimar desde W en la nube. */
-      const currentA: number | null =
-        payload.current_a != null && Number.isFinite(payload.current_a as number)
-          ? (payload.current_a as number)
-          : null;
+      /** Umbral de corriente: valor ya corregido por offset (misma lógica que al insertar). */
+      const currentA: number | null = iCorr;
       let currentMsg = '';
       let currentBreach = false;
       const maxA = (th as Record<string, unknown>)['current_max_a'];
@@ -317,7 +329,7 @@ Deno.serve(async (req) => {
             detail: null,
             temp1_c: null,
             temp2_c: null,
-            current_a: currentA,
+            current_a: currentA ?? null,
           });
           if (e2) console.warn('[ingest-reading] device_alarm_events current:', e2.message);
         }

@@ -1,6 +1,8 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecureBearSSL.h>
+/** Textos del portal WiFiManager en español (wm_strings_es.h). Si falla al compilar, comentá esta línea. */
+#define LANG_ES
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -21,10 +23,11 @@
 // Sin WiFi: las lecturas se encolan en /pending.jsonl (LittleFS) y al reconectar
 // se reenvían con sentAt (NTP UTC); las líneas enviadas se borran del archivo.
 //
-// WiFiManager a veces vacía getValue() al cerrar el portal: por eso en
-// setSaveConfigCallback copiamos ya mismo a g_snap (instantánea al pulsar Guardar).
+// URL de ingest HTTPS: fija en firmware (const DEFAULT_API_URL); no hay campo en el portal WiFi.
+// setSaveConfigCallback: copia instantánea a g_snap al pulsar Guardar (module_id / api_key / intervalo).
 static const char *CFG_FILE = "/config.json";
 static const unsigned long DEFAULT_INTERVAL_MS = 15000;
+/** Endpoint fijo POST (ingest-reading). Cambiar solo aquí si migrás de proyecto Supabase. */
 static const char *DEFAULT_API_URL =
   "https://fohbhymulrmdsgrubtlo.supabase.co/functions/v1/ingest-reading";
 static const char *DEFAULT_MODULE_ID = "";
@@ -105,10 +108,60 @@ static StaticJsonDocument<512> g_jsonDoc;
 OneWire oneWire(PIN_TEMP_GPIO2);
 DallasTemperature ds18b20(&oneWire);
 
-WiFiManagerParameter p_api_url("api_url", "API URL", "", 159);
-WiFiManagerParameter p_module_id("module_id", "Module ID", "", 47);
-WiFiManagerParameter p_api_key("api_key", "API Key (6 digitos)", "", 95);
-WiFiManagerParameter p_interval("interval", "Send interval ms", "", 15);
+WiFiManagerParameter p_module_id("module_id", "ID del modulo", "", 47);
+WiFiManagerParameter p_api_key("api_key", "Clave API (6 digitos)", "", 95);
+WiFiManagerParameter p_interval("interval", "Intervalo de envio (ms)", "", 15);
+
+/**
+ * Tema del portal WiFiManager alineado al panel (dashboard): fondo #0b1220, tarjetas #131c2e, acento #3b82f6.
+ * setCustomHeadElement + setTitle (ampliamente disponibles). La marca superior va en CSS (body::before) para no usar
+ * setCustomBodyHeader (solo WiFiManager 2.x reciente).
+ */
+static const char WM_CUSTOM_HEAD[] =
+  "<meta name=\"theme-color\" content=\"#0b1220\">"
+  "<style>"
+  ":root{--primarycolor:#3b82f6;}"
+  "body::before{content:\"AR Monitoreo\";display:block;text-align:center;font-weight:800;font-size:1.05rem;"
+  "letter-spacing:-0.02em;color:#e8eef7;margin:0 0 0.75rem;padding:0.25rem 0;}"
+  "body{font-family:system-ui,-apple-system,\"Segoe UI\",sans-serif;background:#0b1220!important;color:#e8eef7!important;"
+  "margin:0;padding:0.75rem;box-sizing:border-box;"
+  "background-image:radial-gradient(1200px 600px at 10% -10%,rgba(59,130,246,0.12),transparent 55%),"
+  "radial-gradient(800px 400px at 100% 0%,rgba(34,211,238,0.06),transparent 45%);}"
+  ".c{color:#e8eef7!important;margin:0;padding:0.35rem 0.75rem;}"
+  ".wrap{text-align:left!important;background:#131c2e!important;border:1px solid rgba(148,163,184,0.18)!important;"
+  "border-radius:12px!important;padding:1rem 1.1rem!important;margin:0.5rem auto 1rem!important;max-width:520px!important;"
+  "box-shadow:0 8px 32px rgba(0,0,0,0.35)!important;}"
+  "h1,h2,h3{color:#e8eef7!important;font-weight:800!important;letter-spacing:-0.02em!important;margin:0.5rem 0 1rem!important;}"
+  ".wrap{color:#e8eef7!important;}"
+  "input,select,textarea{background:#1a2740!important;color:#e8eef7!important;border:1px solid rgba(148,163,184,0.25)!important;"
+  "border-radius:10px!important;padding:0.5rem 0.65rem!important;font-size:1rem!important;}"
+  "input:focus,select:focus{outline:none!important;border-color:#3b82f6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.35);}"
+  "button,input[type='button'],input[type='submit']{background:linear-gradient(180deg,#4f8ef0 0%,#3b82f6 50%,#2563eb 100%)!important;"
+  "color:#fff!important;border-radius:10px!important;font-weight:600!important;font-size:1rem!important;line-height:2.2rem!important;"
+  "box-shadow:0 4px 12px rgba(59,130,246,0.35)!important;border:none!important;}"
+  "button:hover{filter:brightness(1.06);}"
+  "button.D{background:#dc3545!important;}"
+  "a{color:#60a5fa!important;font-weight:600!important;}"
+  "a:hover{color:#93c5fd!important;text-decoration:none!important;}"
+  ".msg{background:#1a2740!important;border:1px solid rgba(148,163,184,0.18)!important;border-left:4px solid #3b82f6!important;"
+  "color:#e8eef7!important;border-radius:10px!important;}"
+  ".msg h4{color:#93c5fd!important;}"
+  ".msg.P{border-left-color:#3b82f6!important;}"
+  ".msg.S{border-left-color:#14b8a6!important;}"
+  ".msg.D{border-left-color:#f87171!important;}"
+  "body.invert,body.invert a,body.invert h1{background:#0b1220!important;color:#e8eef7!important;}"
+  "body.invert .msg{background:#1a2740!important;border-color:rgba(148,163,184,0.25)!important;color:#e8eef7!important;}"
+  "</style>";
+
+static void applyWiFiManagerTheme(WiFiManager &wm) {
+  wm.setTitle("AR Monitoreo · Configuracion");
+  wm.setCustomHeadElement(WM_CUSTOM_HEAD);
+}
+
+static void applyFixedIngestUrl(AppConfig *c) {
+  if (!c) return;
+  strlcpy(c->apiUrl, DEFAULT_API_URL, sizeof(c->apiUrl));
+}
 
 void setDefaults() {
   strlcpy(cfg.apiUrl, DEFAULT_API_URL, sizeof(cfg.apiUrl));
@@ -269,7 +322,7 @@ bool loadConfigEeprom() {
     return false;
   }
   memset(&cfg, 0, sizeof(cfg));
-  strlcpy(cfg.apiUrl, b.apiUrl, sizeof(cfg.apiUrl));
+  strlcpy(cfg.apiUrl, DEFAULT_API_URL, sizeof(cfg.apiUrl));
   strlcpy(cfg.moduleId, b.moduleId, sizeof(cfg.moduleId));
   strlcpy(cfg.apiKey, b.apiKey, sizeof(cfg.apiKey));
   strlcpy(cfg.intervalMs, b.intervalMs, sizeof(cfg.intervalMs));
@@ -306,7 +359,7 @@ bool loadConfigLittleFs() {
   DeserializationError err = deserializeJson(g_jsonDoc, f);
   f.close();
   if (err) return false;
-  strlcpy(cfg.apiUrl, g_jsonDoc["apiUrl"] | DEFAULT_API_URL, sizeof(cfg.apiUrl));
+  strlcpy(cfg.apiUrl, DEFAULT_API_URL, sizeof(cfg.apiUrl));
   strlcpy(cfg.moduleId, g_jsonDoc["moduleId"] | "", sizeof(cfg.moduleId));
   strlcpy(cfg.apiKey, g_jsonDoc["apiKey"] | "", sizeof(cfg.apiKey));
   snprintf(cfg.intervalMs, sizeof(cfg.intervalMs), "%lu",
@@ -349,6 +402,7 @@ void loadConfig() {
     wipeAllStoredConfig();
     setDefaults();
   }
+  applyFixedIngestUrl(&cfg);
 }
 
 bool saveConfigLittleFs() {
@@ -387,7 +441,7 @@ bool saveConfig() {
 /** Callback: copia mínima (sin JSON grande en pila) en el instante del Guardar. */
 void onWiFiManagerSave() {
   yield();
-  trimCopy(g_snap.apiUrl, sizeof(g_snap.apiUrl), p_api_url.getValue());
+  applyFixedIngestUrl(&g_snap);
   trimCopy(g_snap.moduleId, sizeof(g_snap.moduleId), p_module_id.getValue());
   trimCopy(g_snap.apiKey, sizeof(g_snap.apiKey), p_api_key.getValue());
   trimCopy(g_snap.intervalMs, sizeof(g_snap.intervalMs), p_interval.getValue());
@@ -432,7 +486,7 @@ bool persistAfterPortal() {
     Serial.println(F("[CFG] Usando snapshot del callback (module_id/api_key)."));
   } else {
     Serial.println(F("[CFG] Sin callback: leyendo getValue()…"));
-    trimCopy(cfg.apiUrl, sizeof(cfg.apiUrl), p_api_url.getValue());
+    applyFixedIngestUrl(&cfg);
     trimCopy(cfg.moduleId, sizeof(cfg.moduleId), p_module_id.getValue());
     trimCopy(cfg.apiKey, sizeof(cfg.apiKey), p_api_key.getValue());
     trimCopy(cfg.intervalMs, sizeof(cfg.intervalMs), p_interval.getValue());
@@ -454,14 +508,13 @@ void setupWiFiAndPortal(bool forceConfigPortal) {
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
   wm.setSaveConfigCallback(onWiFiManagerSave);
+  applyWiFiManagerTheme(wm);
   g_portalUserSaved = false;
 
-  p_api_url.setValue(cfg.apiUrl, sizeof(cfg.apiUrl) - 1);
   p_module_id.setValue(cfg.moduleId, sizeof(cfg.moduleId) - 1);
   p_api_key.setValue(cfg.apiKey, sizeof(cfg.apiKey) - 1);
   p_interval.setValue(cfg.intervalMs, sizeof(cfg.intervalMs) - 1);
 
-  wm.addParameter(&p_api_url);
   wm.addParameter(&p_module_id);
   wm.addParameter(&p_api_key);
   wm.addParameter(&p_interval);
@@ -684,7 +737,7 @@ static bool httpPostIngestBody(const String &body, int *outCode) {
   std::unique_ptr<BearSSL::WiFiClientSecure> secure(new BearSSL::WiFiClientSecure);
   secure->setInsecure();
   HTTPClient http;
-  if (!http.begin(*secure, cfg.apiUrl)) return false;
+  if (!http.begin(*secure, DEFAULT_API_URL)) return false;
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
   String resp = http.getString();

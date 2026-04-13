@@ -19,10 +19,14 @@ export interface DashboardDevice {
   espLocalIp?: string;
   /** Si está en false, no se generan alertas de temperatura para este dispositivo */
   alertsEnabled?: boolean;
-  /** Umbral de temperatura baja (<=), null = sin umbral */
+  /** Umbral de temperatura baja sensor 1 (<=), null = sin umbral */
   tempLowC?: number | null;
-  /** Umbral de temperatura alta (>=), null = sin umbral */
+  /** Umbral de temperatura alta sensor 1 (>=), null = sin umbral */
   tempHighC?: number | null;
+  /** Umbral bajo sensor 2; null = sin umbral (Supabase: temp2_min_c) */
+  temp2LowC?: number | null;
+  /** Umbral alto sensor 2; null = sin umbral (Supabase: temp2_max_c) */
+  temp2HighC?: number | null;
   /** Corriente máxima RMS (A); superarla dispara alarma; null = sin umbral */
   currentMaxA?: number | null;
   /** Tensión nominal de línea (V) para P = V·I y consumo kWh; p. ej. 220 o 380 */
@@ -48,6 +52,10 @@ export interface DashboardDevice {
   temp1OffsetC?: number;
   temp2OffsetC?: number;
   temp3OffsetC?: number;
+  /** Suma en A al valor de corriente del ESP (ingesta); default 0 */
+  currentOffsetA?: number;
+  /** Suma en W al valor de potencia del ESP (ingesta); default 0 */
+  powerOffsetW?: number;
 }
 
 /** Una lectura guardada para historial y gráficos */
@@ -68,6 +76,10 @@ export interface TemperatureReading {
   powerW?: number | null;
   press1Bar?: number | null;
   press2Bar?: number | null;
+  /** Bruto del ESP antes de current_offset_a (nube); si falta, currentA es el valor guardado */
+  currentARaw?: number | null;
+  /** Bruto del ESP antes de power_offset_w */
+  powerWRaw?: number | null;
 }
 
 /** Tipo de alarma en panel y sonido */

@@ -957,9 +957,9 @@
           </article>
 
           <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync">
-            <h2 class="card__title card__title--sm">Corrección de temperatura (sensor)</h2>
+            <h2 class="card__title card__title--sm">Corrección de temperatura y consumo</h2>
             <p class="card__hint card__hint--tight">
-              Sumás o restás grados al valor que manda el ESP <strong>al guardar cada lectura en la nube</strong> (la función de ingesta). El número grande de la tarjeta es ese valor ya corregido; tras cambiar la corrección, el cambio se ve cuando llega la <strong>próxima</strong> lectura del ESP. Ej.: si marca 2 °C de más, poné <strong>-2</strong>.
+              Sumás o restás al valor que envía el ESP al guardar cada lectura en la nube: temperatura en °C, corriente en A y potencia en W. Lo que ves en la tarjeta y en gráficos usa bruto + offset cuando la nube guarda esos valores en crudo; si no, el cambio se nota en las lecturas que lleguen después de guardar.
             </p>
             <div class="notify-panel notify-panel__grid">
               <label class="notify-panel__field">
@@ -995,6 +995,28 @@
                   autocomplete="off"
                 />
               </label>
+              <label class="notify-panel__field">
+                <span>Corriente (A)</span>
+                <input
+                  type="text"
+                  [(ngModel)]="currentOffsetForm"
+                  (ngModelChange)="onCalibrationFormChange()"
+                  placeholder="0"
+                  name="current-offset-a"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="notify-panel__field">
+                <span>Potencia (W)</span>
+                <input
+                  type="text"
+                  [(ngModel)]="powerOffsetForm"
+                  (ngModelChange)="onCalibrationFormChange()"
+                  placeholder="0"
+                  name="power-offset-w"
+                  autocomplete="off"
+                />
+              </label>
             </div>
             <p
               class="sensor-labels-feedback"
@@ -1021,9 +1043,12 @@
                 <input type="checkbox" [(ngModel)]="alertsEnabledForm" (ngModelChange)="onNotificationFormChange()" />
                 <span>Activar notificaciones</span>
               </label>
+              <p class="card__hint card__hint--tight" *ngIf="alertsEnabledForm">
+                Temperatura: <strong>mínimo / máximo por sensor</strong> (los nombres están en «Nombres de sensores»). Vacío = sin límite en ese borde.
+              </p>
               <div class="notify-panel__grid" [class.notify-panel__grid--disabled]="!alertsEnabledForm">
                 <label class="notify-panel__field">
-                  <span>Mínima (°C)</span>
+                  <span>Sensor 1 — mín. (°C)</span>
                   <input
                     type="text"
                     [(ngModel)]="tempLowForm"
@@ -1037,7 +1062,7 @@
                   />
                 </label>
                 <label class="notify-panel__field">
-                  <span>Máxima (°C)</span>
+                  <span>Sensor 1 — máx. (°C)</span>
                   <input
                     type="text"
                     [(ngModel)]="tempHighForm"
@@ -1048,6 +1073,34 @@
                     autocorrect="off"
                     spellcheck="false"
                     name="temp-threshold-high"
+                  />
+                </label>
+                <label class="notify-panel__field">
+                  <span>Sensor 2 — mín. (°C)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="temp2LowForm"
+                    (ngModelChange)="onNotificationFormChange()"
+                    [disabled]="!alertsEnabledForm"
+                    placeholder="Sin mínimo"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    name="temp2-threshold-low"
+                  />
+                </label>
+                <label class="notify-panel__field">
+                  <span>Sensor 2 — máx. (°C)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="temp2HighForm"
+                    (ngModelChange)="onNotificationFormChange()"
+                    [disabled]="!alertsEnabledForm"
+                    placeholder="Sin máximo"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    name="temp2-threshold-high"
                   />
                 </label>
                 <label class="notify-panel__field notify-panel__field--span2">

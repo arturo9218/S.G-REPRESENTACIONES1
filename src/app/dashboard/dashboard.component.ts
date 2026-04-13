@@ -45,6 +45,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   alertsEnabledForm = true;
   tempLowForm = '';
   tempHighForm = '';
+  temp2LowForm = '';
+  temp2HighForm = '';
   /** Corriente máxima RMS (A); vacío = sin límite */
   currentMaxForm = '';
   /** Tensión nominal de línea (V), p. ej. 220 o 380 */
@@ -56,6 +58,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   temp1OffsetForm = '0';
   temp2OffsetForm = '0';
   temp3OffsetForm = '0';
+  /** Suma en A al valor de corriente (corrección por medición). */
+  currentOffsetForm = '0';
+  /** Suma en W al valor de potencia. */
+  powerOffsetForm = '0';
   calibrationDirty = false;
   calibrationSaving = false;
   calibrationFeedback = '';
@@ -517,6 +523,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
       const low = d.tempLowC ?? null;
       const high = d.tempHighC ?? null;
+      const low2 = d.temp2LowC ?? null;
+      const high2 = d.temp2HighC ?? null;
       const readingLabel =
         latestAt != null
           ? `Medición: ${this.formatFullDateTime(latestAt)}`
@@ -551,23 +559,23 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
       const t2 = d.temperature2C;
       if (t2 != null) {
-        if (high != null && t2 >= high) {
+        if (high2 != null && t2 >= high2) {
           out.push({
             id: `${d.id}-t2-high`,
             deviceName: d.name,
             temperatureC: t2,
             message: `${s2Name}: por encima del umbral`,
-            detail: `${t2.toFixed(1)} °C (máx. ${high} °C) · ${readingLabel}`,
+            detail: `${t2.toFixed(1)} °C (máx. ${high2} °C) · ${readingLabel}`,
             kind: 'temp_high',
             severity: 'critical',
           });
-        } else if (low != null && t2 <= low) {
+        } else if (low2 != null && t2 <= low2) {
           out.push({
             id: `${d.id}-t2-low`,
             deviceName: d.name,
             temperatureC: t2,
             message: `${s2Name}: por debajo del umbral`,
-            detail: `${t2.toFixed(1)} °C (mín. ${low} °C) · ${readingLabel}`,
+            detail: `${t2.toFixed(1)} °C (mín. ${low2} °C) · ${readingLabel}`,
             kind: 'temp_low',
             severity: 'warning',
           });
@@ -1308,6 +1316,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         temp1OffsetC: this.parseOffsetValue(this.temp1OffsetForm),
         temp2OffsetC: this.parseOffsetValue(this.temp2OffsetForm),
         temp3OffsetC: this.parseOffsetValue(this.temp3OffsetForm),
+        currentOffsetA: this.parseOffsetValue(this.currentOffsetForm),
+        powerOffsetW: this.parseOffsetValue(this.powerOffsetForm),
       };
       const result = await this.deviceStore.updateDeviceTempCalibration(device.id, input);
       cloudError = result.cloudError;
@@ -1320,13 +1330,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     this.calibrationDirty = false;
     if (cloudError) {
-      const needsCol = cloudError.includes('temp1_offset') || cloudError.includes('column');
+      const needsCol =
+        cloudError.includes('temp1_offset') ||
+        cloudError.includes('current_offset') ||
+        cloudError.includes('power_offset') ||
+        cloudError.includes('column');
       this.calibrationFeedback = needsCol
-        ? 'Ejecutá en Supabase el SQL: FRONTEND/supabase/sql/007_temp_calibration_offsets.sql'
+        ? 'Ejecutá en Supabase los SQL: 007_temp_calibration_offsets.sql y 020_current_power_calibration.sql (si faltan columnas).'
         : `No se pudo guardar en la nube: ${cloudError}`;
     } else {
       this.calibrationFeedback =
-        'Corrección guardada. El valor en la tarjeta se recalcula al instante (bruto + offset) cuando cada lectura tiene temperatura bruta en la nube (SQL 009 + función ingest actualizada).';
+        'Corrección guardada. Temperatura, corriente y potencia se recalculan (bruto + offset) cuando la nube tiene esos valores en crudo; si no, el cambio se refleja en lecturas nuevas.';
     }
     window.setTimeout(() => {
       this.calibrationFeedback = '';
@@ -1363,6 +1377,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
           alertsEnabled: false,
           tempLowC: null,
           tempHighC: null,
+          temp2LowC: null,
+          temp2HighC: null,
           currentMaxA,
           nominalVoltageV,
           tempPushCooldownMs: this.parseDelayMinutesToMs(this.tempPushDelayMinForm),
@@ -1389,6 +1405,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     let low: number | null;
     let high: number | null;
+    let low2: number | null;
+    let high2: number | null;
     let currentMaxA: number | null;
     let nominalVoltageV: number;
     let delayMs: number;
@@ -1396,6 +1414,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     try {
       low = this.parseTempValue(this.tempLowForm);
       high = this.parseTempValue(this.tempHighForm);
+      low2 = this.parseTempValue(this.temp2LowForm);
+      high2 = this.parseTempValue(this.temp2HighForm);
       currentMaxA = this.parseCurrentMaxA(this.currentMaxForm);
       nominalVoltageV = this.parseNominalVoltageV(this.nominalVoltageForm);
       delayMs = this.parseDelayMinutesToMs(this.tempPushDelayMinForm);
@@ -1409,7 +1429,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (low != null && high != null && low > high) {
       this.notificationSettingsFeedbackIsError = true;
-      this.notificationSettingsFeedback = 'El umbral mínimo no puede ser mayor al máximo.';
+      this.notificationSettingsFeedback =
+        'Sensor 1: el mínimo no puede ser mayor al máximo.';
+      this.scheduleNotificationFeedbackClear();
+      return;
+    }
+    if (low2 != null && high2 != null && low2 > high2) {
+      this.notificationSettingsFeedbackIsError = true;
+      this.notificationSettingsFeedback =
+        'Sensor 2: el mínimo no puede ser mayor al máximo.';
       this.scheduleNotificationFeedbackClear();
       return;
     }
@@ -1420,6 +1448,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         alertsEnabled: true,
         tempLowC: low,
         tempHighC: high,
+        temp2LowC: low2,
+        temp2HighC: high2,
         currentMaxA,
         nominalVoltageV,
         tempPushCooldownMs: delayMs,
@@ -2113,6 +2143,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.alertsEnabledForm = false;
       this.tempLowForm = '';
       this.tempHighForm = '';
+      this.temp2LowForm = '';
+      this.temp2HighForm = '';
       this.currentMaxForm = '';
       this.nominalVoltageForm = '220';
       this.tempPushDelayMinForm = '15';
@@ -2120,6 +2152,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.temp1OffsetForm = '0';
       this.temp2OffsetForm = '0';
       this.temp3OffsetForm = '0';
+      this.currentOffsetForm = '0';
+      this.powerOffsetForm = '0';
       this.calibrationDirty = false;
       this.sensor1LabelForm = '';
       this.sensor2LabelForm = '';
@@ -2136,6 +2170,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
           device.tempLowC == null || Number.isNaN(device.tempLowC) ? '' : String(device.tempLowC);
         this.tempHighForm =
           device.tempHighC == null || Number.isNaN(device.tempHighC) ? '' : String(device.tempHighC);
+        this.temp2LowForm =
+          device.temp2LowC == null || Number.isNaN(device.temp2LowC as number)
+            ? ''
+            : String(device.temp2LowC);
+        this.temp2HighForm =
+          device.temp2HighC == null || Number.isNaN(device.temp2HighC as number)
+            ? ''
+            : String(device.temp2HighC);
         this.currentMaxForm =
           device.currentMaxA == null || Number.isNaN(device.currentMaxA as number)
             ? ''
@@ -2176,6 +2218,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
           device.temp3OffsetC == null || Number.isNaN(device.temp3OffsetC)
             ? '0'
             : String(device.temp3OffsetC);
+        this.currentOffsetForm =
+          device.currentOffsetA == null || Number.isNaN(device.currentOffsetA)
+            ? '0'
+            : String(device.currentOffsetA);
+        this.powerOffsetForm =
+          device.powerOffsetW == null || Number.isNaN(device.powerOffsetW)
+            ? '0'
+            : String(device.powerOffsetW);
       } finally {
         this.syncingCalibrationFromDevice = false;
       }

@@ -49,6 +49,14 @@ La respuesta JSON de `ingest-reading` puede incluir `push: { sent, skipped, ... 
 4. Inserta en `device_readings`.
 5. Frontend consume lecturas y muestra historial/metricas.
 
+## Portal WiFi (WiFiManager)
+
+La **URL de ingest** va **fija en el firmware** (`DEFAULT_API_URL` en `esp8266_wifimanager_supabase.ino`); el portal solo permite editar WiFi, ID de módulo, clave API e intervalo.
+
+El sketch define **`#define LANG_ES`** antes de incluir `WiFiManager.h` para usar los textos en español de la librería (menú, SSID, contraseña, etc.). Si al compilar no encontrá `wm_strings_es.h`, actualizá WiFiManager desde el Gestor de librerías o comentá `#define LANG_ES`.
+
+El portal usa **CSS propio** (`setCustomHeadElement` y `setTitle`) para acercarlo al estilo del panel **AR Monitoreo** (fondo oscuro, acento azul). Si `setTitle` no existe en tu versión muy antigua de WiFiManager, comentá esa línea en `applyWiFiManagerTheme` y dejá solo `setCustomHeadElement`.
+
 ## SQL y Function
 
 - SQL: `supabase/sql/001_devices_and_readings.sql` (+ migraciones posteriores para umbrales y alarmas)

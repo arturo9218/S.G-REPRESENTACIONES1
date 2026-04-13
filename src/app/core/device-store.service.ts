@@ -78,6 +78,8 @@ export interface DeviceNotificationConfigInput {
   alertsEnabled: boolean;
   tempLowC: number | null;
   tempHighC: number | null;
+  temp2LowC: number | null;
+  temp2HighC: number | null;
   /** Corriente máx. RMS (A); null = sin límite */
   currentMaxA: number | null;
   /** Tensión nominal (V), p. ej. 220 o 380; null usa 220 en servidor */
@@ -86,11 +88,13 @@ export interface DeviceNotificationConfigInput {
   offlinePushCooldownMs: number | null;
 }
 
-/** Corrección de temperatura (°C que se suman al valor del ESP antes de guardar; la aplica ingest-reading). */
+/** Corrección de temperatura y consumo (sumas aplicadas en ingest-reading al guardar cada lectura). */
 export interface DeviceTempCalibrationInput {
   temp1OffsetC: number;
   temp2OffsetC: number;
   temp3OffsetC: number;
+  currentOffsetA: number;
+  powerOffsetW: number;
 }
 
 export interface TelemetryInput {
@@ -237,6 +241,8 @@ export class DeviceStoreService {
         temp1_offset_c: 0,
         temp2_offset_c: 0,
         temp3_offset_c: 0,
+        current_offset_a: 0,
+        power_offset_w: 0,
         current_max_a: null,
         press1_min_bar: 1.8,
         press1_max_bar: 2.8,
@@ -267,6 +273,8 @@ export class DeviceStoreService {
         temp1OffsetC: 0,
         temp2OffsetC: 0,
         temp3OffsetC: 0,
+        currentOffsetA: 0,
+        powerOffsetW: 0,
         tempPushCooldownMs: 15 * 60 * 1000,
         offlinePushCooldownMs: 15 * 60 * 1000,
         currentMaxA: null,
@@ -318,6 +326,18 @@ export class DeviceStoreService {
         typeof d['tempLowC'] === 'number' && !Number.isNaN(d['tempLowC']) ? d['tempLowC'] : 2,
       tempHighC:
         typeof d['tempHighC'] === 'number' && !Number.isNaN(d['tempHighC']) ? d['tempHighC'] : 8,
+      temp2LowC:
+        typeof d['temp2LowC'] === 'number' && !Number.isNaN(d['temp2LowC'])
+          ? d['temp2LowC']
+          : typeof d['tempLowC'] === 'number' && !Number.isNaN(d['tempLowC'])
+            ? d['tempLowC']
+            : 2,
+      temp2HighC:
+        typeof d['temp2HighC'] === 'number' && !Number.isNaN(d['temp2HighC'])
+          ? d['temp2HighC']
+          : typeof d['tempHighC'] === 'number' && !Number.isNaN(d['tempHighC'])
+            ? d['tempHighC']
+            : 8,
       currentMaxA:
         d['currentMaxA'] === null
           ? null
@@ -334,6 +354,16 @@ export class DeviceStoreService {
         typeof d['sensor2Label'] === 'string' && d['sensor2Label'].trim()
           ? (d['sensor2Label'] as string).trim()
           : undefined,
+      temp1OffsetC:
+        typeof d['temp1OffsetC'] === 'number' && !Number.isNaN(d['temp1OffsetC']) ? d['temp1OffsetC'] : 0,
+      temp2OffsetC:
+        typeof d['temp2OffsetC'] === 'number' && !Number.isNaN(d['temp2OffsetC']) ? d['temp2OffsetC'] : 0,
+      temp3OffsetC:
+        typeof d['temp3OffsetC'] === 'number' && !Number.isNaN(d['temp3OffsetC']) ? d['temp3OffsetC'] : 0,
+      currentOffsetA:
+        typeof d['currentOffsetA'] === 'number' && !Number.isNaN(d['currentOffsetA']) ? d['currentOffsetA'] : 0,
+      powerOffsetW:
+        typeof d['powerOffsetW'] === 'number' && !Number.isNaN(d['powerOffsetW']) ? d['powerOffsetW'] : 0,
     };
   }
 
@@ -394,6 +424,10 @@ export class DeviceStoreService {
               typeof r['press2Bar'] === 'number' && !Number.isNaN(r['press2Bar'])
                 ? r['press2Bar']
                 : null,
+            currentARaw:
+              typeof r['currentARaw'] === 'number' && !Number.isNaN(r['currentARaw']) ? r['currentARaw'] : null,
+            powerWRaw:
+              typeof r['powerWRaw'] === 'number' && !Number.isNaN(r['powerWRaw']) ? r['powerWRaw'] : null,
           } as TemperatureReading;
         })
         .filter((x): x is TemperatureReading => x != null);
@@ -686,7 +720,7 @@ export class DeviceStoreService {
       const { data, error } = await this.auth.client
         .from('device_readings')
         .select(
-          'created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w'
+          'created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w, current_a_raw, power_w_raw'
         )
         .eq('device_id', deviceId)
         .gte('created_at', fromIso)
@@ -744,6 +778,14 @@ export class DeviceStoreService {
             typeof row['power_w'] === 'number' && !Number.isNaN(row['power_w'] as number)
               ? (row['power_w'] as number)
               : null,
+          currentARaw:
+            typeof row['current_a_raw'] === 'number' && !Number.isNaN(row['current_a_raw'] as number)
+              ? (row['current_a_raw'] as number)
+              : null,
+          powerWRaw:
+            typeof row['power_w_raw'] === 'number' && !Number.isNaN(row['power_w_raw'] as number)
+              ? (row['power_w_raw'] as number)
+              : null,
         });
       }
 
@@ -772,7 +814,7 @@ export class DeviceStoreService {
     const base = this.auth.client
       .from('device_readings')
       .select(
-        'created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w'
+        'created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w, current_a_raw, power_w_raw'
       )
       .eq('device_id', deviceId)
       .gte('created_at', fromIso)
@@ -840,6 +882,14 @@ export class DeviceStoreService {
           powerW:
             typeof row['power_w'] === 'number' && !Number.isNaN(row['power_w'] as number)
               ? (row['power_w'] as number)
+              : null,
+          currentARaw:
+            typeof row['current_a_raw'] === 'number' && !Number.isNaN(row['current_a_raw'] as number)
+              ? (row['current_a_raw'] as number)
+              : null,
+          powerWRaw:
+            typeof row['power_w_raw'] === 'number' && !Number.isNaN(row['power_w_raw'] as number)
+              ? (row['power_w_raw'] as number)
               : null,
         };
       })
@@ -979,6 +1029,8 @@ export class DeviceStoreService {
         enabled: boolean;
         low: number | null;
         high: number | null;
+        low2: number | null;
+        high2: number | null;
         currentMax: number | null;
         nominalVoltage: number;
         cooldownMs: number | null;
@@ -986,13 +1038,15 @@ export class DeviceStoreService {
         o1: number;
         o2: number;
         o3: number;
+        oA: number;
+        oP: number;
       }
     >();
     if (ids.length) {
       const { data: thData } = await this.auth.client
         .from('device_thresholds')
         .select(
-          'device_id, notifications_enabled, temp1_min_c, temp1_max_c, current_max_a, nominal_voltage_v, temp_push_cooldown_ms, offline_push_cooldown_ms, temp1_offset_c, temp2_offset_c, temp3_offset_c'
+          'device_id, notifications_enabled, temp1_min_c, temp1_max_c, temp2_min_c, temp2_max_c, current_max_a, nominal_voltage_v, temp_push_cooldown_ms, offline_push_cooldown_ms, temp1_offset_c, temp2_offset_c, temp3_offset_c, current_offset_a, power_offset_w'
         )
         .in('device_id', ids);
       for (const th of (thData ?? []) as Record<string, unknown>[]) {
@@ -1000,16 +1054,28 @@ export class DeviceStoreService {
         if (typeof did !== 'string') continue;
         const off = (k: string) =>
           typeof th[k] === 'number' && !Number.isNaN(th[k] as number) ? (th[k] as number) : 0;
+        const low1 =
+          typeof th['temp1_min_c'] === 'number' && !Number.isNaN(th['temp1_min_c'] as number)
+            ? (th['temp1_min_c'] as number)
+            : null;
+        const high1 =
+          typeof th['temp1_max_c'] === 'number' && !Number.isNaN(th['temp1_max_c'] as number)
+            ? (th['temp1_max_c'] as number)
+            : null;
+        const low2 =
+          typeof th['temp2_min_c'] === 'number' && !Number.isNaN(th['temp2_min_c'] as number)
+            ? (th['temp2_min_c'] as number)
+            : null;
+        const high2 =
+          typeof th['temp2_max_c'] === 'number' && !Number.isNaN(th['temp2_max_c'] as number)
+            ? (th['temp2_max_c'] as number)
+            : null;
         thresholdsByDevice.set(did, {
           enabled: th['notifications_enabled'] !== false,
-          low:
-            typeof th['temp1_min_c'] === 'number' && !Number.isNaN(th['temp1_min_c'] as number)
-              ? (th['temp1_min_c'] as number)
-              : null,
-          high:
-            typeof th['temp1_max_c'] === 'number' && !Number.isNaN(th['temp1_max_c'] as number)
-              ? (th['temp1_max_c'] as number)
-              : null,
+          low: low1,
+          high: high1,
+          low2,
+          high2,
           currentMax:
             typeof th['current_max_a'] === 'number' && !Number.isNaN(th['current_max_a'] as number)
               ? (th['current_max_a'] as number)
@@ -1033,6 +1099,8 @@ export class DeviceStoreService {
           o1: off('temp1_offset_c'),
           o2: off('temp2_offset_c'),
           o3: off('temp3_offset_c'),
+          oA: off('current_offset_a'),
+          oP: off('power_offset_w'),
         });
       }
     }
@@ -1062,6 +1130,10 @@ export class DeviceStoreService {
         alertsEnabled: th?.enabled ?? (prev?.alertsEnabled !== false),
         tempLowC: th?.low ?? (prev?.tempLowC ?? 2),
         tempHighC: th?.high ?? (prev?.tempHighC ?? 8),
+        temp2LowC:
+          th != null ? th.low2 : (prev?.temp2LowC ?? prev?.tempLowC ?? 2),
+        temp2HighC:
+          th != null ? th.high2 : (prev?.temp2HighC ?? prev?.tempHighC ?? 8),
         currentMaxA: th?.currentMax ?? prev?.currentMaxA ?? null,
         nominalVoltageV: th?.nominalVoltage ?? prev?.nominalVoltageV ?? 220,
         currentA: prev?.currentA ?? null,
@@ -1086,6 +1158,8 @@ export class DeviceStoreService {
         temp1OffsetC: th?.o1 ?? prev?.temp1OffsetC ?? 0,
         temp2OffsetC: th?.o2 ?? prev?.temp2OffsetC ?? 0,
         temp3OffsetC: th?.o3 ?? prev?.temp3OffsetC ?? 0,
+        currentOffsetA: th?.oA ?? prev?.currentOffsetA ?? 0,
+        powerOffsetW: th?.oP ?? prev?.powerOffsetW ?? 0,
       };
     });
 
@@ -1109,9 +1183,13 @@ export class DeviceStoreService {
       const o1 = Number.isFinite(d.temp1OffsetC ?? NaN) ? (d.temp1OffsetC as number) : 0;
       const o2 = Number.isFinite(d.temp2OffsetC ?? NaN) ? (d.temp2OffsetC as number) : 0;
       const o3 = Number.isFinite(d.temp3OffsetC ?? NaN) ? (d.temp3OffsetC as number) : 0;
+      const oA = Number.isFinite(d.currentOffsetA ?? NaN) ? (d.currentOffsetA as number) : 0;
+      const oP = Number.isFinite(d.powerOffsetW ?? NaN) ? (d.powerOffsetW as number) : 0;
       let t1 = r.temperatureC;
       let t2 = r.temp2C ?? null;
       let t3 = r.temp3C ?? null;
+      let ca = r.currentA ?? null;
+      let pw = r.powerW ?? null;
       if (r.temp1RawC != null && Number.isFinite(r.temp1RawC)) {
         t1 = r.temp1RawC + o1;
       }
@@ -1121,7 +1199,13 @@ export class DeviceStoreService {
       if (r.temp3RawC != null && Number.isFinite(r.temp3RawC)) {
         t3 = r.temp3RawC + o3;
       }
-      return { ...r, temperatureC: t1, temp2C: t2, temp3C: t3 };
+      if (r.currentARaw != null && Number.isFinite(r.currentARaw)) {
+        ca = r.currentARaw + oA;
+      }
+      if (r.powerWRaw != null && Number.isFinite(r.powerWRaw)) {
+        pw = r.powerWRaw + oP;
+      }
+      return { ...r, temperatureC: t1, temp2C: t2, temp3C: t3, currentA: ca, powerW: pw };
     });
   }
 
@@ -1177,7 +1261,7 @@ export class DeviceStoreService {
     if (!ids.length) return;
 
     const selectCols =
-      'device_id, created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w, press1_bar, press2_bar';
+      'device_id, created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w, current_a_raw, power_w_raw, press1_bar, press2_bar';
     const rows: Record<string, unknown>[] = [];
 
     for (const deviceId of ids) {
@@ -1232,6 +1316,14 @@ export class DeviceStoreService {
         powerW:
           typeof r['power_w'] === 'number' && !Number.isNaN(r['power_w'] as number)
             ? (r['power_w'] as number)
+            : null,
+        currentARaw:
+          typeof r['current_a_raw'] === 'number' && !Number.isNaN(r['current_a_raw'] as number)
+            ? (r['current_a_raw'] as number)
+            : null,
+        powerWRaw:
+          typeof r['power_w_raw'] === 'number' && !Number.isNaN(r['power_w_raw'] as number)
+            ? (r['power_w_raw'] as number)
             : null,
         press1Bar:
           typeof r['press1_bar'] === 'number' && !Number.isNaN(r['press1_bar'] as number)
@@ -1395,6 +1487,8 @@ export class DeviceStoreService {
   ): Promise<{ cloudError?: string }> {
     const low = input.tempLowC;
     const high = input.tempHighC;
+    const low2 = input.temp2LowC;
+    const high2 = input.temp2HighC;
     const currentMaxA = input.currentMaxA;
     const nominalV =
       input.nominalVoltageV != null &&
@@ -1413,8 +1507,8 @@ export class DeviceStoreService {
             notifications_enabled: input.alertsEnabled,
             temp1_min_c: low,
             temp1_max_c: high,
-            temp2_min_c: low,
-            temp2_max_c: high,
+            temp2_min_c: low2,
+            temp2_max_c: high2,
             current_max_a: currentMaxA,
             nominal_voltage_v: nominalV,
             temp_push_cooldown_ms: input.tempPushCooldownMs,
@@ -1435,6 +1529,8 @@ export class DeviceStoreService {
               alertsEnabled: input.alertsEnabled,
               tempLowC: low,
               tempHighC: high,
+              temp2LowC: low2,
+              temp2HighC: high2,
               currentMaxA,
               nominalVoltageV: nominalV,
               tempPushCooldownMs: input.tempPushCooldownMs,
@@ -1496,6 +1592,8 @@ export class DeviceStoreService {
             temp1_offset_c: input.temp1OffsetC,
             temp2_offset_c: input.temp2OffsetC,
             temp3_offset_c: input.temp3OffsetC,
+            current_offset_a: input.currentOffsetA,
+            power_offset_w: input.powerOffsetW,
             updated_at: nowIso,
           })
           .eq('device_id', id);
@@ -1508,8 +1606,8 @@ export class DeviceStoreService {
           notifications_enabled: dev?.alertsEnabled !== false,
           temp1_min_c: dev?.tempLowC ?? null,
           temp1_max_c: dev?.tempHighC ?? null,
-          temp2_min_c: dev?.tempLowC ?? null,
-          temp2_max_c: dev?.tempHighC ?? null,
+          temp2_min_c: dev?.temp2LowC ?? dev?.tempLowC ?? null,
+          temp2_max_c: dev?.temp2HighC ?? dev?.tempHighC ?? null,
           current_max_a: dev?.currentMaxA ?? null,
           nominal_voltage_v:
             dev?.nominalVoltageV != null &&
@@ -1523,6 +1621,8 @@ export class DeviceStoreService {
           temp1_offset_c: input.temp1OffsetC,
           temp2_offset_c: input.temp2OffsetC,
           temp3_offset_c: input.temp3OffsetC,
+          current_offset_a: input.currentOffsetA,
+          power_offset_w: input.powerOffsetW,
           updated_at: nowIso,
         };
         const { error: insErr } = await this.auth.client
@@ -1539,6 +1639,8 @@ export class DeviceStoreService {
                 temp1_offset_c: input.temp1OffsetC,
                 temp2_offset_c: input.temp2OffsetC,
                 temp3_offset_c: input.temp3OffsetC,
+                current_offset_a: input.currentOffsetA,
+                power_offset_w: input.powerOffsetW,
                 updated_at: nowIso,
               })
               .eq('device_id', id);
@@ -1559,6 +1661,8 @@ export class DeviceStoreService {
               temp1OffsetC: input.temp1OffsetC,
               temp2OffsetC: input.temp2OffsetC,
               temp3OffsetC: input.temp3OffsetC,
+              currentOffsetA: input.currentOffsetA,
+              powerOffsetW: input.powerOffsetW,
             }
           : d
       )
@@ -1605,6 +1709,8 @@ export class DeviceStoreService {
       temp3RawC: input.temp3C ?? null,
       temp2C: input.temp2C ?? null,
       temp3C: input.temp3C ?? null,
+      currentARaw: input.currentA ?? null,
+      powerWRaw: input.powerW ?? null,
       currentA: input.currentA ?? null,
       powerW: input.powerW ?? null,
       press1Bar: input.press1Bar ?? null,
@@ -1660,10 +1766,17 @@ export class DeviceStoreService {
       alertsEnabled: true,
       tempLowC: 2,
       tempHighC: 8,
+      temp2LowC: 2,
+      temp2HighC: 8,
       currentMaxA: null,
       nominalVoltageV: 220,
       sensor1Label: DEFAULT_SENSOR_1_LABEL,
       sensor2Label: DEFAULT_SENSOR_2_LABEL,
+      temp1OffsetC: 0,
+      temp2OffsetC: 0,
+      temp3OffsetC: 0,
+      currentOffsetA: 0,
+      powerOffsetW: 0,
     };
 
     this.persistDevices([...this.snapshot, device]);
