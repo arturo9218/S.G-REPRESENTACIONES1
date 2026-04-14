@@ -6,6 +6,114 @@
     </div>
   </header>
 
+  <section class="informes-section">
+    <button
+      type="button"
+      class="btn btn--ghost informes-section__toggle"
+      (click)="toggleInformesPanel()"
+      [attr.aria-expanded]="informesPanelOpen"
+    >
+      <span class="informes-section__chev" aria-hidden="true">{{ informesPanelOpen ? '▼' : '▶' }}</span>
+      Informes guardados
+      <span class="informes-section__count" *ngIf="informesList.length">({{ informesList.length }})</span>
+    </button>
+
+    <div class="informes-section__body" *ngIf="informesPanelOpen">
+      <p class="informes-section__intro">
+        Los informes se guardan en este navegador (incluido el celular si usás la PWA). Incluyen el rango de
+        fechas y canal actuales del gráfico.
+      </p>
+      <p
+        class="informes-section__feedback"
+        *ngIf="informeFeedback"
+        [class.informes-section__feedback--warn]="
+          informeFeedback.includes('No se pudo') ||
+          informeFeedback.includes('Poné') ||
+          informeFeedback.includes('supera') ||
+          informeFeedback.includes('Seleccioná')
+        "
+      >
+        {{ informeFeedback }}
+      </p>
+
+      <ul class="informes-list" *ngIf="informesList.length">
+        <li class="informes-list__item" *ngFor="let inf of informesList">
+          <div class="informes-list__main">
+            <strong class="informes-list__title">{{ inf.title }}</strong>
+            <span class="informes-list__meta">{{ formatInformeDate(inf.createdAt) }} · {{ inf.deviceName }}</span>
+            <span class="informes-list__meta" *ngIf="inf.note">{{ inf.note }}</span>
+            <img
+              *ngIf="inf.photoDataUrl"
+              class="informes-list__thumb"
+              [src]="inf.photoDataUrl"
+              alt="Foto del informe"
+            />
+          </div>
+          <button type="button" class="btn btn--ghost informes-list__del" (click)="deleteInforme(inf.id)">
+            Borrar
+          </button>
+        </li>
+      </ul>
+      <p class="informes-section__empty" *ngIf="!informesList.length">No hay informes todavía.</p>
+
+      <div *ngIf="!informeEditorOpen" class="informes-section__actions">
+        <button type="button" class="btn btn--primary" (click)="informeEditorOpen = true">
+          Nuevo informe
+        </button>
+      </div>
+
+      <div *ngIf="informeEditorOpen" class="informes-editor">
+        <label class="informes-editor__field">
+          <span>Título</span>
+          <input
+            type="text"
+            class="informes-editor__input"
+            [(ngModel)]="informeTitleForm"
+            name="informe-title"
+            maxlength="120"
+            autocomplete="off"
+            placeholder="Ej. Visita marzo — cámara 1"
+          />
+        </label>
+        <label class="informes-editor__field">
+          <span>Notas (opcional)</span>
+          <textarea
+            class="informes-editor__textarea"
+            [(ngModel)]="informeNoteForm"
+            name="informe-note"
+            rows="3"
+            maxlength="2000"
+            placeholder="Observaciones…"
+          ></textarea>
+        </label>
+        <div class="informes-editor__field">
+          <span>Foto (opcional)</span>
+          <p class="informes-editor__hint">En el celular podés abrir la cámara o elegir de la galería.</p>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            class="informes-editor__file"
+            (change)="onInformePhotoFile($event)"
+          />
+          <button
+            type="button"
+            class="btn btn--ghost informes-editor__clear-photo"
+            *ngIf="informePhotoDataUrl"
+            (click)="clearInformePhoto()"
+          >
+            Quitar foto
+          </button>
+          <img *ngIf="informePhotoDataUrl" class="informes-editor__preview" [src]="informePhotoDataUrl" alt="" />
+        </div>
+        <div class="informes-editor__actions">
+          <button type="button" class="btn btn--primary" (click)="saveInforme()">Guardar informe</button>
+          <button type="button" class="btn btn--ghost" (click)="cancelInformeEditor()">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <button
     type="button"
     class="sidebar-hotspot"

@@ -682,20 +682,36 @@ export class DeviceStoreService {
     if (!data || !Array.isArray(data)) {
       return { rows: [], error: null };
     }
-    const rows = (data as Record<string, unknown>[]).map((row) => ({
+    const rows = (data as Record<string, unknown>[]).map((row) =>
+      this.mapChartRpcRowToReading(deviceId, row)
+    );
+    return { rows: this.applyOffsetsToReadings(rows, this.snapshot), error: null };
+  }
+
+  /** Mapea filas del RPC get_device_readings_chart (incl. crudos si existen en la nube). */
+  private mapChartRpcRowToReading(deviceId: string, row: Record<string, unknown>): TemperatureReading {
+    const num = (k: string): number | null => {
+      const v = row[k];
+      return typeof v === 'number' && !Number.isNaN(v) ? v : null;
+    };
+    const t1Raw = num('temp1_raw_c');
+    const t2Raw = num('temp2_raw_c');
+    const t3Raw = num('temp3_raw_c');
+    const t1 = num('temp1_c');
+    return {
       deviceId,
       at: typeof row['read_at'] === 'string' ? row['read_at'] : new Date().toISOString(),
-      temperatureC: row['temp1_c'] as number,
-      temp2C:
-        typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
-          ? (row['temp2_c'] as number)
-          : null,
-      currentA:
-        typeof row['current_a'] === 'number' && !Number.isNaN(row['current_a'] as number)
-          ? (row['current_a'] as number)
-          : null,
-    }));
-    return { rows, error: null };
+      temperatureC: t1 ?? 0,
+      temp1RawC: t1Raw,
+      temp2RawC: t2Raw,
+      temp3RawC: t3Raw,
+      temp2C: num('temp2_c'),
+      temp3C: num('temp3_c'),
+      currentA: num('current_a'),
+      powerW: num('power_w'),
+      currentARaw: num('current_a_raw'),
+      powerWRaw: num('power_w_raw'),
+    };
   }
 
   /**

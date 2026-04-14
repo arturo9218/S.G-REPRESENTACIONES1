@@ -66,6 +66,7 @@ Solo aplica a dispositivos creados en la nube (ID de panel UUID). Requiere ejecu
 - `supabase/sql/021_device_equipment_ficha.sql` — tablas base, bucket Storage `equipment-photos`.
 - `supabase/sql/022_device_equipment_fichas.sql` — varias fichas por dispositivo, columnas de condensador/evaporador ampliadas y vínculos de bitácora/fotos por ficha.
 - `supabase/sql/023_device_expansion_capillary_valve.sql` — tipo de expansión (capilar / válvula) en la ficha.
+- `supabase/sql/024_get_device_readings_chart_raw.sql` — el gráfico de análisis recibe valores en crudo y aplica la corrección de consumo/temperatura como en el panel (ejecutar para que el offset afecte la curva).
 
 Desde cada tarjeta de dispositivo en **Dispositivos** aparece el botón **Ficha** cuando el equipo es elegible.
 

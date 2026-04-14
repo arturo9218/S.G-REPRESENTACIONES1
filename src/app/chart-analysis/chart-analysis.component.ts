@@ -21,6 +21,21 @@ import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 
 type AnalysisChannel = 'temp1' | 'temp2' | 'both' | 'current';
 
+/** Informe guardado localmente (lista en análisis; foto opcional desde cámara o galería). */
+export interface StoredAnalysisInforme {
+  id: string;
+  createdAt: string;
+  title: string;
+  note: string;
+  deviceId: string;
+  deviceName: string;
+  filterFrom: string;
+  filterTo: string;
+  filterDay: string;
+  channel: AnalysisChannel;
+  photoDataUrl: string | null;
+}
+
 @Component({
   selector: 'app-chart-analysis',
   templateUrl: './chart-analysis.component.html',
@@ -66,6 +81,16 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   private remoteLoadGeneration = 0;
 
   private readonly chartStyleStorageKey = 'ar_chart_style_v1';
+  private readonly informesStorageKey = 'ar_analysis_informes_v1';
+  private calibFp = '';
+
+  informesPanelOpen = false;
+  informeEditorOpen = false;
+  informesList: StoredAnalysisInforme[] = [];
+  informeTitleForm = '';
+  informeNoteForm = '';
+  informePhotoDataUrl: string | null = null;
+  informeFeedback = '';
   chartStylePreset: ChartStylePreset = 'area';
   readonly chartStyleOptions: { value: ChartStylePreset; label: string }[] = [
     { value: 'area', label: 'Área (relleno suave)' },
@@ -121,6 +146,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     // Asegura que el store use scope autenticado también en pestaña nueva.
     this.deviceStore.refreshScopeFromSession();
     this.loadChartStylePreset();
+    this.loadInformesFromStorage();
 
     // Soporta ambos nombres por compatibilidad: deviceId (correcto) y deviceld (typo viejo).
     const qp = this.route.snapshot.queryParamMap;
@@ -129,14 +155,24 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
       this.devices = list;
+      const checkCalibReload = () => {
+        const sel = this.selectedDeviceId ? list.find((x) => x.id === this.selectedDeviceId) : undefined;
+        const fp = this.calibrationFingerprint(sel);
+        if (this.calibFp !== '' && fp !== this.calibFp) {
+          this.scheduleRemoteChartLoad();
+        }
+        this.calibFp = fp;
+      };
       if (list.length === 0) {
         this.syncSensorLabelsWithSelected();
+        checkCalibReload();
         return;
       }
       const urlId = this.deviceIdFromUrl;
       if (urlId && list.some((d) => d.id === urlId)) {
         this.selectedDeviceId = urlId;
         this.syncSensorLabelsWithSelected();
+        checkCalibReload();
         return;
       }
       if (urlId && !list.some((d) => d.id === urlId)) {
@@ -147,8 +183,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
         this.scheduleRemoteChartLoad();
       }
       this.syncSensorLabelsWithSelected();
-      // No llamar scheduleRemoteChartLoad() en cada emisión salvo al fijar selección arriba:
-      // el store actualiza dispositivos muy seguido (poll) y borraba la serie remota → parpadeo.
+      checkCalibReload();
     });
 
     this.subRead = this.deviceStore.readings$.subscribe((list) => {
@@ -1795,6 +1830,151 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       return bHasTemp - aHasTemp;
     });
     return ordered[0]?.id ?? null;
+  }
+
+  private calibrationFingerprint(d: DashboardDevice | undefined): string {
+    if (!d) return '';
+    const n = (v: number | null | undefined) =>
+      v != null && Number.isFinite(v) ? String(v) : '0';
+    return [
+      n(d.temp1OffsetC),
+      n(d.temp2OffsetC),
+      n(d.temp3OffsetC),
+      n(d.currentOffsetA),
+      n(d.powerOffsetW),
+    ].join('|');
+  }
+
+  toggleInformesPanel(): void {
+    this.informesPanelOpen = !this.informesPanelOpen;
+  }
+
+  private loadInformesFromStorage(): void {
+    try {
+      const raw = localStorage.getItem(this.informesStorageKey);
+      if (!raw) {
+        this.informesList = [];
+        return;
+      }
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) {
+        this.informesList = [];
+        return;
+      }
+      this.informesList = parsed.filter(
+        (x): x is StoredAnalysisInforme =>
+          !!x &&
+          typeof x === 'object' &&
+          typeof (x as StoredAnalysisInforme).id === 'string' &&
+          typeof (x as StoredAnalysisInforme).title === 'string'
+      );
+      this.informesList.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    } catch {
+      this.informesList = [];
+    }
+  }
+
+  private persistInformesToStorage(): void {
+    try {
+      localStorage.setItem(this.informesStorageKey, JSON.stringify(this.informesList));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.informeFeedback = `No se pudo guardar la lista (${msg}).`;
+      window.setTimeout(() => (this.informeFeedback = ''), 5000);
+    }
+  }
+
+  formatInformeDate(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return iso;
+    }
+  }
+
+  onInformePhotoFile(ev: Event): void {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file || !file.type.startsWith('image/')) {
+      this.informePhotoDataUrl = null;
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      this.informeFeedback = 'La imagen supera 2 MB. Elegí otra más liviana.';
+      input.value = '';
+      window.setTimeout(() => (this.informeFeedback = ''), 4000);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      this.informePhotoDataUrl = url;
+      this.informeFeedback = '';
+    };
+    reader.readAsDataURL(file);
+    input.value = '';
+  }
+
+  clearInformePhoto(): void {
+    this.informePhotoDataUrl = null;
+  }
+
+  cancelInformeEditor(): void {
+    this.informeEditorOpen = false;
+    this.informeTitleForm = '';
+    this.informeNoteForm = '';
+    this.informePhotoDataUrl = null;
+    this.informeFeedback = '';
+  }
+
+  saveInforme(): void {
+    const title = this.informeTitleForm.trim();
+    if (!title) {
+      this.informeFeedback = 'Poné un título al informe.';
+      window.setTimeout(() => (this.informeFeedback = ''), 4000);
+      return;
+    }
+    if (!this.selectedDeviceId) {
+      this.informeFeedback = 'Seleccioná un dispositivo.';
+      window.setTimeout(() => (this.informeFeedback = ''), 4000);
+      return;
+    }
+    const dev = this.devices.find((d) => d.id === this.selectedDeviceId);
+    const row: StoredAnalysisInforme = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+      createdAt: new Date().toISOString(),
+      title,
+      note: this.informeNoteForm.trim(),
+      deviceId: this.selectedDeviceId,
+      deviceName: dev?.name?.trim() || 'Equipo',
+      filterFrom: this.filterFrom,
+      filterTo: this.filterTo,
+      filterDay: this.filterDay,
+      channel: this.analysisChannel,
+      photoDataUrl: this.informePhotoDataUrl,
+    };
+    this.informesList = [row, ...this.informesList];
+    this.persistInformesToStorage();
+    this.informeTitleForm = '';
+    this.informeNoteForm = '';
+    this.informePhotoDataUrl = null;
+    this.informeEditorOpen = false;
+    this.informeFeedback = 'Informe guardado en este navegador.';
+    window.setTimeout(() => (this.informeFeedback = ''), 4000);
+  }
+
+  deleteInforme(id: string): void {
+    if (!confirm('¿Borrar este informe de la lista?')) return;
+    this.informesList = this.informesList.filter((x) => x.id !== id);
+    this.persistInformesToStorage();
   }
 
   private currentSeriesForwardFilled(series: TemperatureReading[]): (number | null)[] {

@@ -1574,7 +1574,7 @@
           <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync">
             <h2 class="card__title card__title--sm">Corrección de temperatura y consumo</h2>
             <p class="card__hint card__hint--tight">
-              Sumás o restás al valor que envía el ESP al guardar cada lectura en la nube: temperatura en °C, corriente en A y potencia en W. Lo que ves en la tarjeta y en gráficos usa bruto + offset cuando la nube guarda esos valores en crudo; si no, el cambio se nota en las lecturas que lleguen después de guardar.
+              Sumás o restás al valor que envía el ESP al guardar cada lectura en la nube: temperatura en °C, corriente en A y potencia en W. La tarjeta y el historial usan bruto + offset cuando existen columnas en crudo en la nube. Para que el gráfico de <strong>Análisis</strong> refleje el mismo criterio, ejecutá en Supabase el SQL <code>024_get_device_readings_chart_raw.sql</code>.
             </p>
             <div class="notify-panel notify-panel__grid">
               <label class="notify-panel__field">
