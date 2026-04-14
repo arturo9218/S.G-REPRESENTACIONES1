@@ -1734,7 +1734,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         : `No se pudo guardar en la nube: ${cloudError}`;
     } else {
       this.calibrationFeedback =
-        'Corrección guardada. Temperatura, corriente y potencia se recalculan (bruto + offset) cuando la nube tiene esos valores en crudo; si no, el cambio se refleja en lecturas nuevas.';
+        'Corrección guardada. Se actualizó la vista con la nube: corriente/potencia usan valor en crudo + offset cuando existe; si no hay columnas crudas en lecturas viejas, se aplica el offset sobre el valor guardado.';
+      await this.deviceStore.refreshCloudReadingsNow();
     }
     window.setTimeout(() => {
       this.calibrationFeedback = '';

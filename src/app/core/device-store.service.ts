@@ -1217,9 +1217,15 @@ export class DeviceStoreService {
       }
       if (r.currentARaw != null && Number.isFinite(r.currentARaw)) {
         ca = r.currentARaw + oA;
+      } else if (r.currentA != null && Number.isFinite(r.currentA)) {
+        // Sin current_a_raw (lecturas viejas o migración pendiente): el valor en nube suele ser el
+        // amperaje base; aplicamos el offset del panel para que la corrección se vea igual.
+        ca = r.currentA + oA;
       }
       if (r.powerWRaw != null && Number.isFinite(r.powerWRaw)) {
         pw = r.powerWRaw + oP;
+      } else if (r.powerW != null && Number.isFinite(r.powerW)) {
+        pw = r.powerW + oP;
       }
       return { ...r, temperatureC: t1, temp2C: t2, temp3C: t3, currentA: ca, powerW: pw };
     });
@@ -1685,6 +1691,14 @@ export class DeviceStoreService {
     );
     this.recomputeReadingsDisplayTemps();
     return { cloudError };
+  }
+
+  /**
+   * Vuelve a pedir lecturas recientes desde Supabase y reaplica offsets.
+   * Útil tras guardar corrección para alinear con columnas crudas (current_a_raw, etc.).
+   */
+  async refreshCloudReadingsNow(): Promise<void> {
+    await this.refreshReadingsFromCloud();
   }
 
   recordTemperatureReading(deviceId: string, temperatureC: number): void {
