@@ -183,6 +183,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   logDateForm = '';
   logTimeForm = '';
   photoCaptionForm = '';
+  /** Evita múltiples `loadEquipmentPage` seguidos (ruta + query + lista de equipos). */
+  private equipmentPageReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
   equipmentPdfExporting = false;
   /** Opciones del PDF de ficha: anexos de nube (últimos 7 días / historial cargado). */
   equipmentPdfIncludeAlarms = true;
@@ -294,6 +297,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
       } else if (!this.selectedDeviceId && list.length > 0) {
         this.selectDevice(list[0].id, false);
       }
+      if (this.router.url.split('?')[0] === '/ficha-equipo') {
+        this.scheduleEquipmentPageReload();
+      }
     });
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
       this.devices = list;
@@ -316,6 +322,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.equipmentPageReloadTimer != null) {
+      clearTimeout(this.equipmentPageReloadTimer);
+      this.equipmentPageReloadTimer = null;
+    }
     if (this.unlockAudioHandler) {
       window.removeEventListener('pointerdown', this.unlockAudioHandler);
       window.removeEventListener('keydown', this.unlockAudioHandler);
@@ -348,7 +358,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (path === '/ficha-equipo') {
       this.shellRoute = 'equipment';
-      void this.loadEquipmentPage();
+      this.scheduleEquipmentPageReload();
       return;
     }
     if (path === '/alertas') {
@@ -1609,9 +1619,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.dailyEnergyError = '';
     this.syncNotificationFormWithSelected();
     this.syncPdfExportDateDefaults();
-    if (this.shellRoute === 'equipment') {
-      void this.loadEquipmentPage();
-    }
     if (syncQueryToUrl) {
       const path = this.router.url.split('?')[0];
       const shellPaths = ['/dashboard', '/dispositivos', '/ficha-equipo', '/alertas', '/configuracion'];
@@ -3052,6 +3059,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
     );
   }
 
+  /** Recarga fichas tras sincronizar ruta/query/dispositivo (debounce para no duplicar peticiones). */
+  private scheduleEquipmentPageReload(): void {
+    if (this.equipmentPageReloadTimer != null) {
+      clearTimeout(this.equipmentPageReloadTimer);
+    }
+    this.equipmentPageReloadTimer = setTimeout(() => {
+      this.equipmentPageReloadTimer = null;
+      if (this.router.url.split('?')[0] !== '/ficha-equipo') return;
+      if (!this.equipmentSheetAvailable() || !this.selectedDeviceId) return;
+      void this.loadEquipmentPage();
+    }, 120);
+  }
+
   private isUuidDeviceId(id: string): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       id
@@ -3085,6 +3105,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     try {
       let { rows: fichas, error: errFichas } = await this.equipmentSheet.listFichas(id);
       if (errFichas) {
+        this.equipmentFichas = [];
+        this.selectedFichaId = null;
         const low = errFichas.toLowerCase();
         this.equipmentFeedback =
           low.includes('does not exist') ||
@@ -3132,6 +3154,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     await this.loadEquipmentLogsAndPhotos();
     this.initLogDateTimeDefaults();
+  }
+
+  compareFichaId(a: string | null | undefined, b: string | null | undefined): boolean {
+    return a === b;
+  }
+
+  trackByFichaId(_i: number, f: DeviceEquipmentFichaRow): string {
+    return f.id;
   }
 
   /** Fecha de último guardado de la ficha seleccionada (nube). */
@@ -3182,14 +3212,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async deleteEquipmentFicha(): Promise<void> {
     const fid = this.selectedFichaId;
-    if (!fid || this.equipmentFichas.length < 2) return;
-    if (!confirm('¿Eliminar esta ficha junto con su bitácora y fotos de esta ficha?')) return;
+    if (!fid || !this.selectedDeviceId) return;
+    const isLast = this.equipmentFichas.length <= 1;
+    const msg = isLast
+      ? '¿Eliminar la única ficha de este equipo? Se creará de nuevo una ficha vacía “Instalación principal”.'
+      : '¿Eliminar esta ficha junto con su bitácora y fotos de esta ficha?';
+    if (!confirm(msg)) return;
     const { error } = await this.equipmentSheet.deleteFicha(fid);
     if (error) {
       this.equipmentFeedback = error;
       return;
     }
     this.selectedFichaId = null;
+    this.equipmentNewFichaHint = '';
     void this.loadEquipmentPage();
   }
 
@@ -3370,8 +3405,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const { rows: refreshed } = await this.equipmentSheet.listFichas(this.selectedDeviceId!);
       if (refreshed.length) {
         this.equipmentFichas = refreshed;
+        const active = refreshed.find((f) => f.id === this.selectedFichaId) ?? refreshed[0];
+        if (active) {
+          this.hydrateEquipmentFormsFromFicha(active);
+        }
         void this.notifyMaintenanceForAllFichasIfDue(refreshed);
       }
+      this.initLogDateTimeDefaults();
     } finally {
       this.equipmentSaving = false;
     }

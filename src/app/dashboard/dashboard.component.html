@@ -1012,9 +1012,12 @@
                       class="notify-panel__select"
                       [ngModel]="selectedFichaId"
                       (ngModelChange)="onEquipmentFichaChange($event)"
+                      [compareWith]="compareFichaId"
                       name="eq-ficha-pick"
                     >
-                      <option *ngFor="let f of equipmentFichas" [ngValue]="f.id">{{ f.label }}</option>
+                      <option *ngFor="let f of equipmentFichas; trackBy: trackByFichaId" [ngValue]="f.id">
+                        {{ f.label }}
+                      </option>
                     </select>
                   </label>
                   <label class="notify-panel__field notify-panel__field--full">
@@ -1040,7 +1043,8 @@
                     <button
                       type="button"
                       class="btn btn--ghost"
-                      *ngIf="equipmentFichas.length > 1"
+                      *ngIf="equipmentFichas.length"
+                      [disabled]="equipmentSaving"
                       (click)="deleteEquipmentFicha()"
                     >
                       Eliminar esta ficha
