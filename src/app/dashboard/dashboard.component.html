@@ -1027,6 +1027,12 @@
                       autocomplete="off"
                     />
                   </label>
+                  <p class="card__hint card__hint--tight" *ngIf="equipmentNewFichaHint">
+                    {{ equipmentNewFichaHint }}
+                  </p>
+                  <p class="card__hint card__hint--tight" *ngIf="selectedFichaUpdatedAtLabel()">
+                    Última vez guardada en la nube: <strong>{{ selectedFichaUpdatedAtLabel() }}</strong>
+                  </p>
                   <div class="equipment-page__ficha-actions">
                     <button type="button" class="btn btn--ghost" (click)="addEquipmentFicha()">
                       + Agregar otra ficha
@@ -1502,6 +1508,47 @@
               </p>
 
               <div class="equipment-page__actions card card--ficha-section">
+                <div class="equipment-page__pdf-options">
+                  <label class="equipment-page__pdf-opt">
+                    <input type="checkbox" [(ngModel)]="equipmentPdfIncludeChart" name="eq-pdf-chart" />
+                    Incluir gráfico (temperatura y corriente)
+                  </label>
+                  <div
+                    class="equipment-page__chart-range"
+                    *ngIf="equipmentPdfIncludeChart"
+                  >
+                    <span class="equipment-page__chart-range-label">Rango del gráfico</span>
+                    <label>
+                      Desde
+                      <input
+                        type="date"
+                        class="equipment-page__chart-date"
+                        [(ngModel)]="equipmentPdfChartFromDate"
+                        name="eq-pdf-chart-from"
+                        [disabled]="!equipmentPdfIncludeChart"
+                      />
+                    </label>
+                    <label>
+                      Hasta
+                      <input
+                        type="date"
+                        class="equipment-page__chart-date"
+                        [(ngModel)]="equipmentPdfChartToDate"
+                        name="eq-pdf-chart-to"
+                        [disabled]="!equipmentPdfIncludeChart"
+                      />
+                    </label>
+                    <span class="equipment-page__chart-range-hint">Vacío = últimos 7 días</span>
+                  </div>
+                  <label class="equipment-page__pdf-opt">
+                    <input type="checkbox" [(ngModel)]="equipmentPdfIncludeReadings" name="eq-pdf-readings" />
+                    Incluir anexo de lecturas (7 días: temp. y corriente)
+                  </label>
+                  <label class="equipment-page__pdf-opt">
+                    <input type="checkbox" [(ngModel)]="equipmentPdfIncludeAlarms" name="eq-pdf-alarms" />
+                    Incluir anexo de historial de alarmas
+                  </label>
+                </div>
                 <button
                   type="button"
                   class="btn btn--primary"
@@ -1574,7 +1621,7 @@
           <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync">
             <h2 class="card__title card__title--sm">Corrección de temperatura y consumo</h2>
             <p class="card__hint card__hint--tight">
-              Sumás o restás al valor que envía el ESP al guardar cada lectura en la nube: temperatura en °C, corriente en A y potencia en W. La tarjeta y el historial usan bruto + offset cuando existen columnas en crudo en la nube. Para que el gráfico de <strong>Análisis</strong> refleje el mismo criterio, ejecutá en Supabase el SQL <code>024_get_device_readings_chart_raw.sql</code>.
+              Sumás o restás al valor que envía el ESP al guardar cada lectura en la nube: temperatura en °C, corriente en A y potencia en W. Con pinza / SCT, la <strong>corriente en A</strong> corrige el amperaje RMS que calcula el firmware a partir del sensor; si el consumo en pantalla queda sistemáticamente alto o bajo, ajustá este valor (y la tensión nominal del equipo arriba) antes que la potencia en W. La tarjeta y el historial usan bruto + offset cuando hay columnas crudas en la nube. Para que el gráfico de <strong>Análisis</strong> use el mismo criterio, ejecutá en Supabase el SQL <code>024_get_device_readings_chart_raw.sql</code>.
             </p>
             <div class="notify-panel notify-panel__grid">
               <label class="notify-panel__field">

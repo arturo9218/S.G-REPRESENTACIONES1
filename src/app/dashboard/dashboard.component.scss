@@ -3118,6 +3118,66 @@ $border: rgba(148, 163, 184, 0.18);
   margin: 0.35rem 0.5rem 0.5rem;
 }
 
+.equipment-page__pdf-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  flex-basis: 100%;
+  margin-bottom: 0.15rem;
+  font-size: 0.8rem;
+  color: $muted;
+}
+
+.equipment-page__pdf-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.equipment-page__chart-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  width: 100%;
+  flex-basis: 100%;
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.78rem;
+  color: $muted;
+
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+}
+
+.equipment-page__chart-range-label {
+  font-weight: 700;
+  color: $text;
+  width: 100%;
+  flex-basis: 100%;
+}
+
+.equipment-page__chart-date {
+  padding: 0.25rem 0.4rem;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.6);
+  color: $text;
+  font: inherit;
+}
+
+.equipment-page__chart-range-hint {
+  font-size: 0.72rem;
+  opacity: 0.9;
+}
+
 .equipment-page__actions.card {
   display: flex;
   flex-wrap: wrap;

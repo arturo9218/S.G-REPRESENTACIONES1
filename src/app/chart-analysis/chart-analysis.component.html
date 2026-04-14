@@ -131,18 +131,42 @@
           {{ sidebarCollapsed ? 'Mostrar panel' : 'Ocultar panel' }}
         </button>
       </div>
-      <h2 class="panel__title">Seleccionar temperatura</h2>
+      <h2 class="panel__title">Series del gráfico</h2>
 
-      <div class="controls">
-        <label class="control">
-          <span>Canal</span>
-          <select [(ngModel)]="analysisChannel" class="control__select">
-            <option value="both">Ambos</option>
-            <option value="temp1">Sensor 1</option>
-            <option value="temp2">Sensor 2</option>
-            <option value="current">Corriente (A)</option>
-          </select>
-        </label>
+      <div class="controls controls--series">
+        <div class="control control--checkboxes">
+          <span class="control__label-block">Mostrar en el gráfico</span>
+          <label class="control control--inline">
+            <input
+              type="checkbox"
+              [(ngModel)]="seriesShowTemp1"
+              (ngModelChange)="onSeriesCheckboxChange()"
+              name="ch-t1"
+            />
+            <span>Sensor 1 (°C)</span>
+          </label>
+          <label class="control control--inline" *ngIf="hasSecondSeries">
+            <input
+              type="checkbox"
+              [(ngModel)]="seriesShowTemp2"
+              (ngModelChange)="onSeriesCheckboxChange()"
+              name="ch-t2"
+            />
+            <span>Sensor 2 (°C)</span>
+          </label>
+          <label class="control control--inline">
+            <input
+              type="checkbox"
+              [(ngModel)]="seriesShowCurrent"
+              (ngModelChange)="onSeriesCheckboxChange()"
+              name="ch-i"
+            />
+            <span>Corriente (A)</span>
+          </label>
+        </div>
+        <p class="panel__hint panel__hint--tight" *ngIf="chartDualAxis">
+          Doble eje: °C a la izquierda, amperes a la derecha.
+        </p>
 
         <label class="control" *ngIf="devices.length">
           <span>Dispositivo</span>
@@ -336,10 +360,22 @@
         Sin datos para este dispositivo todavía. Seleccioná otro o esperá nuevas lecturas del ESP8266.
       </p>
 
-      <div class="chart" [class.chart--trend]="chartStylePreset === 'trend'">
+      <div
+        class="chart"
+        [class.chart--trend]="chartStylePreset === 'trend'"
+        [class.chart--dual-axis]="chartDualAxis"
+      >
         <div class="chart__axis" aria-hidden="true">
-          <span class="chart__axis-title chart__axis-title--y" *ngIf="chartStylePreset === 'trend' && !analysisShowsCurrent">Temperatura</span>
-          <span class="chart__axis-title chart__axis-title--y" *ngIf="chartStylePreset === 'trend' && analysisShowsCurrent">Corriente (A)</span>
+          <span
+            class="chart__axis-title chart__axis-title--y"
+            *ngIf="chartStylePreset === 'trend' && (showTemp1 || showTemp2)"
+            >Temperatura</span
+          >
+          <span
+            class="chart__axis-title chart__axis-title--y"
+            *ngIf="chartStylePreset === 'trend' && analysisShowsCurrent && !showTemp1 && !showTemp2"
+            >Corriente (A)</span
+          >
           <div class="chart__axis-values">
             <span *ngFor="let y of chartYAxisLabelsFromTop">{{ y }}</span>
           </div>
@@ -355,7 +391,12 @@
           (mouseleave)="onChartMouseLeave()"
           (dblclick)="resetChartZoom()"
         >
-          <svg class="chart__svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <svg
+            class="chart__svg"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
             <defs>
               <linearGradient id="chartFillS1" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="#1e40af" stop-opacity="0.14" />
@@ -390,7 +431,7 @@
             <rect class="chart-plot-frame" x="4" y="8" width="96" height="84" fill="none" />
 
             <g clip-path="url(#chartPlotClip)">
-              <ng-container *ngIf="!analysisShowsCurrent">
+              <ng-container *ngIf="showTemp1 || showTemp2">
                 <polygon
                   *ngIf="showTemp1 && chartShowsAreaFill()"
                   class="chart-area chart-area--s1"
@@ -556,7 +597,7 @@
                 [attr.y2]="hyp"
               />
             </g>
-            <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYTemp1 != null && !analysisShowsCurrent">
+            <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYTemp1 != null">
               <circle
                 class="chart-hover-dot"
                 [attr.cx]="hoverX"
@@ -565,7 +606,7 @@
                 vector-effect="non-scaling-stroke"
               />
             </g>
-            <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYTemp2 != null && !analysisShowsCurrent">
+            <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYTemp2 != null">
               <circle
                 class="chart-hover-dot chart-hover-dot--s2"
                 [attr.cx]="hoverX"
@@ -574,7 +615,7 @@
                 vector-effect="non-scaling-stroke"
               />
             </g>
-            <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYCurrent != null && analysisShowsCurrent">
+            <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYCurrent != null">
               <circle
                 class="chart-hover-dot chart-hover-dot--power"
                 [attr.cx]="hoverX"
@@ -591,11 +632,28 @@
             <div class="chart-tooltip__row" *ngIf="analysisShowsCurrent">Corriente: <strong>{{ hoverCurrentLabel }}</strong></div>
           </div>
         </div>
-        <div class="chart__x-axis" *ngIf="hasChartData && chartXAxisTickLabels.length">
+
+        <div class="chart__axis chart__axis--right" *ngIf="chartDualAxis" aria-hidden="true">
+          <span
+            class="chart__axis-title chart__axis-title--y chart__axis-title--right"
+            *ngIf="chartStylePreset === 'trend'"
+            >Corriente (A)</span
+          >
+          <div class="chart__axis-values">
+            <span *ngFor="let y of chartYAxisLabelsRightFromTop">{{ y }}</span>
+          </div>
+        </div>
+
+        <div
+          class="chart__x-axis"
+          [class.chart__x-axis--dual]="chartDualAxis"
+          *ngIf="hasChartData && chartXAxisTickLabels.length"
+        >
           <span class="chart__x-axis-spacer" aria-hidden="true"></span>
           <div class="chart__x-axis-ticks">
             <span *ngFor="let x of chartXAxisTickLabels" class="chart__x-axis-tick">{{ x }}</span>
           </div>
+          <span *ngIf="chartDualAxis" class="chart__x-axis-spacer" aria-hidden="true"></span>
         </div>
       </div>
 

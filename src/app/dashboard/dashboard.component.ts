@@ -184,6 +184,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
   logTimeForm = '';
   photoCaptionForm = '';
   equipmentPdfExporting = false;
+  /** Opciones del PDF de ficha: anexos de nube (últimos 7 días / historial cargado). */
+  equipmentPdfIncludeAlarms = true;
+  equipmentPdfIncludeReadings = true;
+  /** Incluir imagen de gráfico (temp. / corriente) en el PDF de ficha. */
+  equipmentPdfIncludeChart = false;
+  /** Rango para el gráfico del PDF (`yyyy-MM-dd`, vacío = últimos 7 días). */
+  equipmentPdfChartFromDate = '';
+  equipmentPdfChartToDate = '';
+  /** Mensaje breve al crear una ficha nueva desde el panel. */
+  equipmentNewFichaHint = '';
   equipmentPhotoUploading = false;
   alarmEventsCount = 0;
   /** Registros en la nube (device_alarm_events); solo con sesión Supabase + SQL 013. */
@@ -1201,6 +1211,308 @@ export class DashboardComponent implements OnInit, OnDestroy {
       out.push(sorted[idx]);
     }
     return out;
+  }
+
+  /** Lecturas de los últimos 7 días para el anexo del PDF de ficha (nube o memoria local). */
+  private async readingsForEquipmentPdfAnnex(
+    deviceId: string
+  ): Promise<{ rows: TemperatureReading[]; note: string }> {
+    const to = new Date();
+    const from = new Date(to.getTime() - 7 * 86400000);
+    const fromIso = from.toISOString();
+    const toIso = to.toISOString();
+
+    if (this.deviceStore.isCloudSyncActive() && this.deviceStore.isCloudDeviceId(deviceId)) {
+      const fetched = await this.deviceStore.fetchRawReadingsForPdfExport(
+        deviceId,
+        fromIso,
+        toIso,
+        20000
+      );
+      if (fetched.error) {
+        return { rows: [], note: `No se pudieron cargar lecturas: ${fetched.error}` };
+      }
+      let rows = [...fetched.rows].sort(
+        (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+      );
+      let note = 'Origen: nube · últimos 7 días · valores con corrección aplicada.';
+      if (fetched.truncated) {
+        note += ' Se listan hasta 20.000 filas del período.';
+      }
+      const rawLen = rows.length;
+      rows = this.evenSamplePdfRows(rows, this.pdfTableMaxRows);
+      if (rawLen > this.pdfTableMaxRows) {
+        note += ` Tabla: muestreo uniforme (${this.pdfTableMaxRows} de ${rawLen}).`;
+      }
+      return { rows, note };
+    }
+
+    let rows = this.readings
+      .filter((r) => r.deviceId === deviceId)
+      .filter((r) => {
+        const t = new Date(r.at).getTime();
+        return t >= from.getTime() && t <= to.getTime();
+      });
+    rows.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    const rawLen = rows.length;
+    if (rawLen === 0) {
+      return {
+        rows: [],
+        note:
+          'Origen: memoria local · sin lecturas en los últimos 7 días. Abrí el panel con el equipo en línea o usá nube.',
+      };
+    }
+    const cap = Math.min(this.pdfTableMaxRows, 500);
+    rows = this.evenSamplePdfRows(rows, Math.min(rawLen, cap));
+    const note =
+      rawLen > cap
+        ? `Origen: memoria local · últimos 7 días · muestreo (${rows.length} de ${rawLen}). Sincronizá con la nube para el historial completo.`
+        : `Origen: memoria local · últimos 7 días. Sincronizá con la nube para datos históricos completos.`;
+    return { rows, note };
+  }
+
+  /** Rango del gráfico del PDF de ficha (vacío = últimos 7 días). */
+  private equipmentChartRangeBounds(): { from: Date; to: Date } | null {
+    const a = this.equipmentPdfChartFromDate?.trim() ?? '';
+    const b = this.equipmentPdfChartToDate?.trim() ?? '';
+    if (!a && !b) {
+      const to = new Date();
+      const from = new Date(to.getTime() - 7 * 86400000);
+      return { from, to };
+    }
+    let from: Date;
+    let to: Date;
+    if (a) {
+      const p = this.parsePdfYmdLocal(a);
+      if (!p) return null;
+      from = p;
+    } else {
+      from = new Date(0);
+    }
+    if (b) {
+      const p = this.parsePdfYmdLocal(b);
+      if (!p) return null;
+      to = new Date(p);
+      to.setHours(23, 59, 59, 999);
+    } else {
+      const n = new Date();
+      to = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 23, 59, 59, 999);
+    }
+    if (from > to) return null;
+    return { from, to };
+  }
+
+  private async readingsForEquipmentChart(
+    deviceId: string
+  ): Promise<{ rows: TemperatureReading[]; rangeLabel: string; error?: string }> {
+    const bounds = this.equipmentChartRangeBounds();
+    if (!bounds) return { rows: [], rangeLabel: '', error: 'Rango inválido' };
+    const rangeLabel = `${bounds.from.toLocaleString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })} → ${bounds.to.toLocaleString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const fromIso = bounds.from.toISOString();
+    const toIso = bounds.to.toISOString();
+
+    if (this.deviceStore.isCloudSyncActive() && this.deviceStore.isCloudDeviceId(deviceId)) {
+      const fetched = await this.deviceStore.fetchRawReadingsForPdfExport(
+        deviceId,
+        fromIso,
+        toIso,
+        15000
+      );
+      if (fetched.error) {
+        return { rows: [], rangeLabel, error: fetched.error };
+      }
+      let rows = [...fetched.rows].sort(
+        (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+      );
+      const rawLen = rows.length;
+      const cap = Math.min(4000, Math.max(2, rawLen));
+      rows = rawLen <= cap ? rows : this.evenSamplePdfRows(rows, cap);
+      return { rows, rangeLabel };
+    }
+
+    let rows = this.readings
+      .filter((r) => r.deviceId === deviceId)
+      .filter((r) => {
+        const t = new Date(r.at).getTime();
+        return t >= bounds.from.getTime() && t <= bounds.to.getTime();
+      });
+    rows.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    const rawLen = rows.length;
+    const cap = Math.min(4000, Math.max(2, rawLen || 0));
+    rows = rawLen <= cap || rawLen === 0 ? rows : this.evenSamplePdfRows(rows, cap);
+    return { rows, rangeLabel };
+  }
+
+  /** Canvas PNG para incrustar en el PDF de ficha. */
+  private renderEquipmentPdfChartDataUrl(
+    rows: TemperatureReading[],
+    dev: DashboardDevice,
+    rangeLabel: string,
+    s1: string,
+    s2: string
+  ): string | null {
+    if (rows.length < 2) return null;
+    const nomV = dev.nominalVoltageV;
+    const times = rows.map((r) => new Date(r.at).getTime());
+    const t0 = times[0]!;
+    const tEnd = times[times.length - 1]!;
+    const span = Math.max(1, tEnd - t0);
+
+    const t1v = rows.map((r) => r.temperatureC);
+    const t2v = rows.map((r) =>
+      r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C : null
+    );
+    const av = rows.map((r) => effectiveCurrentAWithNominal(r, nomV));
+    const has2 = t2v.some((x) => x != null);
+    let minTemp = Math.min(...t1v);
+    let maxTemp = Math.max(...t1v);
+    if (has2) {
+      const t2nums = t2v.filter((x): x is number => x != null);
+      if (t2nums.length) {
+        minTemp = Math.min(minTemp, ...t2nums);
+        maxTemp = Math.max(maxTemp, ...t2nums);
+      }
+    }
+    let padT = Math.max(0.5, (maxTemp - minTemp) * 0.08);
+    minTemp -= padT;
+    maxTemp += padT;
+    if (Math.abs(maxTemp - minTemp) < 0.01) {
+      minTemp -= 0.5;
+      maxTemp += 0.5;
+    }
+
+    const currNums = av.filter((x): x is number => x != null && Number.isFinite(x));
+    const hasCurr = currNums.length > 0;
+    let minA = hasCurr ? Math.min(...currNums) : 0;
+    let maxA = hasCurr ? Math.max(...currNums) : 1;
+    if (hasCurr) {
+      const padA = Math.max(0.05, (maxA - minA) * 0.1);
+      minA -= padA;
+      maxA += padA;
+      if (Math.abs(maxA - minA) < 1e-6) {
+        minA -= 0.25;
+        maxA += 0.25;
+      }
+    }
+
+    const W = 900;
+    const H = 420;
+    const DPR = 2;
+    const c = document.createElement('canvas');
+    c.width = W * DPR;
+    c.height = H * DPR;
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    ctx.scale(DPR, DPR);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, W, H);
+
+    const padL = 56;
+    const padR = hasCurr ? 56 : 16;
+    const padTop = 52;
+    const padB = 44;
+    const plotW = W - padL - padR;
+    const plotH = H - padTop - padB;
+
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = padTop + (plotH * i) / 4;
+      ctx.beginPath();
+      ctx.moveTo(padL, y);
+      ctx.lineTo(padL + plotW, y);
+      ctx.stroke();
+    }
+
+    const xOf = (tm: number) => padL + ((tm - t0) / span) * plotW;
+    const yTemp = (v: number) =>
+      padTop + plotH - ((v - minTemp) / (maxTemp - minTemp)) * plotH;
+    const yCurr = (v: number) =>
+      padTop + plotH - ((v - minA) / (maxA - minA)) * plotH;
+
+    const drawLine = (
+      pts: { x: number; y: number }[],
+      color: string,
+      width: number
+    ) => {
+      if (pts.length < 2) return;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pts[0]!.x, pts[0]!.y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+      ctx.stroke();
+    };
+
+    const pts1 = times.map((tm, i) => ({ x: xOf(tm), y: yTemp(t1v[i]!) }));
+    drawLine(pts1, '#93c5fd', 2.2);
+    if (has2) {
+      const pts2: { x: number; y: number }[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        if (t2v[i] != null) pts2.push({ x: xOf(times[i]!), y: yTemp(t2v[i]!) });
+      }
+      drawLine(pts2, '#5eead4', 2);
+    }
+    if (hasCurr) {
+      const ptsC: { x: number; y: number }[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const a = av[i];
+        if (a != null && Number.isFinite(a)) ptsC.push({ x: xOf(times[i]!), y: yCurr(a) });
+      }
+      drawLine(ptsC, '#f59e0b', 2);
+    }
+
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '600 13px system-ui, sans-serif';
+    ctx.fillText('Gráfico — ' + rangeLabel, 16, 22);
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText(dev.name ?? 'Equipo', 16, 40);
+
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillStyle = '#93c5fd';
+    ctx.fillText(`— ${s1}`, 16, H - 18);
+    let lx = 16 + ctx.measureText(`— ${s1}`).width + 16;
+    if (has2) {
+      ctx.fillStyle = '#5eead4';
+      ctx.fillText(`— ${s2}`, lx, H - 18);
+      lx += ctx.measureText(`— ${s2}`).width + 16;
+    }
+    if (hasCurr) {
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillText('— Corriente (A)', lx, H - 18);
+    }
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 4; i++) {
+      const v = minTemp + ((4 - i) / 4) * (maxTemp - minTemp);
+      ctx.fillText(`${v.toFixed(1)}°`, padL - 6, padTop + (plotH * i) / 4 + 4);
+    }
+    if (hasCurr) {
+      ctx.textAlign = 'left';
+      for (let i = 0; i <= 4; i++) {
+        const v = minA + ((4 - i) / 4) * (maxA - minA);
+        ctx.fillText(`${v.toFixed(2)} A`, padL + plotW + 6, padTop + (plotH * i) / 4 + 4);
+      }
+    }
+    ctx.textAlign = 'left';
+
+    return c.toDataURL('image/png');
   }
 
   private parsePdfYmdLocal(yyyyMmDd: string): Date | null {
@@ -2813,12 +3125,24 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async onEquipmentFichaChange(fichaId: string): Promise<void> {
     this.selectedFichaId = fichaId;
+    this.equipmentNewFichaHint = '';
     const f = this.equipmentFichas.find((x) => x.id === fichaId);
     if (f) {
       this.hydrateEquipmentFormsFromFicha(f);
     }
     await this.loadEquipmentLogsAndPhotos();
     this.initLogDateTimeDefaults();
+  }
+
+  /** Fecha de último guardado de la ficha seleccionada (nube). */
+  selectedFichaUpdatedAtLabel(): string {
+    const f = this.equipmentFichas.find((x) => x.id === this.selectedFichaId);
+    if (!f?.updatedAt) return '';
+    try {
+      return new Date(f.updatedAt).toLocaleString('es-AR');
+    } catch {
+      return '';
+    }
   }
 
   private async loadEquipmentLogsAndPhotos(): Promise<void> {
@@ -2851,6 +3175,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return;
     }
     this.selectedFichaId = id;
+    this.equipmentNewFichaHint =
+      'Estás en una ficha nueva: completá los datos y tocá Guardar. El PDF puede incluir alarmas y tabla de lecturas (opciones abajo).';
     void this.loadEquipmentPage();
   }
 
@@ -3035,10 +3361,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.equipmentFeedback = error;
         return;
       }
-      this.equipmentFeedback = 'Ficha guardada.';
+      this.equipmentNewFichaHint = '';
+      const ts = new Date().toLocaleString('es-AR');
+      this.equipmentFeedback = `Ficha guardada (${ts}).`;
       window.setTimeout(() => {
         this.equipmentFeedback = '';
-      }, 4000);
+      }, 5000);
       const { rows: refreshed } = await this.equipmentSheet.listFichas(this.selectedDeviceId!);
       if (refreshed.length) {
         this.equipmentFichas = refreshed;
@@ -3207,6 +3535,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async exportEquipmentPdf(): Promise<void> {
     if (!this.equipmentSheetAvailable() || !this.selectedDevice) return;
+    if (this.equipmentPdfIncludeChart) {
+      const ok = window.confirm(
+        'Vas a incluir un gráfico de temperatura y corriente en el PDF. ' +
+          'Revisá el rango Desde / Hasta (vacío = últimos 7 días). ¿Continuar?'
+      );
+      if (!ok) return;
+    }
+    if (this.equipmentPdfIncludeChart && !this.equipmentChartRangeBounds()) {
+      alert('Revisá las fechas del gráfico: “Desde” no puede ser posterior a “Hasta”.');
+      return;
+    }
     this.equipmentPdfExporting = true;
     this.equipmentFeedback = '';
     try {
@@ -3338,6 +3677,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
         if (ficha.maintenanceIntervalDays != null) {
           pushLine(lines, 'Intervalo (días)', String(ficha.maintenanceIntervalDays));
         }
+        pushLine(
+          lines,
+          'Última actualización (nube)',
+          ficha.updatedAt ? new Date(ficha.updatedAt).toLocaleString('es-AR') : ''
+        );
 
         doc.setFontSize(9);
         for (const line of lines) {
@@ -3404,6 +3748,166 @@ export class DashboardComponent implements OnInit, OnDestroy {
           }
         }
         y = imgY + 8;
+      }
+
+      const { autoTable } = await import('jspdf-autotable');
+      type DocWithAuto = typeof doc & { lastAutoTable?: { finalY: number } };
+      let yPos = y;
+
+      const bumpPageIfNeeded = (needMm: number): void => {
+        if (yPos > 297 - needMm - 14) {
+          doc.addPage();
+          yPos = 14;
+        }
+      };
+
+      if (this.equipmentPdfIncludeChart) {
+        const chartPack = await this.readingsForEquipmentChart(devId);
+        bumpPageIfNeeded(115);
+        doc.setFontSize(11);
+        doc.setTextColor(30, 64, 175);
+        doc.text('Anexo: gráfico (temperatura / corriente)', 14, yPos);
+        yPos += 7;
+        doc.setFontSize(8);
+        doc.setTextColor(80);
+        if (chartPack.error) {
+          doc.text(chartPack.error, 14, yPos);
+          yPos += 8;
+        } else {
+          doc.text(`Rango: ${chartPack.rangeLabel}`, 14, yPos);
+          yPos += 5;
+          if (chartPack.rows.length < 2) {
+            doc.text(
+              'No hay suficientes lecturas en el rango para dibujar el gráfico (se necesitan al menos 2 puntos).',
+              14,
+              yPos
+            );
+            yPos += 10;
+          }
+        }
+        doc.setTextColor(0);
+        const chartImg =
+          !chartPack.error && chartPack.rows.length >= 2
+            ? this.renderEquipmentPdfChartDataUrl(
+                chartPack.rows,
+                dev,
+                chartPack.rangeLabel,
+                this.selectedSensor1Name,
+                this.selectedSensor2Name
+              )
+            : null;
+        if (chartImg) {
+          const props = doc.getImageProperties(chartImg);
+          const maxW = 182;
+          let dispW = maxW;
+          let dispH = (props.height * dispW) / props.width;
+          if (yPos + dispH > 285) {
+            doc.addPage();
+            yPos = 14;
+          }
+          doc.addImage(chartImg, 'PNG', 14, yPos, dispW, dispH);
+          yPos += dispH + 10;
+        }
+      }
+
+      if (this.equipmentPdfIncludeReadings) {
+        const annex = await this.readingsForEquipmentPdfAnnex(devId);
+        bumpPageIfNeeded(50);
+        doc.setFontSize(11);
+        doc.setTextColor(30, 64, 175);
+        doc.text('Anexo: lecturas (temperaturas y corriente, últimos 7 días)', 14, yPos);
+        yPos += 7;
+        doc.setFontSize(8);
+        doc.setTextColor(80);
+        const parts = doc.splitTextToSize(annex.note, 182);
+        for (const p of parts) {
+          doc.text(p, 14, yPos);
+          yPos += 4;
+        }
+        doc.setTextColor(0);
+        yPos += 2;
+        if (annex.rows.length) {
+          const s1 = this.selectedSensor1Name;
+          const s2 = this.selectedSensor2Name;
+          const nomV = dev.nominalVoltageV;
+          const has2 = annex.rows.some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
+          const hasCurrent = annex.rows.some(
+            (r) => effectiveCurrentAWithNominal(r, nomV) != null
+          );
+          const head: string[][] = [
+            ['Fecha y hora', `${s1} (°C)`, ...(has2 ? [`${s2} (°C)`] : []), ...(hasCurrent ? ['Corriente (A)'] : [])],
+          ];
+          const body: string[][] = annex.rows.map((r) => {
+            const row: string[] = [this.formatPdfDateTime(r.at), r.temperatureC.toFixed(1)];
+            if (has2) {
+              row.push(
+                r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C.toFixed(1) : '—'
+              );
+            }
+            if (hasCurrent) {
+              const ia = effectiveCurrentAWithNominal(r, nomV);
+              row.push(ia != null && Number.isFinite(ia) ? ia.toFixed(2) : '—');
+            }
+            return row;
+          });
+          autoTable(doc, {
+            startY: yPos,
+            head,
+            body,
+            styles: { fontSize: 7, cellPadding: 1.5 },
+            headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+            alternateRowStyles: { fillColor: [245, 247, 250] },
+            margin: { left: 14, right: 14 },
+          });
+          yPos = (doc as DocWithAuto).lastAutoTable?.finalY ?? yPos + 30;
+          yPos += 8;
+        } else {
+          doc.setFontSize(9);
+          doc.text('Sin filas en el período o sin datos disponibles.', 14, yPos);
+          yPos += 10;
+        }
+      }
+
+      if (this.equipmentPdfIncludeAlarms) {
+        await this.loadAlarmHistory();
+        const evs = this.alarmHistoryItems
+          .filter((e) => e.deviceId === devId)
+          .sort((a, b) => new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime())
+          .slice(0, 400);
+        bumpPageIfNeeded(40);
+        doc.setFontSize(11);
+        doc.setTextColor(30, 64, 175);
+        doc.text('Anexo: historial de alarmas (nube)', 14, yPos);
+        yPos += 7;
+        doc.setFontSize(8);
+        doc.setTextColor(80);
+        doc.text(
+          evs.length
+            ? `Últimos ${evs.length} eventos para este equipo (más recientes primero).`
+            : 'Sin eventos registrados para este equipo o historial no disponible.',
+          14,
+          yPos
+        );
+        yPos += 6;
+        doc.setTextColor(0);
+        if (evs.length) {
+          const head: string[][] = [['Fecha', 'Tipo', 'Mensaje']];
+          const body: string[][] = evs.map((ev) => [
+            this.formatPdfDateTime(ev.triggeredAt),
+            this.alarmKindLabel(ev.kind),
+            [ev.message, ev.detail].filter(Boolean).join(' — '),
+          ]);
+          autoTable(doc, {
+            startY: yPos,
+            head,
+            body,
+            styles: { fontSize: 7, cellPadding: 1.5 },
+            headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+            alternateRowStyles: { fillColor: [245, 247, 250] },
+            margin: { left: 14, right: 14 },
+            columnStyles: { 2: { cellWidth: 95 } },
+          });
+        }
       }
 
       const safe = dev.name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);

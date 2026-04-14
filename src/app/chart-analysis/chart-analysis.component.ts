@@ -32,7 +32,11 @@ export interface StoredAnalysisInforme {
   filterFrom: string;
   filterTo: string;
   filterDay: string;
-  channel: AnalysisChannel;
+  /** @deprecated usar seriesT1/T2/C */
+  channel?: AnalysisChannel;
+  seriesT1?: boolean;
+  seriesT2?: boolean;
+  seriesC?: boolean;
   photoDataUrl: string | null;
 }
 
@@ -54,7 +58,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
    */
   private deviceIdFromUrl: string | null = null;
 
-  analysisChannel: AnalysisChannel = 'both';
+  /** Series visibles (podés combinar temperatura/s y corriente a la vez). */
+  seriesShowTemp1 = true;
+  seriesShowTemp2 = true;
+  seriesShowCurrent = false;
+  private readonly chartSeriesStorageKey = 'ar_chart_series_v1';
 
   sensor1LabelForm = '';
   sensor2LabelForm = '';
@@ -146,6 +154,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     // Asegura que el store use scope autenticado también en pestaña nueva.
     this.deviceStore.refreshScopeFromSession();
     this.loadChartStylePreset();
+    this.loadChartSeriesPrefs();
     this.loadInformesFromStorage();
 
     // Soporta ambos nombres por compatibilidad: deviceId (correcto) y deviceld (typo viejo).
@@ -574,17 +583,29 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   /** Canal corriente (A) en el selector */
   get analysisShowsCurrent(): boolean {
-    return this.analysisChannel === 'current';
+    return this.seriesShowCurrent;
+  }
+
+  /** Temperatura(s) y corriente a la vez → dos escalas Y. */
+  get chartDualAxis(): boolean {
+    return this.seriesShowCurrent && (this.seriesShowTemp1 || this.seriesShowTemp2);
   }
 
   get hasChartData(): boolean {
     const s = this.chartReadings();
     if (s.length < 2) return false;
-    if (this.analysisShowsCurrent) {
+    if (this.seriesShowCurrent && !this.seriesShowTemp1 && !this.seriesShowTemp2) {
       const filled = this.currentSeriesForwardFilled(s);
       return filled.some((v) => v != null && Number.isFinite(v as number));
     }
-    return true;
+    if (this.seriesShowTemp1 || this.seriesShowTemp2) {
+      return true;
+    }
+    if (this.seriesShowCurrent) {
+      const filled = this.currentSeriesForwardFilled(s);
+      return filled.some((v) => v != null && Number.isFinite(v as number));
+    }
+    return false;
   }
 
   /** Hay filtro de fechas explícito pero no alcanza puntos para dibujar la curva */
@@ -605,13 +626,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   get showTemp1(): boolean {
-    if (this.analysisShowsCurrent) return false;
-    return this.analysisChannel === 'temp1' || this.analysisChannel === 'both';
+    return this.seriesShowTemp1;
   }
 
   get showTemp2(): boolean {
-    if (this.analysisShowsCurrent) return false;
-    return this.analysisChannel === 'temp2' || this.analysisChannel === 'both';
+    return this.seriesShowTemp2 && this.hasSecondSeries;
   }
 
   get hoverX(): number | null {
@@ -628,7 +647,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const s = this.chartPointsForDraw();
     const idx = Math.min(Math.max(this.hoverIndex, 0), s.length - 1);
     if (!s[idx]) return null;
-    return this.chartScale().toSvgY(s[idx].temperatureC);
+    return this.chartScaleTemp().toSvgY(s[idx].temperatureC);
   }
 
   get hoverYTemp2(): number | null {
@@ -639,7 +658,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const filled = this.temp2SeriesForwardFilled(s);
     const t2 = filled[idx];
     if (t2 == null || Number.isNaN(t2)) return null;
-    return this.chartScale().toSvgY(t2);
+    return this.chartScaleTemp().toSvgY(t2);
   }
 
   get hoverTimeLabel(): string {
@@ -678,7 +697,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const filled = this.currentSeriesForwardFilled(s);
     const amps = filled[idx];
     if (amps == null || Number.isNaN(amps)) return null;
-    return this.chartScale().toSvgY(amps);
+    return this.chartScaleCurrent().toSvgY(amps);
   }
 
   get hoverCurrentLabel(): string {
@@ -691,8 +710,44 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     return `${amps.toFixed(2)} A`;
   }
 
-  toggleChannel(channel: AnalysisChannel): void {
-    this.analysisChannel = channel;
+  loadChartSeriesPrefs(): void {
+    try {
+      const raw = localStorage.getItem(this.chartSeriesStorageKey);
+      if (!raw) return;
+      const o = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof o['t1'] === 'boolean') this.seriesShowTemp1 = o['t1'];
+      if (typeof o['t2'] === 'boolean') this.seriesShowTemp2 = o['t2'];
+      if (typeof o['c'] === 'boolean') this.seriesShowCurrent = o['c'];
+      this.ensureAtLeastOneSeries();
+    } catch {
+      /* */
+    }
+  }
+
+  private saveChartSeriesPrefs(): void {
+    try {
+      localStorage.setItem(
+        this.chartSeriesStorageKey,
+        JSON.stringify({
+          t1: this.seriesShowTemp1,
+          t2: this.seriesShowTemp2,
+          c: this.seriesShowCurrent,
+        })
+      );
+    } catch {
+      /* */
+    }
+  }
+
+  private ensureAtLeastOneSeries(): void {
+    if (!this.seriesShowTemp1 && !this.seriesShowTemp2 && !this.seriesShowCurrent) {
+      this.seriesShowTemp1 = true;
+    }
+  }
+
+  onSeriesCheckboxChange(): void {
+    this.ensureAtLeastOneSeries();
+    this.saveChartSeriesPrefs();
   }
 
   /** Mismo criterio que el panel principal: relleno bajo la curva en área / técnico. */
@@ -723,7 +778,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   get avgDeltaLabel(): string {
     const series = this.chartReadingsZoomed();
-    if (this.analysisShowsCurrent) {
+    if (this.seriesShowCurrent && !this.seriesShowTemp1 && !this.seriesShowTemp2) {
       const filled = this.currentSeriesForwardFilled(series);
       const n = filled.length;
       if (n < 2) return '—';
@@ -733,6 +788,37 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       const d = last - prev;
       const sign = d >= 0 ? '+' : '';
       return `${sign}${d.toFixed(2)} A`;
+    }
+    if (this.chartDualAxis) {
+      const parts: string[] = [];
+      if (this.showTemp1 && series.length >= 2) {
+        const last1 = series[series.length - 1].temperatureC;
+        const prev1 = series[series.length - 2].temperatureC;
+        const d1 = last1 - prev1;
+        parts.push(`${this.sensor1Name} ${d1 >= 0 ? '+' : ''}${d1.toFixed(1)}°C`);
+      }
+      if (this.showTemp2 && this.hasSecondSeries && series.length >= 2) {
+        const filled = this.temp2SeriesForwardFilled(series);
+        const last2 = filled[series.length - 1];
+        const prev2 = filled[series.length - 2];
+        if (last2 != null && prev2 != null && !Number.isNaN(last2) && !Number.isNaN(prev2)) {
+          const d2 = last2 - prev2;
+          parts.push(`${this.sensor2Name} ${d2 >= 0 ? '+' : ''}${d2.toFixed(1)}°C`);
+        }
+      }
+      if (this.seriesShowCurrent) {
+        const filled = this.currentSeriesForwardFilled(series);
+        const n = filled.length;
+        if (n >= 2) {
+          const last = filled[n - 1];
+          const prev = filled[n - 2];
+          if (last != null && prev != null && !Number.isNaN(last) && !Number.isNaN(prev)) {
+            const d = last - prev;
+            parts.push(`I ${d >= 0 ? '+' : ''}${d.toFixed(2)} A`);
+          }
+        }
+      }
+      return parts.length ? parts.join('\n') : '—';
     }
     if (this.showTemp1 && this.showTemp2) {
       if (series.length < 2) return '—';
@@ -806,14 +892,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   /** Δ con dos sensores: mostrar en columna en lugar de una línea larga. */
   get avgDeltaIsMultiline(): boolean {
-    return (
-      this.analysisChannel === 'both' &&
-      !this.analysisShowsCurrent &&
-      this.avgDeltaLabel.includes('\n')
-    );
+    return this.avgDeltaLabel.includes('\n');
   }
 
   get chartCurrentRangeLabel(): string {
+    if (!this.seriesShowCurrent) return '—';
     const series = this.chartReadingsZoomed();
     const filled = this.currentSeriesForwardFilled(series);
     const vals = filled.filter((x): x is number => x != null && Number.isFinite(x));
@@ -822,7 +905,16 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   get chartSideRangeLabel(): string {
-    return this.analysisShowsCurrent ? this.chartCurrentRangeLabel : this.chartTempRangeLabel;
+    if (this.chartDualAxis) {
+      const a = this.chartTempRangeLabel;
+      const b = this.chartCurrentRangeLabel;
+      if (a === '—') return b;
+      if (b === '—') return a;
+      return `${a}\n${b}`;
+    }
+    return this.seriesShowCurrent && !this.seriesShowTemp1 && !this.seriesShowTemp2
+      ? this.chartCurrentRangeLabel
+      : this.chartTempRangeLabel;
   }
 
   clearDateFilters(): void {
@@ -1042,62 +1134,64 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     return `${v.toFixed(2)} A`;
   }
 
-  private chartValueRange(): { minV: number; maxV: number; span: number } | null {
+  private chartValueRangeTemp(): { minV: number; maxV: number; span: number } | null {
     const series = this.chartReadingsZoomed();
     if (!series.length) return null;
-
-    if (this.analysisShowsCurrent) {
-      const filled = this.currentSeriesForwardFilled(series);
-      const vals = filled.filter((x): x is number => x != null && Number.isFinite(x));
-      if (!vals.length) return null;
-      const minV = Math.min(...vals);
-      const maxV = Math.max(...vals);
-      const span = maxV - minV;
-      return { minV, maxV, span };
-    }
-
     const vals: number[] = [];
-    if (this.showTemp1) vals.push(...series.map((r) => r.temperatureC));
-    if (this.showTemp2) {
+    if (this.seriesShowTemp1) vals.push(...series.map((r) => r.temperatureC));
+    if (this.seriesShowTemp2 && this.hasSecondSeries) {
       const filled = this.temp2SeriesForwardFilled(series);
       for (const t of filled) {
         if (t != null && Number.isFinite(t)) vals.push(t);
       }
     }
-
     if (!vals.length) return null;
-
     const minV = Math.min(...vals);
     const maxV = Math.max(...vals);
-    const span = maxV - minV;
-    return { minV, maxV, span };
+    return { minV, maxV, span: maxV - minV };
   }
 
-  private chartPaddedBounds():
-    | { minV: number; maxV: number; span: number }
-    | null {
-    const raw = this.chartValueRange();
-    if (!raw) return null;
+  private chartValueRangeCurrent(): { minV: number; maxV: number; span: number } | null {
+    const series = this.chartReadingsZoomed();
+    if (!series.length) return null;
+    const filled = this.currentSeriesForwardFilled(series);
+    const vals = filled.filter((x): x is number => x != null && Number.isFinite(x));
+    if (!vals.length) return null;
+    const minV = Math.min(...vals);
+    const maxV = Math.max(...vals);
+    return { minV, maxV, span: maxV - minV };
+  }
 
+  private chartPaddedBoundsTemp(): { minV: number; maxV: number; span: number } | null {
+    const raw = this.chartValueRangeTemp();
+    if (!raw) return null;
     let { minV, maxV, span } = raw;
     if (span < 1e-6) {
-      if (this.analysisShowsCurrent) {
-        span = Math.max(0.5, Math.abs(maxV) * 0.25, 0.15);
-        return { minV: minV - span / 2, maxV: maxV + span / 2, span };
-      }
       span = 0.6;
       return { minV: minV - span / 2, maxV: maxV + span / 2, span };
     }
-    const pad = this.analysisShowsCurrent
-      ? Math.max(0.05, span * 0.08)
-      : Math.max(0.25, span * 0.06, Math.abs(maxV) * 0.01);
+    const pad = Math.max(0.25, span * 0.06, Math.abs(maxV) * 0.01);
     minV = minV - pad;
     maxV = maxV + pad;
     return { minV, maxV, span: maxV - minV };
   }
 
-  private chartScale(): { toSvgY: (v: number) => number } {
-    const padded = this.chartPaddedBounds();
+  private chartPaddedBoundsCurrent(): { minV: number; maxV: number; span: number } | null {
+    const raw = this.chartValueRangeCurrent();
+    if (!raw) return null;
+    let { minV, maxV, span } = raw;
+    if (span < 1e-6) {
+      span = Math.max(0.5, Math.abs(maxV) * 0.25, 0.15);
+      return { minV: minV - span / 2, maxV: maxV + span / 2, span };
+    }
+    const pad = Math.max(0.05, span * 0.08);
+    minV = minV - pad;
+    maxV = maxV + pad;
+    return { minV, maxV, span: maxV - minV };
+  }
+
+  private chartScaleTemp(): { toSvgY: (v: number) => number } {
+    const padded = this.chartPaddedBoundsTemp();
     if (!padded) return { toSvgY: () => 50 };
     const { minV, maxV } = padded;
     const span = maxV - minV || 1;
@@ -1110,29 +1204,78 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     };
   }
 
-  /** Cinco marcas del eje Y (arriba = máx.), alineadas con la rejilla. */
+  private chartScaleCurrent(): { toSvgY: (v: number) => number } {
+    const padded = this.chartPaddedBoundsCurrent();
+    if (!padded) return { toSvgY: () => 50 };
+    const { minV, maxV } = padded;
+    const span = maxV - minV || 1;
+    return {
+      toSvgY: (v: number) => {
+        const ratio = (v - minV) / span;
+        const fromBottom = 8 + ratio * 84;
+        return 100 - fromBottom;
+      },
+    };
+  }
+
+  /** Cinco marcas eje Y izquierdo (°C; si solo corriente, A en esta columna). */
   get chartYAxisLabelsFromTop(): string[] {
-    const padded = this.chartPaddedBounds();
-    if (!padded) return ['—', '—', '—', '—', '—'];
     const n = 5;
+    const dash = (): string[] => Array(n).fill('—');
+    if (this.chartDualAxis) {
+      const padded = this.chartPaddedBoundsTemp();
+      if (!padded) return dash();
+      const tempDec = this.tempDecimalsForDisplay();
+      const labels: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const ratio = (n - 1 - i) / (n - 1);
+        const v = padded.minV + ratio * (padded.maxV - padded.minV);
+        labels.push(`${v.toFixed(tempDec)}°C`);
+      }
+      return labels;
+    }
+    if (this.seriesShowCurrent && !this.seriesShowTemp1 && !this.seriesShowTemp2) {
+      const padded = this.chartPaddedBoundsCurrent();
+      if (!padded) return dash();
+      const labels: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const ratio = (n - 1 - i) / (n - 1);
+        const v = padded.minV + ratio * (padded.maxV - padded.minV);
+        labels.push(`${this.formatCurrentAxisTick(v, padded.span)} A`);
+      }
+      return labels;
+    }
+    const padded = this.chartPaddedBoundsTemp();
+    if (!padded) return dash();
+    const tempDec = this.tempDecimalsForDisplay();
     const labels: string[] = [];
-    const tempDec = this.analysisShowsCurrent ? 0 : this.tempDecimalsForDisplay();
     for (let i = 0; i < n; i++) {
       const ratio = (n - 1 - i) / (n - 1);
       const v = padded.minV + ratio * (padded.maxV - padded.minV);
-      if (this.analysisShowsCurrent) {
-        labels.push(`${this.formatCurrentAxisTick(v, padded.span)} A`);
-      } else {
-        labels.push(`${v.toFixed(tempDec)}°C`);
-      }
+      labels.push(`${v.toFixed(tempDec)}°C`);
+    }
+    return labels;
+  }
+
+  /** Eje Y derecho: corriente (solo con temperatura + corriente a la vez). */
+  get chartYAxisLabelsRightFromTop(): string[] {
+    const n = 5;
+    if (!this.chartDualAxis) return [];
+    const padded = this.chartPaddedBoundsCurrent();
+    if (!padded) return Array(n).fill('—');
+    const labels: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const ratio = (n - 1 - i) / (n - 1);
+      const v = padded.minV + ratio * (padded.maxV - padded.minV);
+      labels.push(`${this.formatCurrentAxisTick(v, padded.span)} A`);
     }
     return labels;
   }
 
   /** Decimales en °C según el rango visible (más zoom → más precisión). */
   private tempDecimalsForDisplay(): number {
-    if (this.analysisShowsCurrent) return 1;
-    const padded = this.chartPaddedBounds();
+    if (this.seriesShowCurrent && !this.seriesShowTemp1 && !this.seriesShowTemp2) return 1;
+    const padded = this.chartPaddedBoundsTemp();
     if (!padded) return 1;
     if (padded.span < 0.4) return 2;
     if (padded.span < 1.2) return 2;
@@ -1190,7 +1333,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const series = this.chartPointsForDraw();
     const n = series.length;
     if (n < 2) return '0,50 100,50';
-    const sc = this.chartScale();
+    const sc = this.chartScaleTemp();
     const pts: string[] = [];
     for (let i = 0; i < n; i++) {
       const r = series[i];
@@ -1208,7 +1351,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const n = series.length;
     if (n < 2) return '';
     const filled = this.temp2SeriesForwardFilled(series);
-    const sc = this.chartScale();
+    const sc = this.chartScaleTemp();
     const pts: string[] = [];
     for (let i = 0; i < n; i++) {
       const t2 = filled[i];
@@ -1227,7 +1370,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const n = series.length;
     if (n < 2) return '0,50 100,50';
     const filled = this.currentSeriesForwardFilled(series);
-    const sc = this.chartScale();
+    const sc = this.chartScaleCurrent();
     const pts: string[] = [];
     for (let i = 0; i < n; i++) {
       const pw = filled[i];
@@ -1296,7 +1439,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const series = this.chartPointsForDraw();
     const n = series.length;
     if (n < 2) return [];
-    const sc = this.chartScale();
+    const sc = this.chartScaleTemp();
     const eps = 1e-4;
     const out: Array<{
       x1: number;
@@ -1323,7 +1466,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const series = this.chartPointsForDraw();
     const n = series.length;
     if (n < 2) return [];
-    const sc = this.chartScale();
+    const sc = this.chartScaleTemp();
     const pts: Array<{ cx: number; cy: number }> = [];
     for (const r of series) {
       const x = this.chartSvgXForTimeMs(new Date(r.at).getTime());
@@ -1345,7 +1488,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const n = series.length;
     if (n < 2) return [];
     const filled = this.temp2SeriesForwardFilled(series);
-    const sc = this.chartScale();
+    const sc = this.chartScaleTemp();
     const eps = 1e-4;
     const out: Array<{
       x1: number;
@@ -1374,7 +1517,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const n = series.length;
     if (n < 2) return [];
     const filled = this.temp2SeriesForwardFilled(series);
-    const sc = this.chartScale();
+    const sc = this.chartScaleTemp();
     const pts: Array<{ cx: number; cy: number }> = [];
     for (let i = 0; i < n; i++) {
       const t = filled[i];
@@ -1398,7 +1541,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const n = series.length;
     if (n < 2) return [];
     const filled = this.currentSeriesForwardFilled(series);
-    const sc = this.chartScale();
+    const sc = this.chartScaleCurrent();
     const eps = 1e-4;
     const out: Array<{
       x1: number;
@@ -1427,7 +1570,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const n = series.length;
     if (n < 2) return [];
     const filled = this.currentSeriesForwardFilled(series);
-    const sc = this.chartScale();
+    const sc = this.chartScaleCurrent();
     const pts: Array<{ cx: number; cy: number }> = [];
     for (let i = 0; i < n; i++) {
       const t = filled[i];
@@ -1958,7 +2101,9 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       filterFrom: this.filterFrom,
       filterTo: this.filterTo,
       filterDay: this.filterDay,
-      channel: this.analysisChannel,
+      seriesT1: this.seriesShowTemp1,
+      seriesT2: this.seriesShowTemp2,
+      seriesC: this.seriesShowCurrent,
       photoDataUrl: this.informePhotoDataUrl,
     };
     this.informesList = [row, ...this.informesList];
@@ -2111,10 +2256,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       doc.setFontSize(8);
       doc.setTextColor(80);
       const rangeLine = this.analysisPdfRangeLabel();
-      const ch = this.analysisPdfChannelLabel();
+      const ch = this.analysisPdfSeriesLabel();
       let headerY = 28;
       doc.text(
-        `Generado: ${new Date().toLocaleString('es-AR')} · ${rows.length} filas · ${rangeLine} · Canal: ${ch} · Estilo: ${styleLabel}`,
+        `Generado: ${new Date().toLocaleString('es-AR')} · ${rows.length} filas · ${rangeLine} · Series: ${ch} · Estilo: ${styleLabel}`,
         14,
         headerY
       );
@@ -2157,43 +2302,23 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
       const buildHead = (): string[][] => {
         const cols = ['Fecha y hora'];
-        if (this.analysisShowsCurrent) {
-          if (hasCurrent) cols.push('Corriente (A)');
-        } else if (this.analysisChannel === 'both') {
-          cols.push(`${s1} (°C)`);
-          if (has2) cols.push(`${s2} (°C)`);
-        } else if (this.analysisChannel === 'temp1') {
-          cols.push(`${s1} (°C)`);
-        } else if (this.analysisChannel === 'temp2' && has2) {
-          cols.push(`${s2} (°C)`);
-        } else {
-          cols.push(`${s1} (°C)`);
-        }
+        if (this.seriesShowTemp1) cols.push(`${s1} (°C)`);
+        if (this.seriesShowTemp2 && has2) cols.push(`${s2} (°C)`);
+        if (this.analysisShowsCurrent && hasCurrent) cols.push('Corriente (A)');
         return [cols];
       };
       const head = buildHead();
       const body: string[][] = rows.map((r) => {
         const row: string[] = [this.formatPdfDateTime(r.at)];
-        if (this.analysisShowsCurrent) {
-          if (hasCurrent) {
-            const ia = effectiveCurrentAWithNominal(r, nomV);
-            row.push(ia != null && Number.isFinite(ia) ? ia.toFixed(2) : '—');
-          }
-        } else if (this.analysisChannel === 'both') {
-          row.push(r.temperatureC.toFixed(1));
-          if (has2) {
-            row.push(
-              r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C.toFixed(1) : '—'
-            );
-          }
-        } else if (this.analysisChannel === 'temp1') {
-          row.push(r.temperatureC.toFixed(1));
-        } else if (this.analysisChannel === 'temp2' && has2) {
+        if (this.seriesShowTemp1) row.push(r.temperatureC.toFixed(1));
+        if (this.seriesShowTemp2 && has2) {
           row.push(
             r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C.toFixed(1) : '—'
           );
-        } else {
-          row.push(r.temperatureC.toFixed(1));
+        }
+        if (this.analysisShowsCurrent && hasCurrent) {
+          const ia = effectiveCurrentAWithNominal(r, nomV);
+          row.push(ia != null && Number.isFinite(ia) ? ia.toFixed(2) : '—');
         }
         return row;
       });
@@ -2237,19 +2362,13 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     return 'ventana local del gráfico';
   }
 
-  private analysisPdfChannelLabel(): string {
-    switch (this.analysisChannel) {
-      case 'both':
-        return 'Ambos sensores';
-      case 'temp1':
-        return 'Sensor 1';
-      case 'temp2':
-        return 'Sensor 2';
-      case 'current':
-        return 'Corriente';
-      default:
-        return this.analysisChannel;
-    }
+  /** Etiqueta legible para PDF / cabecera según series visibles. */
+  private analysisPdfSeriesLabel(): string {
+    const parts: string[] = [];
+    if (this.seriesShowTemp1) parts.push('Sensor 1');
+    if (this.seriesShowTemp2 && this.hasSecondSeries) parts.push('Sensor 2');
+    if (this.seriesShowCurrent) parts.push('Corriente');
+    return parts.length ? parts.join(' + ') : '—';
   }
 
   private pdfDateStamp(): string {
