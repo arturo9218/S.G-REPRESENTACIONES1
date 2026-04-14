@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { AuthService } from './auth.service';
 
 const BUCKET = 'equipment-photos';
+const BRANDING_BUCKET = 'branding-logos';
 
 export interface DeviceEquipmentFichaRow {
   id: string;
@@ -57,6 +58,14 @@ export interface DeviceEquipmentPhotoRow {
   caption: string | null;
   createdAt: string;
   publicUrl: string;
+}
+
+export interface UserBrandingRow {
+  userId: string;
+  companyName: string | null;
+  logoStoragePath: string | null;
+  updatedAt: string | null;
+  logoPublicUrl: string | null;
 }
 
 export type EquipmentFichaPayload = Omit<
@@ -297,6 +306,87 @@ export class EquipmentSheetService {
       createdAt: r['created_at'] as string,
       publicUrl: pub.publicUrl,
     };
+  }
+
+  private mapBranding(r: Record<string, unknown>): UserBrandingRow {
+    const logoStoragePath = (r['logo_storage_path'] as string) ?? null;
+    const logoPublicUrl = logoStoragePath
+      ? this.auth.client.storage.from(BRANDING_BUCKET).getPublicUrl(logoStoragePath).data.publicUrl
+      : null;
+    return {
+      userId: r['user_id'] as string,
+      companyName: (r['company_name'] as string) ?? null,
+      logoStoragePath,
+      updatedAt: (r['updated_at'] as string) ?? null,
+      logoPublicUrl,
+    };
+  }
+
+  async getUserBranding(): Promise<{ row: UserBrandingRow | null; error: string | null }> {
+    const session = await this.auth.getSession();
+    const uid = session?.user?.id;
+    if (!uid) {
+      return { row: null, error: 'Sesión no disponible.' };
+    }
+    const { data, error } = await this.auth.client
+      .from('user_branding')
+      .select('*')
+      .eq('user_id', uid)
+      .maybeSingle();
+    if (error) {
+      return { row: null, error: error.message };
+    }
+    if (!data) {
+      return { row: null, error: null };
+    }
+    return { row: this.mapBranding(data as Record<string, unknown>), error: null };
+  }
+
+  async upsertUserBranding(payload: {
+    companyName: string | null;
+    logoStoragePath: string | null;
+  }): Promise<{ error: string | null }> {
+    const session = await this.auth.getSession();
+    const uid = session?.user?.id;
+    if (!uid) {
+      return { error: 'Sesión no disponible.' };
+    }
+    const { error } = await this.auth.client.from('user_branding').upsert(
+      {
+        user_id: uid,
+        company_name: payload.companyName?.trim() || null,
+        logo_storage_path: payload.logoStoragePath,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    );
+    return { error: error?.message ?? null };
+  }
+
+  async uploadBrandingLogo(file: File): Promise<{ storagePath: string | null; error: string | null }> {
+    const session = await this.auth.getSession();
+    const uid = session?.user?.id;
+    if (!uid) {
+      return { storagePath: null, error: 'Sesión no disponible.' };
+    }
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? ext : 'png';
+    const name = `logo_${Date.now()}_${crypto.randomUUID()}.${safeExt}`;
+    const path = `${uid}/${name}`;
+    const { error } = await this.auth.client.storage.from(BRANDING_BUCKET).upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
+    });
+    if (error) {
+      return { storagePath: null, error: error.message };
+    }
+    return { storagePath: path, error: null };
+  }
+
+  async deleteBrandingLogo(storagePath: string): Promise<void> {
+    if (!storagePath) return;
+    await this.auth.client.storage.from(BRANDING_BUCKET).remove([storagePath]);
   }
 
   async uploadPhoto(

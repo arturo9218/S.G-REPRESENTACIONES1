@@ -1560,6 +1560,45 @@
               </div>
 
               <div class="equipment-page__actions card card--ficha-section">
+                <div class="notify-panel equipment-photos-add">
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Nombre de empresa para cabecera PDF</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="brandingCompanyNameForm"
+                      name="branding-company-name"
+                      maxlength="80"
+                      autocomplete="off"
+                      placeholder="Ej. Refrigeración Pérez"
+                      [disabled]="brandingLoading || brandingSaving"
+                    />
+                  </label>
+                  <label class="btn btn--ghost equipment-photos-add__file">
+                    {{ brandingLogoPublicUrl ? 'Cambiar logotipo' : 'Subir logotipo' }}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      (change)="onBrandingLogoSelected($event)"
+                      [disabled]="brandingUploading || brandingSaving"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    class="btn btn--ghost btn--sm"
+                    *ngIf="brandingLogoPublicUrl"
+                    (click)="removeBrandingLogo()"
+                    [disabled]="brandingUploading || brandingSaving"
+                  >
+                    Quitar logotipo
+                  </button>
+                  <span class="equipment-photos-add__hint" *ngIf="brandingUploading">Subiendo logotipo…</span>
+                </div>
+                <div class="equipment-photo-grid" *ngIf="brandingLogoPublicUrl">
+                  <figure class="equipment-photo-grid__cell">
+                    <img [src]="brandingLogoPublicUrl" alt="Logotipo de empresa" loading="lazy" />
+                    <figcaption>Logotipo actual para PDF</figcaption>
+                  </figure>
+                </div>
                 <div class="equipment-page__pdf-options">
                   <label class="equipment-page__pdf-opt">
                     <input type="checkbox" [(ngModel)]="equipmentPdfIncludeChart" name="eq-pdf-chart" />
@@ -1601,6 +1640,14 @@
                     Incluir anexo de historial de alarmas
                   </label>
                 </div>
+                <button
+                  type="button"
+                  class="btn btn--ghost"
+                  [disabled]="brandingSaving || brandingUploading"
+                  (click)="saveUserBranding()"
+                >
+                  {{ brandingSaving ? 'Guardando branding…' : 'Guardar branding' }}
+                </button>
                 <button
                   type="button"
                   class="btn btn--primary"

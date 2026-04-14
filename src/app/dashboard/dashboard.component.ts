@@ -24,6 +24,7 @@ import {
   DeviceEquipmentLogRow,
   DeviceEquipmentPhotoRow,
   EquipmentSheetService,
+  UserBrandingRow,
 } from '../core/equipment-sheet.service';
 
 @Component({
@@ -203,6 +204,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Mensaje breve al crear una ficha nueva desde el panel. */
   equipmentNewFichaHint = '';
   equipmentPhotoUploading = false;
+  brandingLoading = false;
+  brandingSaving = false;
+  brandingUploading = false;
+  brandingCompanyNameForm = '';
+  brandingLogoPublicUrl: string | null = null;
+  private brandingLogoStoragePath: string | null = null;
   alarmEventsCount = 0;
   /** Registros en la nube (device_alarm_events); solo con sesión Supabase + SQL 013. */
   alarmHistoryItems: DeviceAlarmEvent[] = [];
@@ -3118,6 +3125,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.equipmentLoading = true;
     this.equipmentFeedback = '';
     try {
+      await this.loadUserBranding();
       let { rows: fichas, error: errFichas } = await this.equipmentSheet.listFichas(id);
       if (errFichas) {
         this.equipmentFichas = [];
@@ -3662,6 +3670,106 @@ export class DashboardComponent implements OnInit, OnDestroy {
     void this.loadEquipmentPage();
   }
 
+  private hydrateBrandingForm(row: UserBrandingRow | null): void {
+    this.brandingCompanyNameForm = row?.companyName ?? '';
+    this.brandingLogoPublicUrl = row?.logoPublicUrl ?? null;
+    this.brandingLogoStoragePath = row?.logoStoragePath ?? null;
+  }
+
+  private async loadUserBranding(): Promise<void> {
+    this.brandingLoading = true;
+    try {
+      const { row, error } = await this.equipmentSheet.getUserBranding();
+      if (error) {
+        const low = error.toLowerCase();
+        this.equipmentFeedback =
+          low.includes('does not exist') || low.includes('schema cache') || low.includes('user_branding')
+            ? 'Ejecutá en Supabase el SQL: 025_user_branding_logo.sql'
+            : error;
+        return;
+      }
+      this.hydrateBrandingForm(row);
+    } finally {
+      this.brandingLoading = false;
+    }
+  }
+
+  async saveUserBranding(): Promise<void> {
+    this.brandingSaving = true;
+    try {
+      const { error } = await this.equipmentSheet.upsertUserBranding({
+        companyName: this.brandingCompanyNameForm.trim() || null,
+        logoStoragePath: this.brandingLogoStoragePath,
+      });
+      if (error) {
+        this.equipmentFeedback = error;
+        return;
+      }
+      this.equipmentFeedback = 'Branding guardado.';
+      window.setTimeout(() => {
+        if (this.equipmentFeedback === 'Branding guardado.') this.equipmentFeedback = '';
+      }, 3000);
+    } finally {
+      this.brandingSaving = false;
+    }
+  }
+
+  async onBrandingLogoSelected(ev: Event): Promise<void> {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.brandingUploading = true;
+    this.equipmentFeedback = '';
+    try {
+      const oldPath = this.brandingLogoStoragePath;
+      const { storagePath, error } = await this.equipmentSheet.uploadBrandingLogo(file);
+      if (error || !storagePath) {
+        this.equipmentFeedback = error ?? 'No se pudo subir el logotipo.';
+        return;
+      }
+      const { error: upErr } = await this.equipmentSheet.upsertUserBranding({
+        companyName: this.brandingCompanyNameForm.trim() || null,
+        logoStoragePath: storagePath,
+      });
+      if (upErr) {
+        this.equipmentFeedback = upErr;
+        await this.equipmentSheet.deleteBrandingLogo(storagePath);
+        return;
+      }
+      if (oldPath && oldPath !== storagePath) {
+        await this.equipmentSheet.deleteBrandingLogo(oldPath);
+      }
+      await this.loadUserBranding();
+      this.equipmentFeedback = 'Logotipo actualizado.';
+      window.setTimeout(() => {
+        if (this.equipmentFeedback === 'Logotipo actualizado.') this.equipmentFeedback = '';
+      }, 3000);
+    } finally {
+      this.brandingUploading = false;
+    }
+  }
+
+  async removeBrandingLogo(): Promise<void> {
+    if (!this.brandingLogoStoragePath) return;
+    if (!confirm('¿Quitar logotipo del PDF?')) return;
+    const oldPath = this.brandingLogoStoragePath;
+    const { error } = await this.equipmentSheet.upsertUserBranding({
+      companyName: this.brandingCompanyNameForm.trim() || null,
+      logoStoragePath: null,
+    });
+    if (error) {
+      this.equipmentFeedback = error;
+      return;
+    }
+    await this.equipmentSheet.deleteBrandingLogo(oldPath);
+    await this.loadUserBranding();
+    this.equipmentFeedback = 'Logotipo quitado.';
+    window.setTimeout(() => {
+      if (this.equipmentFeedback === 'Logotipo quitado.') this.equipmentFeedback = '';
+    }, 3000);
+  }
+
   equipmentMaintenanceStatusLabel(): string {
     const next = this.combineDateTimeToIso(this.eqNextMaintDate, this.eqNextMaintTime);
     if (!next) return '';
@@ -3699,10 +3807,28 @@ export class DashboardComponent implements OnInit, OnDestroy {
         return;
       }
 
+      const brandingTitle = this.brandingCompanyNameForm.trim() || 'AR Monitoreo';
       let y = 14;
+      let logoHeight = 0;
+      if (this.brandingLogoPublicUrl) {
+        const logo = await this.loadImageAsDataUrl(this.brandingLogoPublicUrl);
+        if (logo) {
+          const props = doc.getImageProperties(logo);
+          const maxW = 42;
+          const maxH = 18;
+          let w = maxW;
+          let h = (props.height * w) / props.width;
+          if (h > maxH) {
+            h = maxH;
+            w = (props.width * h) / props.height;
+          }
+          doc.addImage(logo, 'PNG', 210 - 14 - w, 10, w, h, undefined, 'FAST');
+          logoHeight = h;
+        }
+      }
       doc.setFontSize(14);
-      doc.text('AR Monitoreo — Ficha del equipo', 14, y);
-      y += 8;
+      doc.text(`${brandingTitle} — Ficha del equipo`, 14, y);
+      y += Math.max(8, logoHeight + 2);
       doc.setFontSize(10);
       doc.text(`Dispositivo: ${dev.name}`, 14, y);
       y += 6;
