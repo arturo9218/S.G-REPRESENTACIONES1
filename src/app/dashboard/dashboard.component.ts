@@ -185,6 +185,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   photoCaptionForm = '';
   /** Evita múltiples `loadEquipmentPage` seguidos (ruta + query + lista de equipos). */
   private equipmentPageReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Solo reinicia la bitácora (fecha/nota) al cambiar de ficha o de equipo, no en cada recarga de lista. */
+  private lastEquipmentLogFichaId: string | null = null;
+  /** Tarjeta “Ficha guardada” (clic → scroll al formulario). */
+  equipmentSavedCard: { label: string; at: string } | null = null;
+  private equipmentSavedCardTimer: ReturnType<typeof setTimeout> | null = null;
 
   equipmentPdfExporting = false;
   /** Opciones del PDF de ficha: anexos de nube (últimos 7 días / historial cargado). */
@@ -297,9 +302,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       } else if (!this.selectedDeviceId && list.length > 0) {
         this.selectDevice(list[0].id, false);
       }
-      if (this.router.url.split('?')[0] === '/ficha-equipo') {
-        this.scheduleEquipmentPageReload();
-      }
+      // No recargar ficha en cada emisión de devices$ (provocaba bucle y borraba lo que escribías).
     });
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
       this.devices = list;
@@ -325,6 +328,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (this.equipmentPageReloadTimer != null) {
       clearTimeout(this.equipmentPageReloadTimer);
       this.equipmentPageReloadTimer = null;
+    }
+    if (this.equipmentSavedCardTimer != null) {
+      clearTimeout(this.equipmentSavedCardTimer);
+      this.equipmentSavedCardTimer = null;
     }
     if (this.unlockAudioHandler) {
       window.removeEventListener('pointerdown', this.unlockAudioHandler);
@@ -1612,15 +1619,22 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   selectDevice(deviceId: string | null, syncQueryToUrl = true): void {
+    const prevId = this.selectedDeviceId;
     this.selectedDeviceId = deviceId;
+    if (prevId !== deviceId) {
+      this.lastEquipmentLogFichaId = null;
+    }
     this.sensorLabelsDirty = false;
     this.notificationSettingsDirty = false;
     this.dailyEnergyKwh = null;
     this.dailyEnergyError = '';
     this.syncNotificationFormWithSelected();
     this.syncPdfExportDateDefaults();
+    const path = this.router.url.split('?')[0];
+    if (path === '/ficha-equipo' && this.equipmentSheetAvailable() && deviceId && deviceId !== prevId) {
+      void this.loadEquipmentPage();
+    }
     if (syncQueryToUrl) {
-      const path = this.router.url.split('?')[0];
       const shellPaths = ['/dashboard', '/dispositivos', '/ficha-equipo', '/alertas', '/configuracion'];
       if (shellPaths.includes(path)) {
         this.skipQueryParamDeviceSync = true;
@@ -3138,7 +3152,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const active = fichas.find((f) => f.id === this.selectedFichaId) ?? fichas[0];
       this.hydrateEquipmentFormsFromFicha(active ?? null);
       await this.loadEquipmentLogsAndPhotos();
-      this.initLogDateTimeDefaults();
+      const fid = this.selectedFichaId;
+      if (fid && fid !== this.lastEquipmentLogFichaId) {
+        this.lastEquipmentLogFichaId = fid;
+        this.initLogDateTimeDefaults();
+      }
       void this.notifyMaintenanceForAllFichasIfDue(fichas);
     } finally {
       this.equipmentLoading = false;
@@ -3148,6 +3166,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   async onEquipmentFichaChange(fichaId: string): Promise<void> {
     this.selectedFichaId = fichaId;
     this.equipmentNewFichaHint = '';
+    this.lastEquipmentLogFichaId = fichaId;
     const f = this.equipmentFichas.find((x) => x.id === fichaId);
     if (f) {
       this.hydrateEquipmentFormsFromFicha(f);
@@ -3162,6 +3181,35 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   trackByFichaId(_i: number, f: DeviceEquipmentFichaRow): string {
     return f.id;
+  }
+
+  /** Una línea corta para la tarjeta (compresor o refrigerante). */
+  equipmentFichaCardSubtitle(f: DeviceEquipmentFichaRow): string {
+    const c = f.compressorText?.trim();
+    if (c) return c.length > 52 ? `${c.slice(0, 50)}…` : c;
+    const r = f.refrigerant?.trim();
+    if (r) return `Ref. ${r}`;
+    return 'Tocá para ver y editar datos';
+  }
+
+  scrollToEquipmentFichaEditor(): void {
+    const el =
+      typeof document !== 'undefined'
+        ? document.getElementById('equipment-ficha-editor')
+        : null;
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  onEquipmentSavedCardClick(): void {
+    this.scrollToEquipmentFichaEditor();
+  }
+
+  dismissEquipmentSavedCard(): void {
+    if (this.equipmentSavedCardTimer != null) {
+      clearTimeout(this.equipmentSavedCardTimer);
+      this.equipmentSavedCardTimer = null;
+    }
+    this.equipmentSavedCard = null;
   }
 
   /** Fecha de último guardado de la ficha seleccionada (nube). */
@@ -3397,11 +3445,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
         return;
       }
       this.equipmentNewFichaHint = '';
+      this.equipmentFeedback = '';
       const ts = new Date().toLocaleString('es-AR');
-      this.equipmentFeedback = `Ficha guardada (${ts}).`;
-      window.setTimeout(() => {
-        this.equipmentFeedback = '';
-      }, 5000);
+      const savedLabel = this.eqFichaLabelForm.trim() || 'Sin nombre';
+      if (this.equipmentSavedCardTimer != null) {
+        clearTimeout(this.equipmentSavedCardTimer);
+        this.equipmentSavedCardTimer = null;
+      }
+      this.equipmentSavedCard = { label: savedLabel, at: ts };
+      this.equipmentSavedCardTimer = window.setTimeout(() => {
+        this.equipmentSavedCardTimer = null;
+        this.equipmentSavedCard = null;
+      }, 12000);
       const { rows: refreshed } = await this.equipmentSheet.listFichas(this.selectedDeviceId!);
       if (refreshed.length) {
         this.equipmentFichas = refreshed;

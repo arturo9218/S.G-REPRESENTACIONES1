@@ -1000,10 +1000,10 @@
                 </p>
               </article>
 
-              <article class="card card--ficha-section">
+              <article class="card card--ficha-section" id="equipment-ficha-picker">
                 <h2 class="card__title card__title--sm">Ficha / cámara</h2>
                 <p class="card__hint card__hint--tight">
-                  Un mismo dispositivo puede tener varias instalaciones (ej. dos cámaras). Cada ficha tiene su bitácora, fotos y mantenimiento.
+                  Un mismo dispositivo puede tener varias instalaciones (ej. dos cámaras). Elegí una ficha en la lista o tocá una tarjeta para cargar sus datos.
                 </p>
                 <div class="notify-panel notify-panel__grid equipment-page__ficha-toolbar">
                   <label class="notify-panel__field">
@@ -1030,6 +1030,21 @@
                       autocomplete="off"
                     />
                   </label>
+                  <div class="equipment-ficha-cards" *ngIf="equipmentFichas.length">
+                    <button
+                      type="button"
+                      class="equipment-ficha-card"
+                      *ngFor="let f of equipmentFichas; trackBy: trackByFichaId"
+                      [class.equipment-ficha-card--active]="selectedFichaId === f.id"
+                      (click)="onEquipmentFichaChange(f.id)"
+                    >
+                      <span class="equipment-ficha-card__title">{{ f.label }}</span>
+                      <span class="equipment-ficha-card__sub">{{ equipmentFichaCardSubtitle(f) }}</span>
+                      <span class="equipment-ficha-card__meta" *ngIf="f.updatedAt">{{
+                        f.updatedAt | date : 'dd/MM/yy HH:mm'
+                      }}</span>
+                    </button>
+                  </div>
                   <p class="card__hint card__hint--tight" *ngIf="equipmentNewFichaHint">
                     {{ equipmentNewFichaHint }}
                   </p>
@@ -1053,7 +1068,7 @@
                 </div>
               </article>
 
-              <article class="card card--ficha-section">
+              <article class="card card--ficha-section" id="equipment-ficha-editor">
                 <div class="equipment-page__section-head">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1500,6 +1515,30 @@
                 </div>
                 <p class="card__empty" *ngIf="!equipmentPhotos.length">Sin fotos.</p>
               </article>
+
+              <div
+                class="equipment-save-card"
+                *ngIf="equipmentSavedCard && !equipmentSaving"
+                role="button"
+                tabindex="0"
+                (click)="onEquipmentSavedCardClick()"
+                (keydown.enter)="onEquipmentSavedCardClick()"
+              >
+                <span class="equipment-save-card__icon" aria-hidden="true">✓</span>
+                <div class="equipment-save-card__body">
+                  <strong class="equipment-save-card__title">Ficha guardada</strong>
+                  <span class="equipment-save-card__line">{{ equipmentSavedCard.label }}</span>
+                  <span class="equipment-save-card__meta">{{ equipmentSavedCard.at }} · Tocá para ir a los datos</span>
+                </div>
+                <button
+                  type="button"
+                  class="equipment-save-card__close"
+                  aria-label="Cerrar"
+                  (click)="$event.stopPropagation(); dismissEquipmentSavedCard()"
+                >
+                  ×
+                </button>
+              </div>
 
               <p
                 class="sensor-labels-feedback"
