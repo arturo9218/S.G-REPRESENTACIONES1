@@ -475,7 +475,7 @@
           <div id="section-devices" class="device-grid">
             <article
               class="device-card"
-              *ngFor="let d of filteredDevices"
+              *ngFor="let d of filteredDevices; trackBy: trackByDeviceId"
               [class.device-card--selected]="d.id === selectedDeviceId"
               (click)="selectDevice(d.id)"
             >
@@ -1003,38 +1003,43 @@
               <article class="card card--ficha-section" id="equipment-ficha-picker">
                 <h2 class="card__title card__title--sm">Ficha / cámara</h2>
                 <p class="card__hint card__hint--tight">
-                  Un mismo dispositivo puede tener varias instalaciones (ej. dos cámaras). Elegí una ficha en la lista o tocá una tarjeta para cargar sus datos.
+                  Varias instalaciones por el mismo dispositivo (ej. dos cámaras). Elegí la ficha en la lista; las tarjetas de resumen solo aparecen cuando hay datos técnicos guardados.
+                </p>
+                <p class="card__hint card__hint--tight" *ngIf="!equipmentFichas.length">
+                  Este equipo no tiene fichas. Creá una para cargar datos técnicos, bitácora y fotos.
                 </p>
                 <div class="notify-panel notify-panel__grid equipment-page__ficha-toolbar">
-                  <label class="notify-panel__field">
-                    <span>Editar ficha</span>
-                    <select
-                      class="notify-panel__select"
-                      [ngModel]="selectedFichaId"
-                      (ngModelChange)="onEquipmentFichaChange($event)"
-                      [compareWith]="compareFichaId"
-                      name="eq-ficha-pick"
-                    >
-                      <option *ngFor="let f of equipmentFichas; trackBy: trackByFichaId" [ngValue]="f.id">
-                        {{ f.label }}
-                      </option>
-                    </select>
-                  </label>
-                  <label class="notify-panel__field notify-panel__field--full">
-                    <span>Nombre identificador (ej. Cámara 1, Cámara congelados)</span>
-                    <input
-                      type="text"
-                      [(ngModel)]="eqFichaLabelForm"
-                      name="eq-ficha-label"
-                      maxlength="80"
-                      autocomplete="off"
-                    />
-                  </label>
-                  <div class="equipment-ficha-cards" *ngIf="equipmentFichas.length">
+                  <ng-container *ngIf="equipmentFichas.length">
+                    <label class="notify-panel__field">
+                      <span>Editar ficha</span>
+                      <select
+                        class="notify-panel__select"
+                        [ngModel]="selectedFichaId"
+                        (ngModelChange)="onEquipmentFichaChange($event)"
+                        [compareWith]="compareFichaId"
+                        name="eq-ficha-pick"
+                      >
+                        <option *ngFor="let f of equipmentFichas; trackBy: trackByFichaId" [ngValue]="f.id">
+                          {{ f.label }}
+                        </option>
+                      </select>
+                    </label>
+                    <label class="notify-panel__field notify-panel__field--full">
+                      <span>Nombre identificador (ej. Cámara 1, Cámara congelados)</span>
+                      <input
+                        type="text"
+                        [(ngModel)]="eqFichaLabelForm"
+                        name="eq-ficha-label"
+                        maxlength="80"
+                        autocomplete="off"
+                      />
+                    </label>
+                  </ng-container>
+                  <div class="equipment-ficha-cards" *ngIf="equipmentFichasWithTechnicalCards.length">
                     <button
                       type="button"
                       class="equipment-ficha-card"
-                      *ngFor="let f of equipmentFichas; trackBy: trackByFichaId"
+                      *ngFor="let f of equipmentFichasWithTechnicalCards; trackBy: trackByFichaId"
                       [class.equipment-ficha-card--active]="selectedFichaId === f.id"
                       (click)="onEquipmentFichaChange(f.id)"
                     >
@@ -1045,6 +1050,9 @@
                       }}</span>
                     </button>
                   </div>
+                  <p class="card__hint card__hint--tight" *ngIf="selectedFichaWithoutTechnicalContent">
+                    Esta ficha aún no tiene datos técnicos guardados: podés completar el formulario abajo o eliminarla.
+                  </p>
                   <p class="card__hint card__hint--tight" *ngIf="equipmentNewFichaHint">
                     {{ equipmentNewFichaHint }}
                   </p>
@@ -1053,7 +1061,7 @@
                   </p>
                   <div class="equipment-page__ficha-actions">
                     <button type="button" class="btn btn--ghost" (click)="addEquipmentFicha()">
-                      + Agregar otra ficha
+                      {{ equipmentFichas.length ? '+ Agregar otra ficha' : '+ Agregar ficha' }}
                     </button>
                     <button
                       type="button"
@@ -1068,6 +1076,17 @@
                 </div>
               </article>
 
+              <p
+                class="sensor-labels-feedback"
+                *ngIf="equipmentFeedback && !equipmentSaving && !equipmentPhotoUploading"
+                [class.sensor-labels-feedback--warn]="
+                  equipmentFeedback.includes('No se pudo') || equipmentFeedback.includes('Ejecutá')
+                "
+              >
+                {{ equipmentFeedback }}
+              </p>
+
+              <ng-container *ngIf="selectedFichaId">
               <article class="card card--ficha-section" id="equipment-ficha-editor">
                 <div class="equipment-page__section-head">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
@@ -1540,16 +1559,6 @@
                 </button>
               </div>
 
-              <p
-                class="sensor-labels-feedback"
-                *ngIf="equipmentFeedback && !equipmentSaving && !equipmentPhotoUploading"
-                [class.sensor-labels-feedback--warn]="
-                  equipmentFeedback.includes('No se pudo') || equipmentFeedback.includes('Ejecutá')
-                "
-              >
-                {{ equipmentFeedback }}
-              </p>
-
               <div class="equipment-page__actions card card--ficha-section">
                 <div class="equipment-page__pdf-options">
                   <label class="equipment-page__pdf-opt">
@@ -1609,8 +1618,9 @@
                   {{ equipmentPdfExporting ? 'Generando PDF…' : 'Descargar PDF' }}
                 </button>
               </div>
+              </ng-container>
             </div>
-          </ng-container>
+      </ng-container>
         </div>
       </ng-container>
 

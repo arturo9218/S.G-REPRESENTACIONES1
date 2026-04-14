@@ -1215,17 +1215,19 @@ export class DeviceStoreService {
       if (r.temp3RawC != null && Number.isFinite(r.temp3RawC)) {
         t3 = r.temp3RawC + o3;
       }
+      // Con consumo ~0 (sin carga o sin lectura útil), no sumar offset: evita mostrar p.ej. 2 A
+      // cuando el crudo es 0 y la corrección es solo para mediciones con corriente real.
+      const nearZeroA = (x: number) => Math.abs(x) < 1e-9;
+      const nearZeroP = (x: number) => Math.abs(x) < 1e-6;
       if (r.currentARaw != null && Number.isFinite(r.currentARaw)) {
-        ca = r.currentARaw + oA;
+        ca = nearZeroA(r.currentARaw) ? 0 : r.currentARaw + oA;
       } else if (r.currentA != null && Number.isFinite(r.currentA)) {
-        // Sin current_a_raw (lecturas viejas o migración pendiente): el valor en nube suele ser el
-        // amperaje base; aplicamos el offset del panel para que la corrección se vea igual.
-        ca = r.currentA + oA;
+        ca = nearZeroA(r.currentA) ? 0 : r.currentA + oA;
       }
       if (r.powerWRaw != null && Number.isFinite(r.powerWRaw)) {
-        pw = r.powerWRaw + oP;
+        pw = nearZeroP(r.powerWRaw) ? 0 : r.powerWRaw + oP;
       } else if (r.powerW != null && Number.isFinite(r.powerW)) {
-        pw = r.powerW + oP;
+        pw = nearZeroP(r.powerW) ? 0 : r.powerW + oP;
       }
       return { ...r, temperatureC: t1, temp2C: t2, temp3C: t3, currentA: ca, powerW: pw };
     });

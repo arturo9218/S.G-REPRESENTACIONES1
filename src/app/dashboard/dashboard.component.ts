@@ -3133,18 +3133,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
         return;
       }
       if (!fichas.length) {
-        const created = await this.equipmentSheet.createFicha(id, 'Instalación principal');
-        if (created.error || !created.id) {
-          this.equipmentFeedback = created.error ?? 'No se pudo crear la ficha inicial.';
-          return;
-        }
-        const again = await this.equipmentSheet.listFichas(id);
-        fichas = again.rows;
-        errFichas = again.error;
-        if (errFichas || !fichas.length) {
-          this.equipmentFeedback = errFichas ?? 'No se pudo cargar la ficha.';
-          return;
-        }
+        this.equipmentFichas = [];
+        this.selectedFichaId = null;
+        this.hydrateEquipmentFormsFromFicha(null);
+        await this.loadEquipmentLogsAndPhotos();
+        void this.notifyMaintenanceForAllFichasIfDue([]);
+        return;
       }
       this.equipmentFichas = fichas;
       if (!this.selectedFichaId || !fichas.some((f) => f.id === this.selectedFichaId)) {
@@ -3184,13 +3178,62 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return f.id;
   }
 
+  trackByDeviceId(_i: number, d: DashboardDevice): string {
+    return d.id;
+  }
+
+  /** True si hay al menos un dato técnico guardado (el nombre solo no alcanza). */
+  equipmentFichaHasTechnicalContent(f: DeviceEquipmentFichaRow): boolean {
+    const t = (s: string | null | undefined) => (s?.trim() ?? '') !== '';
+    if (t(f.compressorText)) return true;
+    if (f.hp != null && Number.isFinite(f.hp)) return true;
+    if (t(f.refrigerant)) return true;
+    if (t(f.condenserCoolingType)) return true;
+    if (f.condenserFanCount != null && Number.isFinite(f.condenserFanCount)) return true;
+    if (t(f.condenserBladeDiameterText)) return true;
+    if (t(f.condenserFanMotorPhases)) return true;
+    if (t(f.condenserFanCapacitorUf)) return true;
+    if (t(f.condenserNotes)) return true;
+    if (t(f.expansionType)) return true;
+    if (t(f.expansionCapillaryMeasure)) return true;
+    if (t(f.expansionValveBrand)) return true;
+    if (t(f.expansionValveModel)) return true;
+    if (t(f.evaporatorAirType)) return true;
+    if (f.evaporatorFanCount != null && Number.isFinite(f.evaporatorFanCount)) return true;
+    if (t(f.evaporatorFanMotorPhases)) return true;
+    if (t(f.evaporatorFanSinglePhaseDetail)) return true;
+    if (t(f.evaporatorNotes)) return true;
+    if (t(f.supply)) return true;
+    if (f.pumpDown) return true;
+    if (t(f.defrost)) return true;
+    if (t(f.chamberType)) return true;
+    if (t(f.freeNotes)) return true;
+    if (f.lastMaintenanceAt) return true;
+    if (f.nextMaintenanceAt) return true;
+    if (f.maintenanceIntervalDays != null && Number.isFinite(f.maintenanceIntervalDays)) return true;
+    return false;
+  }
+
+  get equipmentFichasWithTechnicalCards(): DeviceEquipmentFichaRow[] {
+    return this.equipmentFichas.filter((f) => this.equipmentFichaHasTechnicalContent(f));
+  }
+
+  /** Ficha seleccionada existe pero aún sin datos técnicos (solo borrar o completar). */
+  get selectedFichaWithoutTechnicalContent(): boolean {
+    if (!this.selectedFichaId) return false;
+    const f = this.equipmentFichas.find((x) => x.id === this.selectedFichaId);
+    return !!f && !this.equipmentFichaHasTechnicalContent(f);
+  }
+
   /** Una línea corta para la tarjeta (compresor o refrigerante). */
   equipmentFichaCardSubtitle(f: DeviceEquipmentFichaRow): string {
     const c = f.compressorText?.trim();
     if (c) return c.length > 52 ? `${c.slice(0, 50)}…` : c;
     const r = f.refrigerant?.trim();
     if (r) return `Ref. ${r}`;
-    return 'Tocá para ver y editar datos';
+    const fn = f.freeNotes?.trim();
+    if (fn) return fn.length > 52 ? `${fn.slice(0, 50)}…` : fn;
+    return 'Ver y editar datos';
   }
 
   scrollToEquipmentFichaEditor(): void {
@@ -3264,7 +3307,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!fid || !this.selectedDeviceId) return;
     const isLast = this.equipmentFichas.length <= 1;
     const msg = isLast
-      ? '¿Eliminar la única ficha de este equipo? Se creará de nuevo una ficha vacía “Instalación principal”.'
+      ? '¿Eliminar esta ficha? El equipo quedará sin fichas hasta que agregues una nueva.'
       : '¿Eliminar esta ficha junto con su bitácora y fotos de esta ficha?';
     if (!confirm(msg)) return;
     const { error } = await this.equipmentSheet.deleteFicha(fid);
