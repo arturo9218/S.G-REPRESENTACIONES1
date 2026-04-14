@@ -203,6 +203,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   equipmentPdfChartToDate = '';
   /** Mensaje breve al crear una ficha nueva desde el panel. */
   equipmentNewFichaHint = '';
+  /** Tras guardar, se colapsa el editor y quedan solo las tarjetas de ficha. */
+  equipmentFichaEditorVisible = true;
   equipmentPhotoUploading = false;
   brandingLoading = false;
   brandingSaving = false;
@@ -3143,6 +3145,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (!fichas.length) {
         this.equipmentFichas = [];
         this.selectedFichaId = null;
+        this.equipmentFichaEditorVisible = false;
         this.hydrateEquipmentFormsFromFicha(null);
         await this.loadEquipmentLogsAndPhotos();
         void this.notifyMaintenanceForAllFichasIfDue([]);
@@ -3151,6 +3154,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.equipmentFichas = fichas;
       if (!this.selectedFichaId || !fichas.some((f) => f.id === this.selectedFichaId)) {
         this.selectedFichaId = fichas[0]?.id ?? null;
+      }
+      if (!this.selectedFichaId) {
+        this.equipmentFichaEditorVisible = false;
       }
       const active = fichas.find((f) => f.id === this.selectedFichaId) ?? fichas[0];
       this.hydrateEquipmentFormsFromFicha(active ?? null);
@@ -3168,6 +3174,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async onEquipmentFichaChange(fichaId: string): Promise<void> {
     this.selectedFichaId = fichaId;
+    this.equipmentFichaEditorVisible = true;
     this.equipmentNewFichaHint = '';
     this.lastEquipmentLogFichaId = fichaId;
     const f = this.equipmentFichas.find((x) => x.id === fichaId);
@@ -3253,6 +3260,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   onEquipmentSavedCardClick(): void {
+    this.equipmentFichaEditorVisible = true;
     this.scrollToEquipmentFichaEditor();
   }
 
@@ -3305,6 +3313,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return;
     }
     this.selectedFichaId = id;
+    this.equipmentFichaEditorVisible = true;
     this.equipmentNewFichaHint =
       'Estás en una ficha nueva: completá los datos y tocá Guardar. El PDF puede incluir alarmas y tabla de lecturas (opciones abajo).';
     void this.loadEquipmentPage();
@@ -3324,6 +3333,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return;
     }
     this.selectedFichaId = null;
+    this.equipmentFichaEditorVisible = false;
     this.equipmentNewFichaHint = '';
     void this.loadEquipmentPage();
   }
@@ -3505,6 +3515,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.equipmentSavedCardTimer = null;
       }
       this.equipmentSavedCard = { label: savedLabel, at: ts };
+      this.equipmentFichaEditorVisible = false;
       this.equipmentSavedCardTimer = window.setTimeout(() => {
         this.equipmentSavedCardTimer = null;
         this.equipmentSavedCard = null;
@@ -3799,6 +3810,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const [jspdfMod] = await Promise.all([import('jspdf')]);
       const JsPDF = jspdfMod.default;
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      doc.setFont('helvetica', 'normal');
       const dev = this.selectedDevice;
       const devId = dev.id;
       const { rows: allFichas, error: fe } = await this.equipmentSheet.listFichas(devId);
@@ -3808,69 +3820,150 @@ export class DashboardComponent implements OnInit, OnDestroy {
       }
 
       const brandingTitle = this.brandingCompanyNameForm.trim() || 'AR Monitoreo';
-      let y = 14;
-      let logoHeight = 0;
+      const generatedAt = new Date().toLocaleString('es-AR');
+      const marginX = 14;
+      const contentX = 14;
+      const contentW = 182;
+      const pageW = 210;
+      const pageH = 297;
+      const newPageTop = 18;
+      const headerTop = 10;
+      const headerH = 34;
+      const headerInnerPad = 3;
+      const logoBoxW = 58;
+      const logoBoxH = 26;
+      const logoBoxX = pageW - marginX - logoBoxW - headerInnerPad;
+      const logoBoxY = headerTop + headerInnerPad;
+      const reportSubtitle = 'Ficha técnica de equipo';
+
+      let logoDataUrl: string | null = null;
       if (this.brandingLogoPublicUrl) {
-        const logo = await this.loadImageAsDataUrl(this.brandingLogoPublicUrl);
-        if (logo) {
-          const props = doc.getImageProperties(logo);
-          const maxW = 42;
-          const maxH = 18;
-          let w = maxW;
+        logoDataUrl = await this.loadImageAsDataUrl(this.brandingLogoPublicUrl);
+      }
+
+      // Cabecera técnica sobria (sin portada comercial): foco en datos del equipo.
+      doc.setFillColor(247, 249, 252);
+      doc.setDrawColor(218, 223, 233);
+      doc.roundedRect(marginX, headerTop, pageW - marginX * 2, headerH, 2, 2, 'FD');
+
+      if (logoDataUrl) {
+        try {
+          const props = doc.getImageProperties(logoDataUrl);
+          const fitW = logoBoxW - 4;
+          const fitH = logoBoxH - 4;
+          let w = fitW;
           let h = (props.height * w) / props.width;
-          if (h > maxH) {
-            h = maxH;
+          if (h > fitH) {
+            h = fitH;
             w = (props.width * h) / props.height;
           }
-          doc.addImage(logo, 'PNG', 210 - 14 - w, 10, w, h, undefined, 'FAST');
-          logoHeight = h;
+          const x = logoBoxX + (logoBoxW - w) / 2;
+          const yImg = logoBoxY + (logoBoxH - h) / 2;
+          doc.setDrawColor(225, 229, 238);
+          doc.roundedRect(logoBoxX, logoBoxY, logoBoxW, logoBoxH, 1.5, 1.5, 'S');
+          doc.addImage(logoDataUrl, 'JPEG', x, yImg, w, h, undefined, 'FAST');
+        } catch {
+          // Si el logo falla, el PDF sigue saliendo con cabecera normal.
         }
       }
-      doc.setFontSize(14);
-      doc.text(`${brandingTitle} — Ficha del equipo`, 14, y);
-      y += Math.max(8, logoHeight + 2);
-      doc.setFontSize(10);
-      doc.text(`Dispositivo: ${dev.name}`, 14, y);
-      y += 6;
-      doc.setFontSize(8);
-      doc.setTextColor(80);
-      doc.text(`Generado: ${new Date().toLocaleString('es-AR')}`, 14, y);
-      doc.setTextColor(0);
-      y += 10;
 
-      const pushLine = (lines: string[], label: string, val: string | null | undefined) => {
-        if (val != null && String(val).trim()) {
-          lines.push(`${label}: ${String(val).trim()}`);
+      const textX = marginX + headerInnerPad + 1;
+      const textMaxW = logoDataUrl
+        ? logoBoxX - textX - 4
+        : pageW - marginX - textX - headerInnerPad;
+      let y = headerTop + 9;
+      doc.setTextColor(24, 52, 120);
+      doc.setFontSize(16);
+      doc.text(doc.splitTextToSize(brandingTitle, textMaxW), textX, y);
+      y += 7;
+      doc.setTextColor(35, 35, 35);
+      doc.setFontSize(10);
+      doc.text(reportSubtitle, textX, y);
+      y += 6;
+      doc.setFontSize(9);
+      doc.text(doc.splitTextToSize(`Dispositivo: ${dev.name}`, textMaxW), textX, y);
+      y += 5;
+      doc.setTextColor(95);
+      doc.setFontSize(8);
+      doc.text(`Generado: ${generatedAt}`, textX, y);
+      doc.setTextColor(0);
+      y = headerTop + headerH + 8;
+
+      const ensureRoom = (yy: number, needMm: number): number => {
+        if (yy > pageH - needMm - 14) {
+          doc.addPage();
+          return newPageTop;
         }
+        return yy;
+      };
+
+      const drawSectionTitle = (title: string, yy: number): number => {
+        yy = ensureRoom(yy, 14);
+        doc.setDrawColor(228, 232, 240);
+        doc.line(contentX, yy, contentX + contentW, yy);
+        yy += 5;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(30, 64, 175);
+        doc.text(title, contentX, yy);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0);
+        return yy + 4;
+      };
+
+      type PdfField = { label: string; value: string };
+      const pushField = (
+        fields: PdfField[],
+        label: string,
+        val: string | number | null | undefined
+      ) => {
+        const raw = val == null ? '' : String(val).trim();
+        if (!raw) return;
+        fields.push({ label, value: raw });
+      };
+      const mapSupplyLabel = (v: string | null | undefined): string => {
+        if (!v) return '';
+        const n = v.trim().toLowerCase();
+        if (n === 'three_phase') return 'Trifásica';
+        if (n === 'single_phase') return 'Monofásica';
+        return v;
+      };
+      const mapDefrostLabel = (v: string | null | undefined): string => {
+        if (!v) return '';
+        const n = v.trim().toLowerCase();
+        if (n === 'hot_gas') return 'Gas caliente';
+        if (n === 'electric') return 'Eléctrico';
+        if (n === 'off_cycle') return 'Paro de ciclo';
+        return v;
+      };
+      const mapChamberTypeLabel = (v: string | null | undefined): string => {
+        if (!v) return '';
+        const n = v.trim().toLowerCase();
+        if (n === 'frozen') return 'Congelados';
+        if (n === 'refrigerated') return 'Refrigerados';
+        if (n === 'fresh') return 'Frescos';
+        return v;
       };
 
       for (const ficha of allFichas) {
-        if (y > 250) {
-          doc.addPage();
-          y = 14;
-        }
-        doc.setFontSize(11);
-        doc.setTextColor(30, 64, 175);
-        doc.text(`Ficha: ${ficha.label}`, 14, y);
-        doc.setTextColor(0);
-        y += 7;
+        y = drawSectionTitle(`Ficha: ${ficha.label}`, y);
 
-        const lines: string[] = [];
-        pushLine(lines, 'Compresor', ficha.compressorText);
+        const fields: PdfField[] = [];
+        pushField(fields, 'Compresor', ficha.compressorText);
         if (ficha.hp != null && Number.isFinite(ficha.hp)) {
-          pushLine(lines, 'HP', String(ficha.hp));
+          pushField(fields, 'HP', String(ficha.hp));
         }
-        pushLine(lines, 'Refrigerante', ficha.refrigerant);
+        pushField(fields, 'Refrigerante', ficha.refrigerant);
         const ct = ficha.condenserCoolingType;
         if (ct === 'forced_air') {
-          pushLine(lines, 'Condensador', 'Ventilación forzada');
+          pushField(fields, 'Condensador', 'Ventilación forzada');
           if (ficha.condenserFanCount != null) {
-            pushLine(lines, '  Cant. forzadores', String(ficha.condenserFanCount));
+            pushField(fields, 'Cantidad forzadores', String(ficha.condenserFanCount));
           }
-          pushLine(lines, '  Ø palas / medida', ficha.condenserBladeDiameterText);
-          pushLine(
-            lines,
-            '  Motor forzadores',
+          pushField(fields, 'Diámetro palas / medida', ficha.condenserBladeDiameterText);
+          pushField(
+            fields,
+            'Motor forzadores',
             ficha.condenserFanMotorPhases === 'three_phase'
               ? 'Trifásico'
               : ficha.condenserFanMotorPhases === 'single_phase'
@@ -3878,34 +3971,34 @@ export class DashboardComponent implements OnInit, OnDestroy {
                 : ''
           );
           if (ficha.condenserFanMotorPhases === 'single_phase') {
-            pushLine(lines, '  Capacitor (µF)', ficha.condenserFanCapacitorUf);
+            pushField(fields, 'Capacitor (µF)', ficha.condenserFanCapacitorUf);
           }
         } else if (ct === 'water') {
-          pushLine(lines, 'Condensador', 'Enfriado por agua');
+          pushField(fields, 'Condensador', 'Enfriado por agua');
         }
-        pushLine(lines, 'Notas condensador', ficha.condenserNotes);
+        pushField(fields, 'Notas condensador', ficha.condenserNotes);
 
         const ext = ficha.expansionType;
         if (ext === 'capillary') {
-          pushLine(lines, 'Expansión', 'Capilar');
-          pushLine(lines, '  Medida', ficha.expansionCapillaryMeasure);
+          pushField(fields, 'Expansión', 'Capilar');
+          pushField(fields, 'Medida', ficha.expansionCapillaryMeasure);
         } else if (ext === 'valve') {
-          pushLine(lines, 'Expansión', 'Válvula');
-          pushLine(lines, '  Marca', ficha.expansionValveBrand);
-          pushLine(lines, '  Modelo', ficha.expansionValveModel);
+          pushField(fields, 'Expansión', 'Válvula');
+          pushField(fields, 'Marca', ficha.expansionValveBrand);
+          pushField(fields, 'Modelo', ficha.expansionValveModel);
         }
 
         const eat = ficha.evaporatorAirType;
         if (eat === 'static') {
-          pushLine(lines, 'Evaporador', 'Estático (sin forzadores)');
+          pushField(fields, 'Evaporador', 'Estático (sin forzadores)');
         } else if (eat === 'forced') {
-          pushLine(lines, 'Evaporador', 'Con forzadores');
+          pushField(fields, 'Evaporador', 'Con forzadores');
           if (ficha.evaporatorFanCount != null) {
-            pushLine(lines, '  Cantidad forzadores', String(ficha.evaporatorFanCount));
+            pushField(fields, 'Cantidad forzadores', String(ficha.evaporatorFanCount));
           }
-          pushLine(
-            lines,
-            '  Alimentación motores',
+          pushField(
+            fields,
+            'Alimentación motores',
             ficha.evaporatorFanMotorPhases === 'three_phase'
               ? 'Trifásico'
               : ficha.evaporatorFanMotorPhases === 'single_phase'
@@ -3913,77 +4006,78 @@ export class DashboardComponent implements OnInit, OnDestroy {
                 : ''
           );
           if (ficha.evaporatorFanMotorPhases === 'single_phase') {
-            pushLine(lines, '  Capacitor / detalle monofásico', ficha.evaporatorFanSinglePhaseDetail);
+            pushField(fields, 'Capacitor / detalle monofásico', ficha.evaporatorFanSinglePhaseDetail);
           }
         }
-        pushLine(lines, 'Notas evaporador', ficha.evaporatorNotes);
+        pushField(fields, 'Notas evaporador', ficha.evaporatorNotes);
 
-        pushLine(lines, 'Alimentación (general)', ficha.supply);
-        lines.push(`Pump down: ${ficha.pumpDown ? 'Sí' : 'No'}`);
-        pushLine(lines, 'Descongelamiento', ficha.defrost);
-        pushLine(lines, 'Tipo de cámara', ficha.chamberType);
+        pushField(fields, 'Alimentación (general)', mapSupplyLabel(ficha.supply));
+        pushField(fields, 'Pump down', ficha.pumpDown ? 'Sí' : 'No');
+        pushField(fields, 'Descongelamiento', mapDefrostLabel(ficha.defrost));
+        pushField(fields, 'Tipo de cámara', mapChamberTypeLabel(ficha.chamberType));
         if (ficha.freeNotes?.trim()) {
-          lines.push(`Descripción: ${ficha.freeNotes.trim()}`);
+          pushField(fields, 'Descripción', ficha.freeNotes.trim());
         }
-        pushLine(
-          lines,
+        pushField(
+          fields,
           'Último mantenimiento',
           ficha.lastMaintenanceAt
             ? new Date(ficha.lastMaintenanceAt).toLocaleString('es-AR')
             : ''
         );
-        pushLine(
-          lines,
+        pushField(
+          fields,
           'Próximo mantenimiento',
           ficha.nextMaintenanceAt
             ? new Date(ficha.nextMaintenanceAt).toLocaleString('es-AR')
             : ''
         );
         if (ficha.maintenanceIntervalDays != null) {
-          pushLine(lines, 'Intervalo (días)', String(ficha.maintenanceIntervalDays));
+          pushField(fields, 'Intervalo (días)', String(ficha.maintenanceIntervalDays));
         }
-        pushLine(
-          lines,
+        pushField(
+          fields,
           'Última actualización (nube)',
           ficha.updatedAt ? new Date(ficha.updatedAt).toLocaleString('es-AR') : ''
         );
 
-        doc.setFontSize(9);
-        for (const line of lines) {
-          const parts = doc.splitTextToSize(line, 182);
-          for (const p of parts) {
-            if (y > 270) {
-              doc.addPage();
-              y = 14;
-            }
-            doc.text(p, 14, y);
-            y += 4.5;
+        doc.setFontSize(8.7);
+        const labelW = 46;
+        for (const f of fields) {
+          const valueParts = doc.splitTextToSize(f.value, contentW - labelW - 2);
+          y = ensureRoom(y, 8 + Math.max(0, (valueParts.length - 1) * 4.2));
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(40, 40, 40);
+          doc.text(`${f.label}:`, contentX, y);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(35, 35, 35);
+          for (let i = 0; i < valueParts.length; i++) {
+            doc.text(valueParts[i], contentX + labelW, y + i * 4.2);
           }
-          y += 1;
+          y += Math.max(4.3, valueParts.length * 4.2) + 0.7;
         }
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0);
 
         const { rows: logs } = await this.equipmentSheet.listLog(devId, ficha.id);
-        y += 3;
-        doc.setFontSize(10);
-        doc.text(`Bitácora — ${ficha.label}`, 14, y);
-        y += 6;
-        doc.setFontSize(8);
+        y += 2;
+        y = drawSectionTitle(`Bitácora — ${ficha.label}`, y);
+        doc.setFontSize(8.3);
+        doc.setTextColor(45);
         for (const log of [...logs].sort(
           (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
         )) {
           const dt = new Date(log.occurredAt).toLocaleString('es-AR');
           const block = `${dt} — ${log.note}`;
-          const parts = doc.splitTextToSize(block, 182);
+          const parts = doc.splitTextToSize(block, contentW);
           for (const p of parts) {
-            if (y > 270) {
-              doc.addPage();
-              y = 14;
-            }
-            doc.text(p, 14, y);
+            y = ensureRoom(y, 8);
+            doc.text(p, contentX, y);
             y += 4;
           }
-          y += 1;
+          y += 0.8;
         }
+        doc.setTextColor(0);
 
         const { rows: photos } = await this.equipmentSheet.listPhotos(devId, ficha.id);
         let imgY = y + 4;
@@ -3991,15 +4085,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
           try {
             const dataUrl = await this.loadImageAsDataUrl(ph.publicUrl);
             if (!dataUrl) continue;
-            const pageW = 180;
+            const photoW = 180;
             const imgProps = doc.getImageProperties(dataUrl);
             const ratio = imgProps.height / imgProps.width;
-            const h = Math.min(90, pageW * ratio);
+            const h = Math.min(90, photoW * ratio);
             if (imgY + h > 280) {
               doc.addPage();
-              imgY = 14;
+              imgY = newPageTop;
             }
-            doc.addImage(dataUrl, 'JPEG', 14, imgY, pageW, h, undefined, 'FAST');
+            doc.addImage(dataUrl, 'JPEG', contentX, imgY, photoW, h, undefined, 'FAST');
             imgY += h + 4;
             if (ph.caption?.trim()) {
               doc.setFontSize(7);
@@ -4029,11 +4123,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (this.equipmentPdfIncludeChart) {
         const chartPack = await this.readingsForEquipmentChart(devId);
         bumpPageIfNeeded(115);
-        doc.setFontSize(11);
-        doc.setTextColor(30, 64, 175);
-        doc.text('Anexo: gráfico (temperatura / corriente)', 14, yPos);
-        yPos += 7;
-        doc.setFontSize(8);
+        yPos = drawSectionTitle('Anexo: gráfico (temperatura / corriente)', yPos);
+        doc.setFontSize(8.4);
         doc.setTextColor(80);
         if (chartPack.error) {
           doc.text(chartPack.error, 14, yPos);
@@ -4063,14 +4154,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
             : null;
         if (chartImg) {
           const props = doc.getImageProperties(chartImg);
-          const maxW = 182;
+          const maxW = contentW;
           let dispW = maxW;
           let dispH = (props.height * dispW) / props.width;
           if (yPos + dispH > 285) {
             doc.addPage();
             yPos = 14;
           }
-          doc.addImage(chartImg, 'PNG', 14, yPos, dispW, dispH);
+          doc.addImage(chartImg, 'PNG', contentX, yPos, dispW, dispH);
           yPos += dispH + 10;
         }
       }
@@ -4078,13 +4169,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (this.equipmentPdfIncludeReadings) {
         const annex = await this.readingsForEquipmentPdfAnnex(devId);
         bumpPageIfNeeded(50);
-        doc.setFontSize(11);
-        doc.setTextColor(30, 64, 175);
-        doc.text('Anexo: lecturas (temperaturas y corriente, últimos 7 días)', 14, yPos);
-        yPos += 7;
-        doc.setFontSize(8);
+        yPos = drawSectionTitle('Anexo: lecturas (temperaturas y corriente, últimos 7 días)', yPos);
+        doc.setFontSize(8.4);
         doc.setTextColor(80);
-        const parts = doc.splitTextToSize(annex.note, 182);
+        const parts = doc.splitTextToSize(annex.note, contentW);
         for (const p of parts) {
           doc.text(p, 14, yPos);
           yPos += 4;
@@ -4119,8 +4207,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
             startY: yPos,
             head,
             body,
-            styles: { fontSize: 7, cellPadding: 1.5 },
-            headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+            styles: { fontSize: 7.2, cellPadding: 1.8, textColor: [35, 35, 35], lineColor: [229, 233, 240] },
+            headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
             alternateRowStyles: { fillColor: [245, 247, 250] },
             margin: { left: 14, right: 14 },
           });
@@ -4140,11 +4228,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
           .sort((a, b) => new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime())
           .slice(0, 400);
         bumpPageIfNeeded(40);
-        doc.setFontSize(11);
-        doc.setTextColor(30, 64, 175);
-        doc.text('Anexo: historial de alarmas (nube)', 14, yPos);
-        yPos += 7;
-        doc.setFontSize(8);
+        yPos = drawSectionTitle('Anexo: historial de alarmas (nube)', yPos);
+        doc.setFontSize(8.4);
         doc.setTextColor(80);
         doc.text(
           evs.length
@@ -4166,8 +4251,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
             startY: yPos,
             head,
             body,
-            styles: { fontSize: 7, cellPadding: 1.5 },
-            headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+            styles: { fontSize: 7.2, cellPadding: 1.8, textColor: [35, 35, 35], lineColor: [229, 233, 240] },
+            headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
             alternateRowStyles: { fillColor: [245, 247, 250] },
             margin: { left: 14, right: 14 },
             columnStyles: { 2: { cellWidth: 95 } },
@@ -4175,6 +4260,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
         }
       }
 
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(110);
+        doc.text(`${brandingTitle} · ${dev.name}`, marginX, 292, { maxWidth: 120 });
+        doc.text(`Página ${i} de ${totalPages}`, pageW - marginX, 292, { align: 'right' });
+      }
+      doc.setTextColor(0);
       const safe = dev.name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);
       doc.save(`ficha_equipo_${safe}_${this.pdfDateStamp()}.pdf`);
     } catch (e) {

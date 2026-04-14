@@ -6,10 +6,16 @@ import { AuthService } from './auth.service';
 export const guestGuard: CanActivateFn = async () => {
   const auth = inject(AuthService);
   const router = inject(Router);
-  const session = await auth.getSession();
+  let session = await auth.getSession();
+  if (!session) {
+    // Evita rebote visual login/dashboard si la sesión demora en restaurarse.
+    for (let i = 0; i < 6 && !session; i++) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
+      session = await auth.getSession();
+    }
+  }
   if (session) {
-    await router.navigate(['/dashboard']);
-    return false;
+    return router.parseUrl('/dashboard');
   }
   return true;
 };
