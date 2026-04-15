@@ -1087,6 +1087,16 @@
               </p>
 
               <ng-container *ngIf="selectedFichaId && equipmentFichaEditorVisible">
+              <article class="card card--ficha-section">
+                <div class="equipment-page__ficha-actions">
+                  <button type="button" class="btn btn--ghost" (click)="closeEquipmentFichaEditorView()">
+                    ← Volver a fichas
+                  </button>
+                  <p class="card__hint card__hint--tight">
+                    Estás viendo los datos de la ficha seleccionada.
+                  </p>
+                </div>
+              </article>
               <article class="card card--ficha-section" id="equipment-ficha-editor">
                 <div class="equipment-page__section-head">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">

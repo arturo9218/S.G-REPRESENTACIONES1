@@ -3264,6 +3264,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.scrollToEquipmentFichaEditor();
   }
 
+  closeEquipmentFichaEditorView(): void {
+    this.equipmentFichaEditorVisible = false;
+  }
+
   dismissEquipmentSavedCard(): void {
     if (this.equipmentSavedCardTimer != null) {
       clearTimeout(this.equipmentSavedCardTimer);
