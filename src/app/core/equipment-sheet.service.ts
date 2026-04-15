@@ -32,6 +32,18 @@ export interface DeviceEquipmentFichaRow {
   pumpDown: boolean;
   defrost: string | null;
   chamberType: string | null;
+  suctionLineDiameter: string | null;
+  liquidLineDiameter: string | null;
+  lineInsulationStatus: string | null;
+  highPressureSwitch: string | null;
+  lowPressureSwitch: string | null;
+  controllerModel: string | null;
+  contactorStatus: string | null;
+  suctionPressureBar: number | null;
+  dischargePressureBar: number | null;
+  superheatC: number | null;
+  subcoolingC: number | null;
+  compressorCurrentA: number | null;
   freeNotes: string | null;
   lastMaintenanceAt: string | null;
   nextMaintenanceAt: string | null;
@@ -109,6 +121,23 @@ export class EquipmentSheetService {
       pumpDown: Boolean(r['pump_down']),
       defrost: (r['defrost'] as string) ?? null,
       chamberType: (r['chamber_type'] as string) ?? null,
+      suctionLineDiameter: (r['suction_line_diameter'] as string) ?? null,
+      liquidLineDiameter: (r['liquid_line_diameter'] as string) ?? null,
+      lineInsulationStatus: (r['line_insulation_status'] as string) ?? null,
+      highPressureSwitch: (r['high_pressure_switch'] as string) ?? null,
+      lowPressureSwitch: (r['low_pressure_switch'] as string) ?? null,
+      controllerModel: (r['controller_model'] as string) ?? null,
+      contactorStatus: (r['contactor_status'] as string) ?? null,
+      suctionPressureBar:
+        typeof r['suction_pressure_bar'] === 'number' ? (r['suction_pressure_bar'] as number) : null,
+      dischargePressureBar:
+        typeof r['discharge_pressure_bar'] === 'number'
+          ? (r['discharge_pressure_bar'] as number)
+          : null,
+      superheatC: typeof r['superheat_c'] === 'number' ? (r['superheat_c'] as number) : null,
+      subcoolingC: typeof r['subcooling_c'] === 'number' ? (r['subcooling_c'] as number) : null,
+      compressorCurrentA:
+        typeof r['compressor_current_a'] === 'number' ? (r['compressor_current_a'] as number) : null,
       freeNotes: (r['free_notes'] as string) ?? null,
       lastMaintenanceAt: (r['last_maintenance_at'] as string) ?? null,
       nextMaintenanceAt: (r['next_maintenance_at'] as string) ?? null,
@@ -165,6 +194,18 @@ export class EquipmentSheetService {
       pump_down: payload.pumpDown,
       defrost: payload.defrost || null,
       chamber_type: payload.chamberType || null,
+      suction_line_diameter: payload.suctionLineDiameter || null,
+      liquid_line_diameter: payload.liquidLineDiameter || null,
+      line_insulation_status: payload.lineInsulationStatus || null,
+      high_pressure_switch: payload.highPressureSwitch || null,
+      low_pressure_switch: payload.lowPressureSwitch || null,
+      controller_model: payload.controllerModel || null,
+      contactor_status: payload.contactorStatus || null,
+      suction_pressure_bar: payload.suctionPressureBar,
+      discharge_pressure_bar: payload.dischargePressureBar,
+      superheat_c: payload.superheatC,
+      subcooling_c: payload.subcoolingC,
+      compressor_current_a: payload.compressorCurrentA,
       free_notes: payload.freeNotes || null,
       last_maintenance_at: payload.lastMaintenanceAt || null,
       next_maintenance_at: payload.nextMaintenanceAt || null,

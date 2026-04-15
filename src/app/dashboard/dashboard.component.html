@@ -1242,6 +1242,79 @@
                 <div class="equipment-page__section-head">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M3 12h18" />
+                      <path d="M7 8h2v8H7zM15 8h2v8h-2z" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Línea, protecciones y mediciones</h2>
+                    <p class="card__hint card__hint--tight">
+                      Detalle de línea frigorífica, control eléctrico y parámetros medidos del sistema.
+                    </p>
+                  </div>
+                </div>
+                <div class="notify-panel notify-panel__grid">
+                  <label class="notify-panel__field">
+                    <span>Línea de succión (diámetro / medida)</span>
+                    <input type="text" [(ngModel)]="eqSuctionLineDiameterForm" name="eq-suction-line" maxlength="80" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Línea de líquido (diámetro / medida)</span>
+                    <input type="text" [(ngModel)]="eqLiquidLineDiameterForm" name="eq-liquid-line" maxlength="80" />
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Estado de aislación de líneas</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="eqLineInsulationStatusForm"
+                      name="eq-line-insulation"
+                      maxlength="160"
+                      placeholder="Ej. Completa, deteriorada, a reparar"
+                    />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Presostato de alta</span>
+                    <input type="text" [(ngModel)]="eqHighPressureSwitchForm" name="eq-hp-switch" maxlength="120" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Presostato de baja</span>
+                    <input type="text" [(ngModel)]="eqLowPressureSwitchForm" name="eq-lp-switch" maxlength="120" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Controlador / termostato</span>
+                    <input type="text" [(ngModel)]="eqControllerModelForm" name="eq-controller-model" maxlength="120" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Contactor / protecciones</span>
+                    <input type="text" [(ngModel)]="eqContactorStatusForm" name="eq-contactor" maxlength="120" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Presión succión (bar)</span>
+                    <input type="text" [(ngModel)]="eqSuctionPressureBarForm" name="eq-suction-pressure" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Presión descarga (bar)</span>
+                    <input type="text" [(ngModel)]="eqDischargePressureBarForm" name="eq-discharge-pressure" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Sobrecalentamiento (°C)</span>
+                    <input type="text" [(ngModel)]="eqSuperheatCForm" name="eq-superheat" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Subenfriamiento (°C)</span>
+                    <input type="text" [(ngModel)]="eqSubcoolingCForm" name="eq-subcooling" />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Corriente compresor (A)</span>
+                    <input type="text" [(ngModel)]="eqCompressorCurrentAForm" name="eq-comp-current" />
+                  </label>
+                </div>
+              </article>
+
+              <article class="card card--ficha-section">
+                <div class="equipment-page__section-head">
+                  <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <circle cx="12" cy="12" r="3" />
                       <path d="M12 2v4M12 14v6M6.34 6.34l2.83 2.83M12 12h.01M14.83 14.83l2.83 2.83" />
                     </svg>

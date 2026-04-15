@@ -173,6 +173,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
   eqPumpDownForm = false;
   eqDefrostForm = '';
   eqChamberForm = '';
+  eqSuctionLineDiameterForm = '';
+  eqLiquidLineDiameterForm = '';
+  eqLineInsulationStatusForm = '';
+  eqHighPressureSwitchForm = '';
+  eqLowPressureSwitchForm = '';
+  eqControllerModelForm = '';
+  eqContactorStatusForm = '';
+  eqSuctionPressureBarForm = '';
+  eqDischargePressureBarForm = '';
+  eqSuperheatCForm = '';
+  eqSubcoolingCForm = '';
+  eqCompressorCurrentAForm = '';
   eqFreeNotesForm = '';
   eqLastMaintDate = '';
   eqLastMaintTime = '';
@@ -3222,6 +3234,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (f.pumpDown) return true;
     if (t(f.defrost)) return true;
     if (t(f.chamberType)) return true;
+    if (t(f.suctionLineDiameter)) return true;
+    if (t(f.liquidLineDiameter)) return true;
+    if (t(f.lineInsulationStatus)) return true;
+    if (t(f.highPressureSwitch)) return true;
+    if (t(f.lowPressureSwitch)) return true;
+    if (t(f.controllerModel)) return true;
+    if (t(f.contactorStatus)) return true;
+    if (f.suctionPressureBar != null && Number.isFinite(f.suctionPressureBar)) return true;
+    if (f.dischargePressureBar != null && Number.isFinite(f.dischargePressureBar)) return true;
+    if (f.superheatC != null && Number.isFinite(f.superheatC)) return true;
+    if (f.subcoolingC != null && Number.isFinite(f.subcoolingC)) return true;
+    if (f.compressorCurrentA != null && Number.isFinite(f.compressorCurrentA)) return true;
     if (t(f.freeNotes)) return true;
     if (f.lastMaintenanceAt) return true;
     if (f.nextMaintenanceAt) return true;
@@ -3367,6 +3391,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.eqPumpDownForm = false;
       this.eqDefrostForm = '';
       this.eqChamberForm = '';
+      this.eqSuctionLineDiameterForm = '';
+      this.eqLiquidLineDiameterForm = '';
+      this.eqLineInsulationStatusForm = '';
+      this.eqHighPressureSwitchForm = '';
+      this.eqLowPressureSwitchForm = '';
+      this.eqControllerModelForm = '';
+      this.eqContactorStatusForm = '';
+      this.eqSuctionPressureBarForm = '';
+      this.eqDischargePressureBarForm = '';
+      this.eqSuperheatCForm = '';
+      this.eqSubcoolingCForm = '';
+      this.eqCompressorCurrentAForm = '';
       this.eqFreeNotesForm = '';
       this.eqLastMaintDate = '';
       this.eqLastMaintTime = '';
@@ -3405,6 +3441,29 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.eqPumpDownForm = row.pumpDown;
     this.eqDefrostForm = row.defrost ?? '';
     this.eqChamberForm = row.chamberType ?? '';
+    this.eqSuctionLineDiameterForm = row.suctionLineDiameter ?? '';
+    this.eqLiquidLineDiameterForm = row.liquidLineDiameter ?? '';
+    this.eqLineInsulationStatusForm = row.lineInsulationStatus ?? '';
+    this.eqHighPressureSwitchForm = row.highPressureSwitch ?? '';
+    this.eqLowPressureSwitchForm = row.lowPressureSwitch ?? '';
+    this.eqControllerModelForm = row.controllerModel ?? '';
+    this.eqContactorStatusForm = row.contactorStatus ?? '';
+    this.eqSuctionPressureBarForm =
+      row.suctionPressureBar != null && Number.isFinite(row.suctionPressureBar)
+        ? String(row.suctionPressureBar)
+        : '';
+    this.eqDischargePressureBarForm =
+      row.dischargePressureBar != null && Number.isFinite(row.dischargePressureBar)
+        ? String(row.dischargePressureBar)
+        : '';
+    this.eqSuperheatCForm =
+      row.superheatC != null && Number.isFinite(row.superheatC) ? String(row.superheatC) : '';
+    this.eqSubcoolingCForm =
+      row.subcoolingC != null && Number.isFinite(row.subcoolingC) ? String(row.subcoolingC) : '';
+    this.eqCompressorCurrentAForm =
+      row.compressorCurrentA != null && Number.isFinite(row.compressorCurrentA)
+        ? String(row.compressorCurrentA)
+        : '';
     this.eqFreeNotesForm = row.freeNotes ?? '';
     this.eqLastMaintDate = this.isoToDateInput(row.lastMaintenanceAt);
     this.eqLastMaintTime = this.isoToTimeInput(row.lastMaintenanceAt);
@@ -3464,6 +3523,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const condFanCount = cfc ? Number.parseInt(cfc, 10) : null;
       const efc = this.eqEvapFanCountForm.trim();
       const evapFanCount = efc ? Number.parseInt(efc, 10) : null;
+      const parseFloatForm = (v: string): number | null => {
+        const n = v.trim().replace(',', '.');
+        if (!n) return null;
+        const p = Number.parseFloat(n);
+        return Number.isFinite(p) ? p : null;
+      };
       const expT = this.eqExpansionTypeForm.trim();
       const expansionType = expT || null;
       const expansionCapillaryMeasure =
@@ -3499,6 +3564,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
         pumpDown: this.eqPumpDownForm,
         defrost: this.eqDefrostForm.trim() || null,
         chamberType: this.eqChamberForm.trim() || null,
+        suctionLineDiameter: this.eqSuctionLineDiameterForm.trim() || null,
+        liquidLineDiameter: this.eqLiquidLineDiameterForm.trim() || null,
+        lineInsulationStatus: this.eqLineInsulationStatusForm.trim() || null,
+        highPressureSwitch: this.eqHighPressureSwitchForm.trim() || null,
+        lowPressureSwitch: this.eqLowPressureSwitchForm.trim() || null,
+        controllerModel: this.eqControllerModelForm.trim() || null,
+        contactorStatus: this.eqContactorStatusForm.trim() || null,
+        suctionPressureBar: parseFloatForm(this.eqSuctionPressureBarForm),
+        dischargePressureBar: parseFloatForm(this.eqDischargePressureBarForm),
+        superheatC: parseFloatForm(this.eqSuperheatCForm),
+        subcoolingC: parseFloatForm(this.eqSubcoolingCForm),
+        compressorCurrentA: parseFloatForm(this.eqCompressorCurrentAForm),
         freeNotes: this.eqFreeNotesForm.trim() || null,
         lastMaintenanceAt: this.combineDateTimeToIso(this.eqLastMaintDate, this.eqLastMaintTime),
         nextMaintenanceAt: this.combineDateTimeToIso(this.eqNextMaintDate, this.eqNextMaintTime),
@@ -4020,7 +4097,29 @@ export class DashboardComponent implements OnInit, OnDestroy {
         pushField(fields, 'Descongelamiento', mapDefrostLabel(ficha.defrost));
         pushField(fields, 'Tipo de cámara', mapChamberTypeLabel(ficha.chamberType));
         if (ficha.freeNotes?.trim()) {
-          pushField(fields, 'Descripción', ficha.freeNotes.trim());
+        pushField(fields, 'Línea de succión', ficha.suctionLineDiameter);
+        pushField(fields, 'Línea de líquido', ficha.liquidLineDiameter);
+        pushField(fields, 'Aislación de líneas', ficha.lineInsulationStatus);
+        pushField(fields, 'Presostato de alta', ficha.highPressureSwitch);
+        pushField(fields, 'Presostato de baja', ficha.lowPressureSwitch);
+        pushField(fields, 'Controlador / termostato', ficha.controllerModel);
+        pushField(fields, 'Contactor / protecciones', ficha.contactorStatus);
+        if (ficha.suctionPressureBar != null && Number.isFinite(ficha.suctionPressureBar)) {
+          pushField(fields, 'Presión de succión (bar)', ficha.suctionPressureBar.toFixed(2));
+        }
+        if (ficha.dischargePressureBar != null && Number.isFinite(ficha.dischargePressureBar)) {
+          pushField(fields, 'Presión de descarga (bar)', ficha.dischargePressureBar.toFixed(2));
+        }
+        if (ficha.superheatC != null && Number.isFinite(ficha.superheatC)) {
+          pushField(fields, 'Sobrecalentamiento (°C)', ficha.superheatC.toFixed(1));
+        }
+        if (ficha.subcoolingC != null && Number.isFinite(ficha.subcoolingC)) {
+          pushField(fields, 'Subenfriamiento (°C)', ficha.subcoolingC.toFixed(1));
+        }
+        if (ficha.compressorCurrentA != null && Number.isFinite(ficha.compressorCurrentA)) {
+          pushField(fields, 'Corriente compresor (A)', ficha.compressorCurrentA.toFixed(2));
+        }
+        pushField(fields, 'Descripción', ficha.freeNotes.trim());
         }
         pushField(
           fields,
