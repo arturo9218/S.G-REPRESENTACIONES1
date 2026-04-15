@@ -1086,6 +1086,16 @@
                 {{ equipmentFeedback }}
               </p>
 
+              <article class="card card--ficha-section" *ngIf="selectedFichaId && equipmentFichaEditorVisible && equipmentTechnicalWarnings().length">
+                <h2 class="card__title card__title--sm">Chequeo técnico (asistente)</h2>
+                <p class="card__hint card__hint--tight">
+                  Avisos automáticos para ayudarte a revisar consistencia. No bloquean el guardado.
+                </p>
+                <ul class="card__hint card__hint--tight">
+                  <li *ngFor="let w of equipmentTechnicalWarnings()">{{ w }}</li>
+                </ul>
+              </article>
+
               <ng-container *ngIf="selectedFichaId && equipmentFichaEditorVisible">
               <article class="card card--ficha-section">
                 <div class="equipment-page__ficha-actions">

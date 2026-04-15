@@ -3502,6 +3502,65 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return iso.toISOString();
   }
 
+  private parseNullableNumber(raw: string): number | null {
+    const n = raw.trim().replace(',', '.');
+    if (!n) return null;
+    const p = Number.parseFloat(n);
+    return Number.isFinite(p) ? p : null;
+  }
+
+  /** Validaciones técnicas no bloqueantes para guiar carga de ficha. */
+  equipmentTechnicalWarnings(): string[] {
+    const warnings: string[] = [];
+    const supply = this.eqSupplyForm.trim();
+    const condPh = this.eqCondenserFanPhasesForm.trim();
+    const evapPh = this.eqEvapFanPhasesForm.trim();
+    const expansionType = this.eqExpansionTypeForm.trim();
+    const chamber = this.eqChamberForm.trim();
+    const defrost = this.eqDefrostForm.trim();
+
+    if (supply === 'single_phase' && (condPh === 'three_phase' || evapPh === 'three_phase')) {
+      warnings.push(
+        'La alimentación general está en monofásica pero hay motores marcados como trifásicos.'
+      );
+    }
+
+    if (chamber === 'frozen' && !defrost) {
+      warnings.push('Para cámara de congelado conviene definir un tipo de descongelamiento.');
+    }
+
+    if (expansionType === 'valve') {
+      if (!this.eqExpansionValveBrandForm.trim() || !this.eqExpansionValveModelForm.trim()) {
+        warnings.push('En expansión por válvula, completá marca y modelo para trazabilidad técnica.');
+      }
+    }
+    if (expansionType === 'capillary' && !this.eqExpansionCapillaryForm.trim()) {
+      warnings.push('En expansión capilar, completá la medida del capilar.');
+    }
+
+    const pSuc = this.parseNullableNumber(this.eqSuctionPressureBarForm);
+    const pDis = this.parseNullableNumber(this.eqDischargePressureBarForm);
+    if (pSuc != null && pDis != null && pSuc >= pDis) {
+      warnings.push('La presión de succión no debería ser mayor o igual a la de descarga.');
+    }
+
+    const sh = this.parseNullableNumber(this.eqSuperheatCForm);
+    const sc = this.parseNullableNumber(this.eqSubcoolingCForm);
+    if (sh != null && sh < 0) {
+      warnings.push('El sobrecalentamiento es negativo; revisá sensores/carga o el dato cargado.');
+    }
+    if (sc != null && sc < 0) {
+      warnings.push('El subenfriamiento es negativo; revisá el dato o el estado del sistema.');
+    }
+
+    const ia = this.parseNullableNumber(this.eqCompressorCurrentAForm);
+    if (ia != null && ia <= 0) {
+      warnings.push('La corriente del compresor debería ser mayor a 0 A.');
+    }
+
+    return warnings;
+  }
+
   private initLogDateTimeDefaults(): void {
     const now = new Date();
     this.logDateForm = this.isoToDateInput(now.toISOString());
@@ -3523,12 +3582,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const condFanCount = cfc ? Number.parseInt(cfc, 10) : null;
       const efc = this.eqEvapFanCountForm.trim();
       const evapFanCount = efc ? Number.parseInt(efc, 10) : null;
-      const parseFloatForm = (v: string): number | null => {
-        const n = v.trim().replace(',', '.');
-        if (!n) return null;
-        const p = Number.parseFloat(n);
-        return Number.isFinite(p) ? p : null;
-      };
       const expT = this.eqExpansionTypeForm.trim();
       const expansionType = expT || null;
       const expansionCapillaryMeasure =
@@ -3571,11 +3624,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
         lowPressureSwitch: this.eqLowPressureSwitchForm.trim() || null,
         controllerModel: this.eqControllerModelForm.trim() || null,
         contactorStatus: this.eqContactorStatusForm.trim() || null,
-        suctionPressureBar: parseFloatForm(this.eqSuctionPressureBarForm),
-        dischargePressureBar: parseFloatForm(this.eqDischargePressureBarForm),
-        superheatC: parseFloatForm(this.eqSuperheatCForm),
-        subcoolingC: parseFloatForm(this.eqSubcoolingCForm),
-        compressorCurrentA: parseFloatForm(this.eqCompressorCurrentAForm),
+        suctionPressureBar: this.parseNullableNumber(this.eqSuctionPressureBarForm),
+        dischargePressureBar: this.parseNullableNumber(this.eqDischargePressureBarForm),
+        superheatC: this.parseNullableNumber(this.eqSuperheatCForm),
+        subcoolingC: this.parseNullableNumber(this.eqSubcoolingCForm),
+        compressorCurrentA: this.parseNullableNumber(this.eqCompressorCurrentAForm),
         freeNotes: this.eqFreeNotesForm.trim() || null,
         lastMaintenanceAt: this.combineDateTimeToIso(this.eqLastMaintDate, this.eqLastMaintTime),
         nextMaintenanceAt: this.combineDateTimeToIso(this.eqNextMaintDate, this.eqNextMaintTime),
