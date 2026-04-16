@@ -9,6 +9,7 @@ export interface DeviceEquipmentFichaRow {
   deviceId: string;
   sortOrder: number;
   label: string;
+  status: string | null;
   compressorText: string | null;
   hp: number | null;
   refrigerant: string | null;
@@ -97,6 +98,7 @@ export class EquipmentSheetService {
       deviceId: r['device_id'] as string,
       sortOrder: typeof r['sort_order'] === 'number' ? (r['sort_order'] as number) : 0,
       label: (r['label'] as string) || 'Instalación',
+      status: (r['status'] as string) ?? 'draft',
       compressorText: (r['compressor_text'] as string) ?? null,
       hp: typeof r['hp'] === 'number' ? (r['hp'] as number) : null,
       refrigerant: (r['refrigerant'] as string) ?? null,
@@ -172,6 +174,7 @@ export class EquipmentSheetService {
       device_id: payload.deviceId,
       sort_order: payload.sortOrder,
       label: payload.label.trim() || 'Sin nombre',
+      status: payload.status || 'draft',
       compressor_text: payload.compressorText || null,
       hp: payload.hp,
       refrigerant: payload.refrigerant || null,

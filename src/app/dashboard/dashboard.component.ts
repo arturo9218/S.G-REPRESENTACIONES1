@@ -151,6 +151,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   equipmentLogRows: DeviceEquipmentLogRow[] = [];
   equipmentPhotos: DeviceEquipmentPhotoRow[] = [];
   eqFichaLabelForm = '';
+  eqFichaStatusForm = 'draft';
   eqCompressorForm = '';
   eqHpForm = '';
   eqRefrigerantForm = '';
@@ -213,6 +214,28 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Rango para el gráfico del PDF (`yyyy-MM-dd`, vacío = últimos 7 días). */
   equipmentPdfChartFromDate = '';
   equipmentPdfChartToDate = '';
+  equipmentSectionOpen: Record<string, boolean> = {
+    compression: true,
+    condenser: false,
+    expansion: false,
+    evaporator: false,
+    piping: false,
+    notes: false,
+    maintenance: false,
+    log: false,
+    photos: false,
+  };
+  private readonly equipmentSectionKeys = [
+    'compression',
+    'condenser',
+    'expansion',
+    'evaporator',
+    'piping',
+    'notes',
+    'maintenance',
+    'log',
+    'photos',
+  ] as const;
   /** Mensaje breve al crear una ficha nueva desde el panel. */
   equipmentNewFichaHint = '';
   /** Tras guardar, se colapsa el editor y quedan solo las tarjetas de ficha. */
@@ -3197,6 +3220,27 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.initLogDateTimeDefaults();
   }
 
+  async onEquipmentFichaCardClick(fichaId: string): Promise<void> {
+    if (this.selectedFichaId === fichaId) {
+      this.equipmentFichaEditorVisible = !this.equipmentFichaEditorVisible;
+      return;
+    }
+    await this.onEquipmentFichaChange(fichaId);
+  }
+
+  toggleEquipmentSection(key: string): void {
+    if (this.equipmentSectionOpen[key]) {
+      return;
+    }
+    for (const k of this.equipmentSectionKeys) {
+      this.equipmentSectionOpen[k] = k === key;
+    }
+  }
+
+  isEquipmentSectionOpen(key: string): boolean {
+    return this.equipmentSectionOpen[key] === true;
+  }
+
   compareFichaId(a: string | null | undefined, b: string | null | undefined): boolean {
     return a === b;
   }
@@ -3266,13 +3310,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   /** Una línea corta para la tarjeta (compresor o refrigerante). */
   equipmentFichaCardSubtitle(f: DeviceEquipmentFichaRow): string {
+    const status = (f.status ?? 'draft').trim();
+    const statusLabel =
+      status === 'active' ? 'Operativa' : status === 'out_of_service' ? 'Fuera de servicio' : 'Borrador';
     const c = f.compressorText?.trim();
-    if (c) return c.length > 52 ? `${c.slice(0, 50)}…` : c;
+    if (c) return `${statusLabel} · ${c.length > 36 ? `${c.slice(0, 34)}…` : c}`;
     const r = f.refrigerant?.trim();
-    if (r) return `Ref. ${r}`;
+    if (r) return `${statusLabel} · Ref. ${r}`;
     const fn = f.freeNotes?.trim();
-    if (fn) return fn.length > 52 ? `${fn.slice(0, 50)}…` : fn;
-    return 'Ver y editar datos';
+    if (fn) return `${statusLabel} · ${fn.length > 40 ? `${fn.slice(0, 38)}…` : fn}`;
+    return `${statusLabel} · Ver y editar datos`;
   }
 
   scrollToEquipmentFichaEditor(): void {
@@ -3286,10 +3333,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
   onEquipmentSavedCardClick(): void {
     this.equipmentFichaEditorVisible = true;
     this.scrollToEquipmentFichaEditor();
-  }
-
-  closeEquipmentFichaEditorView(): void {
-    this.equipmentFichaEditorVisible = false;
   }
 
   dismissEquipmentSavedCard(): void {
@@ -3369,6 +3412,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private hydrateEquipmentFormsFromFicha(row: DeviceEquipmentFichaRow | null): void {
     if (!row) {
       this.eqFichaLabelForm = '';
+      this.eqFichaStatusForm = 'draft';
       this.eqCompressorForm = '';
       this.eqHpForm = '';
       this.eqRefrigerantForm = '';
@@ -3413,6 +3457,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return;
     }
     this.eqFichaLabelForm = row.label ?? '';
+    this.eqFichaStatusForm = row.status ?? 'draft';
     this.eqCompressorForm = row.compressorText ?? '';
     this.eqHpForm = row.hp != null && Number.isFinite(row.hp) ? String(row.hp) : '';
     this.eqRefrigerantForm = row.refrigerant ?? '';
@@ -3595,6 +3640,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         deviceId: this.selectedDeviceId!,
         sortOrder: cur?.sortOrder ?? 0,
         label: this.eqFichaLabelForm.trim() || 'Sin nombre',
+        status: this.eqFichaStatusForm.trim() || 'draft',
         compressorText: this.eqCompressorForm.trim() || null,
         hp: hp != null && Number.isFinite(hp) ? hp : null,
         refrigerant: this.eqRefrigerantForm.trim() || null,
@@ -4078,11 +4124,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
         if (n === 'fresh') return 'Frescos';
         return v;
       };
+      const mapFichaStatusLabel = (v: string | null | undefined): string => {
+        const n = (v ?? 'draft').trim().toLowerCase();
+        if (n === 'active') return 'Operativa';
+        if (n === 'out_of_service') return 'Fuera de servicio';
+        return 'Borrador';
+      };
 
       for (const ficha of allFichas) {
         y = drawSectionTitle(`Ficha: ${ficha.label}`, y);
 
         const fields: PdfField[] = [];
+        pushField(fields, 'Estado', mapFichaStatusLabel(ficha.status));
         pushField(fields, 'Compresor', ficha.compressorText);
         if (ficha.hp != null && Number.isFinite(ficha.hp)) {
           pushField(fields, 'HP', String(ficha.hp));

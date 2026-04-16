@@ -1034,6 +1034,14 @@
                         autocomplete="off"
                       />
                     </label>
+                    <label class="notify-panel__field">
+                      <span>Estado de la ficha</span>
+                      <select class="notify-panel__select" [(ngModel)]="eqFichaStatusForm" name="eq-ficha-status">
+                        <option value="draft">Borrador</option>
+                        <option value="active">Operativa</option>
+                        <option value="out_of_service">Fuera de servicio</option>
+                      </select>
+                    </label>
                   </ng-container>
                   <div class="equipment-ficha-cards" *ngIf="equipmentFichasWithTechnicalCards.length">
                     <button
@@ -1041,7 +1049,7 @@
                       class="equipment-ficha-card"
                       *ngFor="let f of equipmentFichasWithTechnicalCards; trackBy: trackByFichaId"
                       [class.equipment-ficha-card--active]="selectedFichaId === f.id"
-                      (click)="onEquipmentFichaChange(f.id)"
+                      (click)="onEquipmentFichaCardClick(f.id)"
                     >
                       <span class="equipment-ficha-card__title">{{ f.label }}</span>
                       <span class="equipment-ficha-card__sub">{{ equipmentFichaCardSubtitle(f) }}</span>
@@ -1097,18 +1105,8 @@
               </article>
 
               <ng-container *ngIf="selectedFichaId && equipmentFichaEditorVisible">
-              <article class="card card--ficha-section">
-                <div class="equipment-page__ficha-actions">
-                  <button type="button" class="btn btn--ghost" (click)="closeEquipmentFichaEditorView()">
-                    ← Volver a fichas
-                  </button>
-                  <p class="card__hint card__hint--tight">
-                    Estás viendo los datos de la ficha seleccionada.
-                  </p>
-                </div>
-              </article>
               <article class="card card--ficha-section" id="equipment-ficha-editor">
-                <div class="equipment-page__section-head">
+                <div class="equipment-page__section-head" role="button" tabindex="0" (click)="toggleEquipmentSection('compression')" (keydown.enter)="toggleEquipmentSection('compression')">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -1120,7 +1118,7 @@
                     <p class="card__hint card__hint--tight">Compresor, refrigerante y configuración general.</p>
                   </div>
                 </div>
-                <div class="notify-panel notify-panel__grid">
+                <div class="notify-panel notify-panel__grid" *ngIf="isEquipmentSectionOpen('compression')">
                   <label class="notify-panel__field notify-panel__field--full">
                     <span>Compresor</span>
                     <input
@@ -1182,7 +1180,7 @@
               </article>
 
               <article class="card card--ficha-section">
-                <div class="equipment-page__section-head">
+                <div class="equipment-page__section-head" role="button" tabindex="0" (click)="toggleEquipmentSection('condenser')" (keydown.enter)="toggleEquipmentSection('condenser')">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <circle cx="12" cy="12" r="3" />
@@ -1196,7 +1194,7 @@
                     </p>
                   </div>
                 </div>
-                <div class="notify-panel notify-panel__grid">
+                <div class="notify-panel notify-panel__grid" *ngIf="isEquipmentSectionOpen('condenser')">
                   <label class="notify-panel__field notify-panel__field--full">
                     <span>Tipo</span>
                     <select class="notify-panel__select" [(ngModel)]="eqCondenserCoolingForm" name="eq-cond-type">
@@ -1249,7 +1247,7 @@
               </article>
 
               <article class="card card--ficha-section">
-                <div class="equipment-page__section-head">
+                <div class="equipment-page__section-head" role="button" tabindex="0" (click)="toggleEquipmentSection('expansion')" (keydown.enter)="toggleEquipmentSection('expansion')">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M3 12h18" />
@@ -1263,7 +1261,7 @@
                     </p>
                   </div>
                 </div>
-                <div class="notify-panel notify-panel__grid">
+                <div class="notify-panel notify-panel__grid" *ngIf="isEquipmentSectionOpen('expansion')">
                   <label class="notify-panel__field">
                     <span>Línea de succión (diámetro / medida)</span>
                     <input type="text" [(ngModel)]="eqSuctionLineDiameterForm" name="eq-suction-line" maxlength="80" />
@@ -1322,7 +1320,7 @@
               </article>
 
               <article class="card card--ficha-section">
-                <div class="equipment-page__section-head">
+                <div class="equipment-page__section-head" role="button" tabindex="0" (click)="toggleEquipmentSection('evaporator')" (keydown.enter)="toggleEquipmentSection('evaporator')">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <circle cx="12" cy="12" r="3" />
@@ -1336,7 +1334,7 @@
                     </p>
                   </div>
                 </div>
-                <div class="notify-panel notify-panel__grid">
+                <div class="notify-panel notify-panel__grid" *ngIf="isEquipmentSectionOpen('evaporator')">
                   <label class="notify-panel__field notify-panel__field--full">
                     <span>Tipo</span>
                     <select class="notify-panel__select" [(ngModel)]="eqExpansionTypeForm" name="eq-exp-type">
@@ -1381,7 +1379,7 @@
               </article>
 
               <article class="card card--ficha-section">
-                <div class="equipment-page__section-head">
+                <div class="equipment-page__section-head" role="button" tabindex="0" (click)="toggleEquipmentSection('piping')" (keydown.enter)="toggleEquipmentSection('piping')">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" />
@@ -1394,7 +1392,7 @@
                     </p>
                   </div>
                 </div>
-                <div class="notify-panel notify-panel__grid">
+                <div class="notify-panel notify-panel__grid" *ngIf="isEquipmentSectionOpen('piping')">
                   <label class="notify-panel__field notify-panel__field--full">
                     <span>Tipo</span>
                     <select class="notify-panel__select" [(ngModel)]="eqEvapAirTypeForm" name="eq-evap-type">
@@ -1442,7 +1440,7 @@
               </article>
 
               <article class="card card--ficha-section">
-                <div class="equipment-page__section-head">
+                <div class="equipment-page__section-head" role="button" tabindex="0" (click)="toggleEquipmentSection('notes')" (keydown.enter)="toggleEquipmentSection('notes')">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -1454,7 +1452,7 @@
                     <p class="card__hint card__hint--tight">Instalación, accesorios, particularidades.</p>
                   </div>
                 </div>
-                <label class="notify-panel__field notify-panel__field--full">
+                <label class="notify-panel__field notify-panel__field--full" *ngIf="isEquipmentSectionOpen('notes')">
                   <span>Texto</span>
                   <textarea
                     class="notify-panel__textarea"
@@ -1468,7 +1466,7 @@
               </article>
 
               <article class="card card--ficha-section">
-                <div class="equipment-page__section-head">
+                <div class="equipment-page__section-head" role="button" tabindex="0" (click)="toggleEquipmentSection('maintenance')" (keydown.enter)="toggleEquipmentSection('maintenance')">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -1482,7 +1480,7 @@
                     <p class="card__hint card__hint--tight">Última y próxima visita; intervalo y aviso en el dispositivo (navegador o PWA en el celular, con permiso de notificaciones).</p>
                   </div>
                 </div>
-                <div class="notify-panel notify-panel__grid">
+                <div class="notify-panel notify-panel__grid" *ngIf="isEquipmentSectionOpen('maintenance')">
                   <label class="notify-panel__field">
                     <span>Último mantenimiento — fecha</span>
                     <input type="date" [(ngModel)]="eqLastMaintDate" name="eq-lm-d" />
@@ -1517,7 +1515,7 @@
               </article>
 
               <article class="card card--ficha-section">
-                <div class="equipment-page__section-head">
+                <div class="equipment-page__section-head" role="button" tabindex="0" (click)="toggleEquipmentSection('log')" (keydown.enter)="toggleEquipmentSection('log')">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <line x1="8" y1="6" x2="21" y2="6" />
@@ -1533,7 +1531,7 @@
                     <p class="card__hint card__hint--tight">Visitas e intervenciones (más reciente arriba).</p>
                   </div>
                 </div>
-                <div class="notify-panel notify-panel__grid equipment-log-add">
+                <div class="notify-panel notify-panel__grid equipment-log-add" *ngIf="isEquipmentSectionOpen('log')">
                   <label class="notify-panel__field">
                     <span>Fecha</span>
                     <input type="date" [(ngModel)]="logDateForm" name="log-d" />
@@ -1552,7 +1550,7 @@
                     </button>
                   </div>
                 </div>
-                <div class="equipment-log-table-wrap" *ngIf="equipmentLogRows.length">
+                <div class="equipment-log-table-wrap" *ngIf="isEquipmentSectionOpen('log') && equipmentLogRows.length">
                   <table class="equipment-log-table">
                     <thead>
                       <tr>
@@ -1579,11 +1577,11 @@
                     </tbody>
                   </table>
                 </div>
-                <p class="card__empty" *ngIf="!equipmentLogRows.length">Sin entradas todavía.</p>
+                <p class="card__empty" *ngIf="isEquipmentSectionOpen('log') && !equipmentLogRows.length">Sin entradas todavía.</p>
               </article>
 
               <article class="card card--ficha-section">
-                <div class="equipment-page__section-head">
+                <div class="equipment-page__section-head" role="button" tabindex="0" (click)="toggleEquipmentSection('photos')" (keydown.enter)="toggleEquipmentSection('photos')">
                   <span class="equipment-page__section-icon equipment-page__section-icon--blue" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
@@ -1596,7 +1594,7 @@
                     <p class="card__hint card__hint--tight">Cámara o archivos; máx. 5 MB (JPEG, PNG, WebP, GIF).</p>
                   </div>
                 </div>
-                <div class="notify-panel equipment-photos-add">
+                <div class="notify-panel equipment-photos-add" *ngIf="isEquipmentSectionOpen('photos')">
                   <label class="notify-panel__field notify-panel__field--full">
                     <span>Leyenda (opcional)</span>
                     <input type="text" [(ngModel)]="photoCaptionForm" name="ph-cap" maxlength="120" />
@@ -1612,7 +1610,7 @@
                   </label>
                   <span class="equipment-photos-add__hint" *ngIf="equipmentPhotoUploading">Subiendo…</span>
                 </div>
-                <div class="equipment-photo-grid" *ngIf="equipmentPhotos.length">
+                <div class="equipment-photo-grid" *ngIf="isEquipmentSectionOpen('photos') && equipmentPhotos.length">
                   <figure class="equipment-photo-grid__cell" *ngFor="let ph of equipmentPhotos">
                     <img [src]="ph.publicUrl" [alt]="ph.caption || 'Foto equipo'" loading="lazy" />
                     <figcaption *ngIf="ph.caption">{{ ph.caption }}</figcaption>
@@ -1625,7 +1623,7 @@
                     </button>
                   </figure>
                 </div>
-                <p class="card__empty" *ngIf="!equipmentPhotos.length">Sin fotos.</p>
+                <p class="card__empty" *ngIf="isEquipmentSectionOpen('photos') && !equipmentPhotos.length">Sin fotos.</p>
               </article>
 
               <div
