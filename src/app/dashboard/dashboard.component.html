@@ -1763,6 +1763,35 @@
       </ng-container>
 
       <ng-template #settingsPanelsContent>
+          <article class="card" *ngIf="environment.deviceCloudSync">
+            <h2 class="card__title card__title--sm">Guía: conectar un dispositivo</h2>
+            <p class="card__hint card__hint--tight">
+              Pasos para que el equipo envíe telemetría a la nube y aparezca en el panel.
+            </p>
+            <details class="connection-guide">
+              <summary class="connection-guide__summary">Ver pasos</summary>
+              <ol class="connection-guide__steps">
+                <li>
+                  En <strong>Dispositivos</strong>, pulsá <strong>Agregar dispositivo</strong>, completá nombre y ubicación, y guardá.
+                </li>
+                <li>
+                  Si dejaste vacío el ID módulo, la app genera uno. Tras guardar se abre una ventana con
+                  <strong>api_url</strong>, <strong>module_id</strong> y <strong>api_key</strong>: copiá esos tres valores.
+                </li>
+                <li>
+                  En el equipo, abrí el <strong>portal de configuración por WiFi</strong> (red temporal del dispositivo, como al configurar un router) y pegá los mismos nombres de campo que muestra la app.
+                </li>
+                <li>
+                  Conectá el equipo a tu WiFi con internet. Cuando envíe lecturas, la tarjeta pasará de “esperando datos” a mostrar temperaturas y demás.
+                </li>
+                <li>
+                  La dirección de ingesta (campo <code>api_url</code>) suele ser:
+                  <code class="connection-guide__url">{{ ingestUrlForGuide }}</code>
+                </li>
+              </ol>
+            </details>
+          </article>
+
           <article class="card card--sensor-labels" *ngIf="selectedDevice">
             <h2 class="card__title card__title--sm">Nombres de sensores</h2>
             <p class="card__hint card__hint--tight">
@@ -1812,7 +1841,7 @@
           <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync">
             <h2 class="card__title card__title--sm">Corrección de temperatura y consumo</h2>
             <p class="card__hint card__hint--tight">
-              Sumás o restás al valor que envía el ESP al guardar cada lectura en la nube: temperatura en °C, corriente en A y potencia en W. Con pinza / SCT, la <strong>corriente en A</strong> corrige el amperaje RMS que calcula el firmware a partir del sensor; si el consumo en pantalla queda sistemáticamente alto o bajo, ajustá este valor (y la tensión nominal del equipo arriba) antes que la potencia en W. La tarjeta y el historial usan bruto + offset cuando hay columnas crudas en la nube. Para que el gráfico de <strong>Análisis</strong> use el mismo criterio, ejecutá en Supabase el SQL <code>024_get_device_readings_chart_raw.sql</code>.
+              Sumás o restás al valor que envía el dispositivo al guardar cada lectura en la nube: temperatura en °C, corriente en A y potencia en W. Con pinza / SCT, la <strong>corriente en A</strong> corrige el amperaje RMS que calcula el equipo a partir del sensor; si el consumo en pantalla queda sistemáticamente alto o bajo, ajustá este valor (y la tensión nominal del equipo arriba) antes que la potencia en W. La tarjeta y el historial usan bruto + offset cuando hay columnas crudas en la nube. Para que el gráfico de <strong>Análisis</strong> use el mismo criterio, ejecutá en Supabase el SQL <code>024_get_device_readings_chart_raw.sql</code>.
             </p>
             <div class="notify-panel notify-panel__grid">
               <label class="notify-panel__field">
@@ -2019,7 +2048,7 @@
                 </label>
               </div>
               <p class="notify-panel__hint" *ngIf="alertsEnabledForm">
-                Los mín./máx. en °C aplican al sensor 1 y al sensor 2. Corriente: el ESP debe enviar <code>current_a</code> (A RMS); si falta y hay <code>power_w</code>, el panel estima I con la tensión nominal (p. ej. 220 o 380 V según el tablero). Esa misma tensión sirve para el consumo diario (kWh) y la tarjeta “Pinza”. Retardo temperatura: entre avisos si °C o corriente superan el máximo. Retardo desconectado: entre avisos si no hay datos del equipo.
+                Los mín./máx. en °C aplican al sensor 1 y al sensor 2. Corriente: el dispositivo debe enviar <code>current_a</code> (A RMS); si falta y hay <code>power_w</code>, el panel estima I con la tensión nominal (p. ej. 220 o 380 V según el tablero). Esa misma tensión sirve para el consumo diario (kWh) y la tarjeta “Pinza”. Retardo temperatura: entre avisos si °C o corriente superan el máximo. Retardo desconectado: entre avisos si no hay datos del equipo.
               </p>
               <p class="notify-panel__hint" *ngIf="!alertsEnabledForm">
                 Sin alertas para este dispositivo: no suena el pitido, no aparecen en el panel ni avisos del navegador (tras guardar).
@@ -2076,7 +2105,7 @@
                 *ngIf="!webPushPublicKeyConfigured"
               >
                 <strong>Web Push desactivado en este build:</strong> falta la clave pública VAPID. Definí
-                <code>VAPID_PUBLIC_KEY</code> al construir (Vercel / local: antes de
+                <code>VAPID_PUBLIC_KEY</code> al construir (variables de entorno del despliegue o local: antes de
                 <code>npm run build</code> corre <code>inject-vapid</code>). En Supabase → Edge Functions → Secrets deben existir
                 <code>VAPID_PUBLIC_KEY</code>, <code>VAPID_PRIVATE_KEY</code> y <code>VAPID_SUBJECT</code> (mismo par que en el front).
               </p>
@@ -2087,7 +2116,7 @@
               </p>
               <p class="notify-panel__hint" *ngIf="webPushUiState === 'loading'">Comprobando soporte…</p>
               <p class="notify-panel__hint" *ngIf="webPushUiState === 'unsupported'">
-                No disponible aquí (probá la URL publicada en Vercel con HTTPS o otro navegador).
+                No disponible aquí (probá la URL publicada del sitio con HTTPS o otro navegador).
               </p>
               <ng-container *ngIf="webPushUiState === 'none' || webPushUiState === 'active'">
                 <p class="notify-panel__hint" *ngIf="webPushUiState === 'active'">
@@ -2247,7 +2276,7 @@
       <h2 id="device-modal-title" class="modal__title">Dispositivo</h2>
       <button type="button" class="modal__close" (click)="closeDeviceModal()" aria-label="Cerrar">×</button>
     </div>
-    <p class="modal__intro" *ngIf="deviceModalMode === 'add'">Nuevo dispositivo. Si dejás vacío el ID módulo, se genera uno para cargar en WiFiManager del ESP.</p>
+    <p class="modal__intro" *ngIf="deviceModalMode === 'add'">Nuevo dispositivo. Si dejás vacío el ID módulo, se genera uno para cargarlo en el portal de configuración del equipo.</p>
     <p class="modal__intro" *ngIf="deviceModalMode === 'edit'">Editar dispositivo. Podés registrar una lectura manual abajo.</p>
     <form class="modal__form" [formGroup]="deviceForm" (ngSubmit)="submitDeviceForm()">
       <label class="modal__field">
@@ -2263,15 +2292,15 @@
       <label class="modal__field">
         <span class="modal__label">ID módulo (dispositivo)</span>
         <input type="text" class="modal__input" formControlName="moduleId" autocomplete="off" />
-        <span class="modal__hint">Opcional. Vacío = se genera automático (mismo valor en WiFiManager: module_id).</span>
+        <span class="modal__hint">Opcional. Vacío = se genera automático (mismo valor en el portal del equipo: <code>module_id</code>).</span>
       </label>
       <div class="modal__field" *ngIf="deviceModalMode === 'edit' && editingDevice?.deviceToken">
         <span class="modal__label">Código API (6 dígitos, solo este navegador)</span>
         <input type="text" class="modal__input" readonly [value]="editingDevice?.deviceToken" />
-        <span class="modal__hint">Copialo al ESP (WiFiManager: api_key) si cambiaste de PC o borraste datos del navegador.</span>
+        <span class="modal__hint">Copialo al dispositivo (campo <code>api_key</code> del portal) si cambiaste de PC o borraste datos del navegador.</span>
       </div>
       <label class="modal__field">
-        <span class="modal__label">IP (WiFi)</span>
+        <span class="modal__label">IP en tu red (opcional)</span>
         <input type="text" class="modal__input" formControlName="espLocalIp" autocomplete="off" />
       </label>
       <label class="modal__field">
@@ -2299,10 +2328,10 @@
 >
   <div class="modal modal--wide" (click)="$event.stopPropagation()">
     <div class="modal__head">
-      <h2 id="provision-title" class="modal__title">Configurar ESP (WiFiManager)</h2>
+      <h2 id="provision-title" class="modal__title">Configurar el dispositivo</h2>
       <button type="button" class="modal__close" (click)="closeProvisioningModal()" aria-label="Cerrar">×</button>
     </div>
-    <p class="modal__intro">Copiá estos valores en el portal del ESP (mismos nombres que en el firmware).</p>
+    <p class="modal__intro">Copiá estos valores en el portal de configuración del equipo (mismos nombres de campo).</p>
     <div class="provision-rows">
       <div class="provision-row">
         <span class="provision-row__label">api_url</span>
@@ -2320,7 +2349,7 @@
         <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(cred.deviceToken)">Copiar</button>
       </div>
     </div>
-    <p class="modal__hint">En el firmware van como <code>moduleId</code> y <code>deviceToken</code> (api_key = 6 dígitos). Guardá este código: no se puede recuperar desde otro navegador.</p>
+    <p class="modal__hint">En el programa del equipo suelen mapearse como <code>moduleId</code> y <code>deviceToken</code> (<code>api_key</code> = 6 dígitos). Guardá este código: no se puede recuperar desde otro navegador.</p>
     <div class="modal__actions">
       <button type="button" class="btn btn--primary" (click)="closeProvisioningModal()">Listo</button>
     </div>

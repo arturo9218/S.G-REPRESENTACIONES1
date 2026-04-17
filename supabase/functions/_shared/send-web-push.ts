@@ -31,7 +31,7 @@ function normalizePushSubscriptionKey(key: string): string {
 }
 
 /**
- * URL pública del front (HTTPS, sin barra final), ej. https://tu-app.vercel.app
+ * URL pública del front (HTTPS, sin barra final), ej. https://panel.tudominio.com
  * Secret en Supabase: APP_PUBLIC_URL — para icon/badge absolutos en Android/Chrome en segundo plano.
  */
 function notificationBaseUrl(): string | undefined {

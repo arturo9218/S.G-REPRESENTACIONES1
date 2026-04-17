@@ -17,6 +17,7 @@ import {
   TemperatureReading,
 } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
+import { ingestFunctionUrl } from '../core/supabase-config';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
 import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 import {
@@ -36,8 +37,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly isDev = !environment.production;
   /** Expuesto al template (intervalo de actualización de lecturas). */
   readonly environment = environment;
+  /** URL de ingesta (Supabase Edge Function) para mostrar en la guía de conexión. */
+  readonly ingestUrlForGuide = ingestFunctionUrl();
 
-  /** Sin clave pública VAPID en el build, Web Push no puede registrarse (VAPID_PUBLIC_KEY en build / Vercel). */
+  /** Sin clave pública VAPID en el build, Web Push no puede registrarse (p. ej. variable VAPID_PUBLIC_KEY en el hosting). */
   get webPushPublicKeyConfigured(): boolean {
     return typeof this.environment.vapidPublicKey === 'string' && this.environment.vapidPublicKey.trim().length > 0;
   }
@@ -61,7 +64,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   tempPushDelayMinForm = '15';
   /** Retardo entre avisos de “desconectado” (min), independiente del de temperatura */
   offlinePushDelayMinForm = '15';
-  /** Suma en °C al valor del ESP (corrección por sensor); se aplica en la nube al guardar lecturas. */
+  /** Suma en °C al valor que envía el dispositivo (corrección por sensor); se aplica en la nube al guardar lecturas. */
   temp1OffsetForm = '0';
   temp2OffsetForm = '0';
   temp3OffsetForm = '0';
@@ -283,7 +286,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     { value: 'low', label: 'Grave (suave)' },
   ];
 
-  /** Tras crear en la nube: datos para WiFiManager del ESP */
+  /** Tras crear en la nube: datos para el portal de configuración del dispositivo */
   provisioningOpen = false;
   provisioningCredentials: { moduleId: string; deviceToken: string; ingestUrl: string } | null =
     null;

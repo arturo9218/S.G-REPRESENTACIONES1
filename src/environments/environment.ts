@@ -14,14 +14,14 @@ export const environment = {
    */
   adminEmails: ['arturoalmeida9218@gmail.com'] as readonly string[],
 
-  /** Si true y hay sesión, dispositivos y lecturas se sincronizan con Supabase (ESP → Function → DB → app). */
+  /** Si true y hay sesión, dispositivos y lecturas se sincronizan con Supabase (dispositivo → Function → DB → app). */
   deviceCloudSync: true,
   ingestFunctionPath: '/functions/v1/ingest-reading',
   /** Intervalo de refresco de lecturas desde la nube (ms). Mínimo 2000 en el store. */
   readingsPollIntervalMs: 12000,
   /** Sin telemetría nueva por este tiempo => se considera desconectado. */
   deviceOfflineAfterMs: 90000,
-  /** Si una lectura vieja solo tiene `power_w`, se estima I = P / V (debe coincidir con MAINS_V_RMS del ESP). */
+  /** Si una lectura vieja solo tiene `power_w`, se estima I = P / V (debe coincidir con la tensión nominal configurada en el dispositivo). */
   displayLineVoltageVForFallback: 220,
   /** Clave pública VAPID (build: variable VAPID_PUBLIC_KEY o valor en vapid.inject.ts). */
   vapidPublicKey: VAPID_INJECT,

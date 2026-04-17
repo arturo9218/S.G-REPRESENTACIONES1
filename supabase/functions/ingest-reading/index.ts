@@ -1,5 +1,5 @@
 // Supabase Edge Function: ingest-reading
-// Recibe telemetría de ESP8266 y guarda en device_readings.
+// Recibe telemetría del dispositivo y guarda en device_readings.
 // Deploy:
 // supabase functions deploy ingest-reading --no-verify-jwt
 
@@ -162,7 +162,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    /** Diagnóstico push (útil si no llegan notificaciones); no afecta al ESP. */
+    /** Diagnóstico push (útil si no llegan notificaciones); no afecta al dispositivo. */
     let pushDiag: { sent: number; skipped?: string; lastError?: string } | undefined;
 
     if (th?.notifications_enabled && device.owner_user_id) {

@@ -23,7 +23,7 @@ function formatPushSubscribeError(raw: string): string {
       `${raw} — Suele ser red inestable o datos móviles limitando el registro con Google (FCM). ` +
       'Activá las notificaciones conectado a Wi‑Fi (una vez alcanza; después suelen llegar también con datos). ' +
       'Desactivá ahorro de datos / VPN, mejor señal 4G o probá de nuevo. ' +
-      'Si con Wi‑Fi tampoco funciona, recién ahí revisá VAPID en Vercel y Supabase (mismo par de claves). ' +
+      'Si con Wi‑Fi tampoco funciona, recién ahí revisá VAPID en el hosting del front y en Supabase (mismo par de claves). ' +
       'Chrome/Safari directo (no WebView de WhatsApp). iPhone: PWA en inicio (iOS 16.4+).'
     );
   }
@@ -82,7 +82,7 @@ export class WebPushService {
       return {
         ok: false,
         message:
-          'Falta VAPID_PUBLIC_KEY: definila en el entorno (Vercel / local) y ejecutá npm start o npm run build para regenerar src/environments/vapid.inject.ts (script scripts/inject-vapid.cjs). En Supabase Edge Functions deben coincidir VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY.',
+          'Falta VAPID_PUBLIC_KEY: definila en el entorno del build (local o CI/hosting) y ejecutá npm start o npm run build para regenerar src/environments/vapid.inject.ts (script scripts/inject-vapid.cjs). En Supabase Edge Functions deben coincidir VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY.',
       };
     }
     if (!this.swPush.isEnabled) {
@@ -142,7 +142,7 @@ export class WebPushService {
       return {
         ok: true,
         message:
-          'Activado. En Supabase (secrets de Edge Functions) tenés que tener el mismo par VAPID que en Vercel: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y VAPID_SUBJECT (mailto:tu@email). Si no coinciden, no llega ningún push.',
+          'Activado. En Supabase (secrets de Edge Functions) tenés que tener el mismo par VAPID que en el front desplegado: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y VAPID_SUBJECT (mailto:tu@email). Si no coinciden, no llega ningún push.',
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

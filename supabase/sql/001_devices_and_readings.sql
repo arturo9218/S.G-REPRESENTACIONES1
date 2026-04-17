@@ -1,4 +1,4 @@
--- SG Monitoreo: esquema para ESP8266 multi-sensor
+-- SG Monitoreo: esquema para dispositivos multi-sensor
 -- Ejecutar en Supabase SQL Editor
 
 create extension if not exists pgcrypto;

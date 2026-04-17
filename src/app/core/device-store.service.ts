@@ -1,6 +1,6 @@
 /**
- * Dispositivos: localStorage por usuario + opcional sincronización Supabase (ESP → Edge Function → DB).
- * El token del dispositivo se genera al crear; el técnico lo copia a WiFiManager del ESP.
+ * Dispositivos: localStorage por usuario + opcional sincronización Supabase (dispositivo → Edge Function → DB).
+ * El token del dispositivo se genera al crear; el técnico lo copia al portal de configuración del equipo.
  */
 
 import { Injectable, NgZone } from '@angular/core';
@@ -178,7 +178,7 @@ export class DeviceStoreService {
     void this.hydrateFromCloud();
   }
 
-  /** URL del endpoint que debe usar el ESP en WiFiManager (`api_url`). */
+  /** URL del endpoint que debe usar el dispositivo en su portal de configuración (`api_url`). */
   getIngestUrl(): string {
     return ingestFunctionUrl();
   }
@@ -952,7 +952,7 @@ export class DeviceStoreService {
     return `MOD-${this.randomHex(4)}`;
   }
 
-  /** Código numérico de 6 dígitos para cargar en el ESP (WiFiManager: api_key). */
+  /** Código numérico de 6 dígitos para cargar en el dispositivo (portal: api_key). */
   private randomSixDigitToken(): string {
     const a = new Uint8Array(6);
     crypto.getRandomValues(a);
@@ -1185,8 +1185,8 @@ export class DeviceStoreService {
   }
 
   /**
-   * Si la lectura trae bruto del ESP (tempNRawC), el valor mostrado = bruto + offset actual del dispositivo.
-   * Así al cambiar la corrección en el panel se actualiza la tarjeta sin esperar un nuevo POST del ESP.
+   * Si la lectura trae bruto del sensor (tempNRawC), el valor mostrado = bruto + offset actual del dispositivo.
+   * Así al cambiar la corrección en el panel se actualiza la tarjeta sin esperar un nuevo envío del equipo.
    */
   private applyOffsetsToReadings(
     readings: TemperatureReading[],

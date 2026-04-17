@@ -2,7 +2,7 @@ export interface DashboardDevice {
   id: string;
   name: string;
   location: string;
-  /** null hasta que llegue una lectura (ESP8266 o manual) */
+  /** null hasta que llegue una lectura (desde el dispositivo o manual) */
   temperatureC: number | null;
   /** Segundo canal DS18B20 (mismo bus OneWire); null si no hay dato */
   temperature2C?: number | null;
@@ -10,10 +10,10 @@ export interface DashboardDevice {
   updatedAtLabel: string;
   batteryPct?: number | null;
   /**
-   * Mismo identificador que uses en el firmware del ESP8266.
-   * Conexión típica: el ESP hace HTTP POST a tu API con { "moduleId": "...", "temperatureC": 3.2 }
+   * Mismo identificador que configurás en el equipo (portal o programa embebido).
+   * Conexión típica: el dispositivo hace HTTP POST a la API con { "moduleId": "...", "temperatureC": 3.2 }
    * y el backend busca el dispositivo por moduleId y llama a recordTemperatureReading.
-   * Ver comentario en device-store.service.ts (ESP8266).
+   * Ver comentario en device-store.service.ts (ingesta).
    */
   moduleId?: string;
   espLocalIp?: string;
@@ -43,18 +43,18 @@ export interface DashboardDevice {
   ownerUserId?: string;
   /** Creado en Supabase; lecturas vienen de la nube */
   cloudSynced?: boolean;
-  /** Código de 6 dígitos para WiFiManager api_key (solo en este navegador tras el alta) */
+  /** Código de 6 dígitos para el portal del dispositivo (api_key); solo en este navegador tras el alta */
   deviceToken?: string;
   /** Etiquetas mostradas para temp1 / temp2 (Supabase + localStorage) */
   sensor1Label?: string;
   sensor2Label?: string;
-  /** Suma en °C al valor crudo del ESP (corrección de sensor); default 0 */
+  /** Suma en °C al valor crudo del dispositivo (corrección de sensor); default 0 */
   temp1OffsetC?: number;
   temp2OffsetC?: number;
   temp3OffsetC?: number;
-  /** Suma en A al valor de corriente del ESP (ingesta); default 0 */
+  /** Suma en A al valor de corriente del dispositivo (ingesta); default 0 */
   currentOffsetA?: number;
-  /** Suma en W al valor de potencia del ESP (ingesta); default 0 */
+  /** Suma en W al valor de potencia del dispositivo (ingesta); default 0 */
   powerOffsetW?: number;
 }
 
@@ -64,7 +64,7 @@ export interface TemperatureReading {
   at: string;
   /** Temperatura principal usada en gráfico y alertas (bruto + offset actual del dispositivo si hay raw) */
   temperatureC: number;
-  /** Bruto del ESP antes de corrección (si existe en DB / ingesta); si falta, temperatureC es el valor guardado tal cual */
+  /** Bruto del sensor antes de corrección (si existe en DB / ingesta); si falta, temperatureC es el valor guardado tal cual */
   temp1RawC?: number | null;
   temp2RawC?: number | null;
   temp3RawC?: number | null;
@@ -76,9 +76,9 @@ export interface TemperatureReading {
   powerW?: number | null;
   press1Bar?: number | null;
   press2Bar?: number | null;
-  /** Bruto del ESP antes de current_offset_a (nube); si falta, currentA es el valor guardado */
+  /** Bruto de ingesta antes de current_offset_a (nube); si falta, currentA es el valor guardado */
   currentARaw?: number | null;
-  /** Bruto del ESP antes de power_offset_w */
+  /** Bruto de ingesta antes de power_offset_w */
   powerWRaw?: number | null;
 }
 
