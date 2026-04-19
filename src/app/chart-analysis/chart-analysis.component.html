@@ -11,6 +11,7 @@
     class="sidebar-hotspot"
     *ngIf="sidebarCollapsed && !sidebarPeek"
     (mouseenter)="openSidebarPeek()"
+    (click)="toggleSidebar()"
     aria-label="Mostrar panel de filtros"
   >
     ≡

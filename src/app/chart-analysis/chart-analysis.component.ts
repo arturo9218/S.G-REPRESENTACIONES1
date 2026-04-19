@@ -128,6 +128,12 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.loadChartStylePreset();
     this.loadChartSeriesPrefs();
 
+    // Celular / tablet estrecho: panel de filtros plegado para que el gráfico entre primero.
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches) {
+      this.sidebarCollapsed = true;
+      this.sidebarPeek = false;
+    }
+
     // Soporta ambos nombres por compatibilidad: deviceId (correcto) y deviceld (typo viejo).
     const qp = this.route.snapshot.queryParamMap;
     this.selectedDeviceId = qp.get('deviceId') ?? qp.get('deviceld');
