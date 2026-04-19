@@ -210,14 +210,10 @@ $border: rgba(148, 163, 184, 0.18);
   }
 }
 
-/* Móvil: filtros y gráfico en el flujo (scroll); sin cajón fixed ni visibility:hidden que deje el SVG sin alto. */
+/* Móvil: filtros arriba y gráfico abajo en el flujo (scroll); sin panel fixed ni visibility:hidden que deje el SVG sin alto. */
 @media (max-width: 768px) {
   .grid.grid--sidebar-hidden {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .panel--chart {
-    order: -1;
   }
 
   .panel--side {
@@ -1441,6 +1437,35 @@ $border: rgba(148, 163, 184, 0.18);
 
   .chart--trend .chart__axis-title {
     font-size: 0.52rem;
+  }
+}
+
+/*
+ * Móvil (≤768px): el gráfico no debe participar en flex-grow/shrink contra el panel
+ * de filtros. Con `order: -1` + `flex: 1 1 0` + `min-height: 0`, el bloque del plot
+ * quedaba más bajo que su contenido y el SVG hacía overflow visible encima de los
+ * controles. Aquí: altura explícita del wrap y flex "auto" en la cadena.
+ */
+@media (max-width: 768px) {
+  .panel.panel--chart {
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
+  .chart-pdf-capture {
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
+  .chart {
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
+  .chart__svg-wrap {
+    height: clamp(220px, 48dvh, 520px);
+    min-height: clamp(200px, 36dvh, 360px);
+    max-height: min(68dvh, 560px);
   }
 }
 
