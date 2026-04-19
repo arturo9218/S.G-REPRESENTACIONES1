@@ -19,27 +19,6 @@ import { environment } from '../../environments/environment';
 import { capChartPointsSorted } from '../core/chart-sampling';
 import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 
-type AnalysisChannel = 'temp1' | 'temp2' | 'both' | 'current';
-
-/** Informe guardado localmente (lista en análisis; foto opcional desde cámara o galería). */
-export interface StoredAnalysisInforme {
-  id: string;
-  createdAt: string;
-  title: string;
-  note: string;
-  deviceId: string;
-  deviceName: string;
-  filterFrom: string;
-  filterTo: string;
-  filterDay: string;
-  /** @deprecated usar seriesT1/T2/C */
-  channel?: AnalysisChannel;
-  seriesT1?: boolean;
-  seriesT2?: boolean;
-  seriesC?: boolean;
-  photoDataUrl: string | null;
-}
-
 @Component({
   selector: 'app-chart-analysis',
   templateUrl: './chart-analysis.component.html',
@@ -83,22 +62,15 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
+  private subRoute: Subscription | null = null;
   /** En navegador `setTimeout` devuelve `number` (no NodeJS.Timeout). */
   private remoteLoadTimer: number | null = null;
   /** Evita que una respuesta vieja de red pise un filtro nuevo. */
   private remoteLoadGeneration = 0;
 
   private readonly chartStyleStorageKey = 'ar_chart_style_v1';
-  private readonly informesStorageKey = 'ar_analysis_informes_v1';
   private calibFp = '';
 
-  informesPanelOpen = false;
-  informeEditorOpen = false;
-  informesList: StoredAnalysisInforme[] = [];
-  informeTitleForm = '';
-  informeNoteForm = '';
-  informePhotoDataUrl: string | null = null;
-  informeFeedback = '';
   chartStylePreset: ChartStylePreset = 'area';
   readonly chartStyleOptions: { value: ChartStylePreset; label: string }[] = [
     { value: 'area', label: 'Área (relleno suave)' },
@@ -155,7 +127,6 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.deviceStore.refreshScopeFromSession();
     this.loadChartStylePreset();
     this.loadChartSeriesPrefs();
-    this.loadInformesFromStorage();
 
     // Soporta ambos nombres por compatibilidad: deviceId (correcto) y deviceld (typo viejo).
     const qp = this.route.snapshot.queryParamMap;
@@ -221,6 +192,25 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       this.deviceStore.forceRefreshCloudReadings();
       this.scheduleRemoteChartLoad();
     }, 1200);
+
+    // Desde/Hasta/deviceId en la URL (navegación o pestaña nueva): reaplicar y recargar nube.
+    this.subRoute = this.route.queryParamMap.subscribe((qm) => {
+      const dId = qm.get('deviceId') ?? qm.get('deviceld');
+      if (dId) {
+        this.selectedDeviceId = dId;
+        this.deviceIdFromUrl = dId;
+        this.syncSensorLabelsWithSelected();
+      }
+      const qFrom = qm.get('from')?.trim() ?? '';
+      const qTo = qm.get('to')?.trim() ?? '';
+      if (qFrom || qTo) {
+        if (qFrom) this.filterFrom = qFrom;
+        if (qTo) this.filterTo = qTo;
+        this.filterDay = '';
+      }
+      this.resetChartZoom();
+      this.scheduleRemoteChartLoad();
+    });
   }
 
   ngAfterViewInit(): void {
@@ -239,6 +229,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     }
     this.subDev?.unsubscribe();
     this.subRead?.unsubscribe();
+    this.subRoute?.unsubscribe();
   }
 
   private chartInteractionCleanup?: () => void;
@@ -402,7 +393,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     if (ub) {
       const fromMs = ub.from.getTime();
       const toMs = ub.to.getTime();
-      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) return null;
+      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs > toMs) return null;
       return { fromMs, toMs };
     }
     const full = this.chartReadings();
@@ -1632,41 +1623,14 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const source = this.readings.filter((r) => r.deviceId === this.selectedDeviceId);
     let filtered = [...source];
 
-    const hasFrom = !!this.filterFrom?.trim();
-    const hasTo = !!this.filterTo?.trim();
-
-    if (hasFrom || hasTo) {
-      if (hasFrom) {
-        const fromMs = this.parseLocalDateLike(this.filterFrom)?.getTime() ?? Number.NaN;
-        if (Number.isFinite(fromMs)) {
-          filtered = filtered.filter((r) => new Date(r.at).getTime() >= fromMs);
-        }
-      }
-      if (hasTo) {
-        const parsedTo = this.parseLocalDateLike(this.filterTo);
-        if (
-          parsedTo &&
-          parsedTo.getHours() === 0 &&
-          parsedTo.getMinutes() === 0 &&
-          parsedTo.getSeconds() === 0
-        ) {
-          parsedTo.setHours(23, 59, 59, 999);
-        }
-        const toMs = parsedTo?.getTime() ?? Number.NaN;
-        if (Number.isFinite(toMs)) {
-          filtered = filtered.filter((r) => new Date(r.at).getTime() <= toMs);
-        }
-      }
-    } else if (this.filterDay) {
-      const dayRange = this.parseDayRange(this.filterDay);
-      if (dayRange) {
-        const msStart = dayRange.from.getTime();
-        const msEnd = dayRange.to.getTime();
-        filtered = filtered.filter((r) => {
-          const t = new Date(r.at).getTime();
-          return Number.isFinite(t) && t >= msStart && t <= msEnd;
-        });
-      }
+    const bounds = this.getUserDateFilterBounds();
+    if (bounds) {
+      const msStart = bounds.from.getTime();
+      const msEnd = bounds.to.getTime();
+      filtered = filtered.filter((r) => {
+        const t = new Date(r.at).getTime();
+        return Number.isFinite(t) && t >= msStart && t <= msEnd;
+      });
     }
 
     const sorted = filtered.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
@@ -1734,28 +1698,33 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
      * antes el día completo pisaba el rango horario (solo se veía efecto de "hasta").
      */
     if (hasFrom || hasTo) {
-      let from: Date;
       let to: Date;
+      if (hasTo) {
+        const rawTo = this.filterTo.trim();
+        if (this.isDateOnlyYmdInput(rawTo)) {
+          const parsed = this.parseLocalDateLike(rawTo);
+          if (!parsed) return null;
+          to = parsed;
+          to.setHours(23, 59, 59, 999);
+        } else {
+          const parsed = this.parseLocalDateLike(rawTo);
+          if (!parsed) return null;
+          to = this.applyInclusiveUpperBoundForFilterTo(rawTo, parsed);
+        }
+        if (!Number.isFinite(to.getTime())) return null;
+      } else {
+        to = new Date();
+      }
 
+      let from: Date;
       if (hasFrom) {
         const parsed = this.parseLocalDateLike(this.filterFrom);
         if (!parsed) return null;
         from = parsed;
         if (!Number.isFinite(from.getTime())) return null;
       } else {
-        from = new Date(0);
-      }
-
-      if (hasTo) {
-        const parsed = this.parseLocalDateLike(this.filterTo);
-        if (!parsed) return null;
-        to = parsed;
-        if (!Number.isFinite(to.getTime())) return null;
-        if (to.getHours() === 0 && to.getMinutes() === 0 && to.getSeconds() === 0) {
-          to.setHours(23, 59, 59, 999);
-        }
-      } else {
-        to = new Date();
+        // Solo "Hasta": evita rango 1970→hoy (en nube agrupa por hora/día y no coincide con lo pedido).
+        from = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 0, 0, 0, 0);
       }
 
       if (from > to) return null;
@@ -1770,12 +1739,50 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     return null;
   }
 
+  /** `yyyy-mm-dd` sin hora (p. ej. type=date o pegado); no confundir con `yyyy-mm-ddT00:00`. */
+  private isDateOnlyYmdInput(raw: string): boolean {
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw.trim().replace(/\.\d+$/, ''));
+  }
+
+  /**
+   * Límite superior inclusivo: `datetime-local` suele mandar `…T14:30` o `…:30:00` sin el resto del minuto;
+   * sin esto se pierden lecturas entre :00 y :59 de ese minuto.
+   */
+  private applyInclusiveUpperBoundForFilterTo(rawInput: string, parsed: Date): Date {
+    const s = rawInput.trim().replace(/\.\d+$/, '');
+    const d = new Date(parsed.getTime());
+    const m = s.match(/[T ](\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (!m) {
+      d.setMilliseconds(999);
+      return d;
+    }
+    if (!m[3]) {
+      d.setSeconds(59, 999);
+      return d;
+    }
+    if (m[3] === '00') {
+      d.setSeconds(59, 999);
+      return d;
+    }
+    d.setMilliseconds(999);
+    return d;
+  }
+
   /**
    * Acepta formato ISO (datetime-local/date) y fallback manual dd/mm/yyyy [hh:mm[:ss]].
    */
   private parseLocalDateLike(raw: string | null | undefined): Date | null {
-    const v = (raw ?? '').trim();
+    let v = (raw ?? '').trim();
     if (!v) return null;
+
+    // Instante explícito en UTC (export / API), p. ej. 2026-04-19T14:30:00.000Z
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/i.test(v)) {
+      const d = new Date(v);
+      return Number.isFinite(d.getTime()) ? d : null;
+    }
+
+    // Algunos navegadores agregan ".000" sin Z; quitar fracción para que matchee el patrón local.
+    v = v.replace(/\.\d+$/, '');
 
     // Input date: yyyy-mm-dd (interpretar SIEMPRE en local para evitar desfase UTC).
     const ymd = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1996,140 +2003,6 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       n(d.currentOffsetA),
       n(d.powerOffsetW),
     ].join('|');
-  }
-
-  toggleInformesPanel(): void {
-    this.informesPanelOpen = !this.informesPanelOpen;
-  }
-
-  private loadInformesFromStorage(): void {
-    try {
-      const raw = localStorage.getItem(this.informesStorageKey);
-      if (!raw) {
-        this.informesList = [];
-        return;
-      }
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) {
-        this.informesList = [];
-        return;
-      }
-      this.informesList = parsed.filter(
-        (x): x is StoredAnalysisInforme =>
-          !!x &&
-          typeof x === 'object' &&
-          typeof (x as StoredAnalysisInforme).id === 'string' &&
-          typeof (x as StoredAnalysisInforme).title === 'string'
-      );
-      this.informesList.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-    } catch {
-      this.informesList = [];
-    }
-  }
-
-  private persistInformesToStorage(): void {
-    try {
-      localStorage.setItem(this.informesStorageKey, JSON.stringify(this.informesList));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      this.informeFeedback = `No se pudo guardar la lista (${msg}).`;
-      window.setTimeout(() => (this.informeFeedback = ''), 5000);
-    }
-  }
-
-  formatInformeDate(iso: string): string {
-    try {
-      return new Date(iso).toLocaleString('es-AR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return iso;
-    }
-  }
-
-  onInformePhotoFile(ev: Event): void {
-    const input = ev.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file || !file.type.startsWith('image/')) {
-      this.informePhotoDataUrl = null;
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      this.informeFeedback = 'La imagen supera 2 MB. Elegí otra más liviana.';
-      input.value = '';
-      window.setTimeout(() => (this.informeFeedback = ''), 4000);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
-      this.informePhotoDataUrl = url;
-      this.informeFeedback = '';
-    };
-    reader.readAsDataURL(file);
-    input.value = '';
-  }
-
-  clearInformePhoto(): void {
-    this.informePhotoDataUrl = null;
-  }
-
-  cancelInformeEditor(): void {
-    this.informeEditorOpen = false;
-    this.informeTitleForm = '';
-    this.informeNoteForm = '';
-    this.informePhotoDataUrl = null;
-    this.informeFeedback = '';
-  }
-
-  saveInforme(): void {
-    const title = this.informeTitleForm.trim();
-    if (!title) {
-      this.informeFeedback = 'Poné un título al informe.';
-      window.setTimeout(() => (this.informeFeedback = ''), 4000);
-      return;
-    }
-    if (!this.selectedDeviceId) {
-      this.informeFeedback = 'Seleccioná un dispositivo.';
-      window.setTimeout(() => (this.informeFeedback = ''), 4000);
-      return;
-    }
-    const dev = this.devices.find((d) => d.id === this.selectedDeviceId);
-    const row: StoredAnalysisInforme = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
-      createdAt: new Date().toISOString(),
-      title,
-      note: this.informeNoteForm.trim(),
-      deviceId: this.selectedDeviceId,
-      deviceName: dev?.name?.trim() || 'Equipo',
-      filterFrom: this.filterFrom,
-      filterTo: this.filterTo,
-      filterDay: this.filterDay,
-      seriesT1: this.seriesShowTemp1,
-      seriesT2: this.seriesShowTemp2,
-      seriesC: this.seriesShowCurrent,
-      photoDataUrl: this.informePhotoDataUrl,
-    };
-    this.informesList = [row, ...this.informesList];
-    this.persistInformesToStorage();
-    this.informeTitleForm = '';
-    this.informeNoteForm = '';
-    this.informePhotoDataUrl = null;
-    this.informeEditorOpen = false;
-    this.informeFeedback = 'Informe guardado en este navegador.';
-    window.setTimeout(() => (this.informeFeedback = ''), 4000);
-  }
-
-  deleteInforme(id: string): void {
-    if (!confirm('¿Borrar este informe de la lista?')) return;
-    this.informesList = this.informesList.filter((x) => x.id !== id);
-    this.persistInformesToStorage();
   }
 
   private currentSeriesForwardFilled(series: TemperatureReading[]): (number | null)[] {
