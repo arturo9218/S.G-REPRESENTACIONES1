@@ -8,6 +8,14 @@
 
   <button
     type="button"
+    class="sidebar-backdrop"
+    *ngIf="narrowUi && !sidebarCollapsed"
+    (click)="toggleSidebar()"
+    aria-label="Cerrar panel de filtros"
+  ></button>
+
+  <button
+    type="button"
     class="sidebar-hotspot"
     *ngIf="sidebarCollapsed && !sidebarPeek"
     (mouseenter)="openSidebarPeek()"
@@ -574,6 +582,7 @@
         </span>
         <span class="chart-stat chart-stat--range">{{ chartSideRangeLabel }}</span>
       </div>
+
       </div>
     </div>
   </section>

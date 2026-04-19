@@ -2,6 +2,7 @@ import {
   AfterViewInit,
   Component,
   ElementRef,
+  NgZone,
   OnDestroy,
   OnInit,
   ViewChild,
@@ -54,6 +55,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   filterTo = '';
   sidebarCollapsed = false;
   sidebarPeek = false;
+
+  /** Vista ≤768px: panel de filtros en cajón + backdrop (no `display:none`). */
+  narrowUi = false;
+  private narrowUiMql?: MediaQueryList;
+  private onNarrowUiMediaChange?: () => void;
 
   /** Serie para filtros de fecha en dispositivo nube (RPC Supabase). */
   remoteChartSeries: TemperatureReading[] | null = null;
@@ -119,7 +125,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     private readonly route: ActivatedRoute,
     private readonly router: Router,
     private readonly auth: AuthService,
-    private readonly deviceStore: DeviceStoreService
+    private readonly deviceStore: DeviceStoreService,
+    private readonly ngZone: NgZone
   ) {}
 
   ngOnInit(): void {
@@ -134,9 +141,21 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       this.sidebarPeek = false;
     }
 
-    // Soporta ambos nombres por compatibilidad: deviceId (correcto) y deviceld (typo viejo).
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      this.narrowUiMql = window.matchMedia('(max-width: 768px)');
+      this.narrowUi = this.narrowUiMql.matches;
+      this.onNarrowUiMediaChange = () => {
+        const next = this.narrowUiMql?.matches ?? false;
+        this.ngZone.run(() => {
+          this.narrowUi = next;
+        });
+      };
+      this.narrowUiMql.addEventListener('change', this.onNarrowUiMediaChange);
+    }
+
+    // deviceId (correcto), deviceid (minúsculas), deviceld (typo viejo).
     const qp = this.route.snapshot.queryParamMap;
-    this.selectedDeviceId = qp.get('deviceId') ?? qp.get('deviceld');
+    this.selectedDeviceId = qp.get('deviceId') ?? qp.get('deviceid') ?? qp.get('deviceld');
     this.deviceIdFromUrl = this.selectedDeviceId;
     const qFrom = qp.get('from')?.trim();
     const qTo = qp.get('to')?.trim();
@@ -201,7 +220,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
     // Desde/Hasta/deviceId en la URL (navegación o pestaña nueva): reaplicar y recargar nube.
     this.subRoute = this.route.queryParamMap.subscribe((qm) => {
-      const dId = qm.get('deviceId') ?? qm.get('deviceld');
+      const dId = qm.get('deviceId') ?? qm.get('deviceid') ?? qm.get('deviceld');
       if (dId) {
         this.selectedDeviceId = dId;
         this.deviceIdFromUrl = dId;
@@ -236,6 +255,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.subDev?.unsubscribe();
     this.subRead?.unsubscribe();
     this.subRoute?.unsubscribe();
+    if (this.narrowUiMql && this.onNarrowUiMediaChange) {
+      this.narrowUiMql.removeEventListener('change', this.onNarrowUiMediaChange);
+    }
+    this.narrowUiMql = undefined;
+    this.onNarrowUiMediaChange = undefined;
   }
 
   private chartInteractionCleanup?: () => void;

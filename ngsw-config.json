@@ -31,7 +31,9 @@
     {
       "name": "supabase-api",
       "urls": [
-        "https://*.supabase.co/**"
+        "https://*.supabase.co/rest/v1/**",
+        "https://*.supabase.co/auth/v1/**",
+        "https://*.supabase.co/storage/v1/**"
       ],
       "cacheConfig": {
         "maxSize": 40,

@@ -9,7 +9,7 @@
     "prebuild": "node scripts/inject-vapid.cjs && node scripts/patch-ngsw-notification-sound.cjs",
     "build": "ng build",
     "manual:pdf": "node scripts/generate-manual-pdf.cjs",
-    "deploy:supabase-functions": "npx -y supabase@latest functions deploy ingest-reading --no-verify-jwt && npx -y supabase@latest functions deploy check-offline-push --no-verify-jwt",
+    "deploy:supabase-functions": "npx -y supabase@latest functions deploy ingest-reading --no-verify-jwt && npx -y supabase@latest functions deploy check-offline-push --no-verify-jwt && npx -y supabase@latest functions deploy ai-chart-insight",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },

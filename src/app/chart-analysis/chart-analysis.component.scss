@@ -117,14 +117,50 @@ $border: rgba(148, 163, 184, 0.18);
   grid-template-columns: 0 1fr;
 }
 
-/* Móvil: columna 0px deja rastros en algunos navegadores; ocultamos el panel y dejamos solo el gráfico. */
+/* Móvil: gráfico a ancho completo; filtros en cajón fijo (no display:none). */
 @media (max-width: 768px) {
   .grid.grid--sidebar-hidden {
     grid-template-columns: 1fr;
   }
 
+  .panel--side {
+    position: fixed;
+    top: max(0.45rem, env(safe-area-inset-top, 0px));
+    bottom: max(0.45rem, env(safe-area-inset-bottom, 0px));
+    left: max(0.35rem, env(safe-area-inset-left, 0px));
+    width: min(360px, calc(100vw - 0.75rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+    max-width: min(360px, 92vw);
+    z-index: 36;
+    margin: 0;
+    transition:
+      transform 0.22s ease,
+      visibility 0.22s ease,
+      box-shadow 0.22s ease;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
+  }
+
   .grid.grid--sidebar-hidden .panel--side {
-    display: none;
+    transform: translateX(calc(-100% - 28px));
+    visibility: hidden;
+    pointer-events: none;
+    box-shadow: none;
+  }
+
+  .grid:not(.grid--sidebar-hidden) .panel--side {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  /* Altura del gráfico sigue el ancho de pantalla (se ajusta solo al rotar o redimensionar). */
+  .chart__svg-wrap {
+    height: auto;
+    width: 100%;
+    aspect-ratio: 11 / 8;
+    min-height: clamp(200px, 54vw, 300px);
+    max-height: min(72dvh, 72svh, 480px);
   }
 }
 
@@ -810,6 +846,7 @@ $border: rgba(148, 163, 184, 0.18);
 .panel--chart:fullscreen .chart__svg-wrap {
   height: min(calc(100dvh - 8rem), 900px);
   max-height: none;
+  aspect-ratio: unset;
 }
 
 .chart__svg {
@@ -934,11 +971,24 @@ $border: rgba(148, 163, 184, 0.18);
   }
 }
 
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 34;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: rgba(2, 6, 23, 0.55);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .sidebar-hotspot {
   position: fixed;
   top: max(4.25rem, calc(env(safe-area-inset-top, 0px) + 3rem));
   left: max(0.5rem, env(safe-area-inset-left, 0px));
-  z-index: 10;
+  z-index: 38;
   width: 28px;
   height: 28px;
   border-radius: 8px;
@@ -1147,14 +1197,10 @@ $border: rgba(148, 163, 184, 0.18);
   }
 
   .chart__svg-wrap {
-    /* svh/dvh: menos “saltos” con barra de direcciones; más alto para la curva */
-    min-height: min(50svh, 300px);
-    height: min(
-      68svh,
-      calc(100svh - max(9rem, env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px) + 5.5rem))
-    );
-    max-height: min(78svh, 640px);
     border-radius: 10px;
+    /* Tamaño ya definido en bloque ≤768px (aspect-ratio); aquí solo refina en pantallas muy angostas */
+    min-height: clamp(190px, 56vw, 280px);
+    max-height: min(70dvh, 70svh, 440px);
   }
 
   .chart-stats {
@@ -1181,27 +1227,12 @@ $border: rgba(148, 163, 184, 0.18);
 
 @media (max-width: 380px) {
   .chart__svg-wrap {
-    min-height: min(46svh, 260px);
-    height: min(
-      64svh,
-      calc(100svh - max(8.5rem, env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px) + 4.5rem))
-    );
-    max-height: min(76svh, 600px);
+    aspect-ratio: 5 / 4;
+    min-height: clamp(180px, 52vw, 250px);
+    max-height: min(66dvh, 66svh, 400px);
   }
 
   .chart__x-axis-tick {
     font-size: 0.48rem;
-  }
-}
-
-/* Tablets / móviles anchos: más alto del gráfico aunque no entren en el bloque 640px de detalle fino */
-@media (max-width: 768px) and (min-width: 641px) {
-  .chart__svg-wrap {
-    min-height: min(46svh, 280px);
-    height: min(
-      64svh,
-      calc(100svh - max(9.5rem, env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px) + 6rem))
-    );
-    max-height: min(76svh, 660px);
   }
 }

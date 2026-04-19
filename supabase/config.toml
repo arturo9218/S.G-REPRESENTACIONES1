@@ -368,6 +368,11 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# Tokens ES256 (JWT Signing Keys): el verificador del gateway puede devolver 401 antes de ejecutar el código.
+# Esta función valida Authorization con auth.getUser() y comprueba owner_user_id del dispositivo.
+[functions.ai-chart-insight]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

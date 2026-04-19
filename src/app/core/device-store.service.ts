@@ -685,7 +685,24 @@ export class DeviceStoreService {
     const rows = (data as Record<string, unknown>[]).map((row) =>
       this.mapChartRpcRowToReading(deviceId, row)
     );
-    return { rows: this.applyOffsetsToReadings(rows, this.snapshot), error: null };
+    const applied = this.applyOffsetsToReadings(rows, this.snapshot);
+
+    /**
+     * PostgREST aplica `max_rows` (p. ej. 1000 en config local / API del proyecto) a cualquier respuesta,
+     * incluido el RPC: la SQL puede devolver hasta 100k filas pero el cliente recibe solo las primeras 1000.
+     * En rangos ≤4 días el RPC devuelve puntos crudos; si hay muchas lecturas, el gráfico queda “cortado” al inicio.
+     * Re-leemos por `device_readings` con paginación (misma lógica que el PDF).
+     */
+    const spanMs = new Date(toIso).getTime() - new Date(fromIso).getTime();
+    const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
+    if (spanMs <= fourDaysMs && applied.length >= 1000) {
+      const paged = await this.fetchRawReadingsForPdfExport(deviceId, fromIso, toIso, 100_000);
+      if (!paged.error && paged.rows.length > applied.length) {
+        return { rows: paged.rows, error: null };
+      }
+    }
+
+    return { rows: applied, error: null };
   }
 
   /** Mapea filas del RPC get_device_readings_chart (incl. crudos si existen en la nube). */
