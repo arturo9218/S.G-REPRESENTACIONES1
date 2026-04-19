@@ -168,6 +168,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
   eqExpansionCapillaryForm = '';
   eqExpansionValveBrandForm = '';
   eqExpansionValveModelForm = '';
+  /** Orificio / cartucho (válvula de expansión). */
+  eqExpansionOrificeForm = '';
+  /** Filtro / secador de líquido (medida u observación). */
+  eqExpansionFilterMeasureForm = '';
+  /** Tubo recibidor. */
+  eqExpansionReceiverTubeForm = '';
+  /** Válvula solenoide (modelo, bobina, etc.). */
+  eqExpansionSolenoidForm = '';
   eqEvapAirTypeForm = '';
   eqEvapFanCountForm = '';
   eqEvapFanPhasesForm = '';
@@ -3338,6 +3346,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (t(f.expansionCapillaryMeasure)) return true;
     if (t(f.expansionValveBrand)) return true;
     if (t(f.expansionValveModel)) return true;
+    if (t(f.expansionOrificeText)) return true;
+    if (t(f.expansionFilterMeasureText)) return true;
+    if (t(f.expansionReceiverTubeText)) return true;
+    if (t(f.expansionSolenoidValveText)) return true;
     if (t(f.evaporatorAirType)) return true;
     if (f.evaporatorFanCount != null && Number.isFinite(f.evaporatorFanCount)) return true;
     if (t(f.evaporatorFanMotorPhases)) return true;
@@ -3497,6 +3509,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.eqExpansionCapillaryForm = '';
       this.eqExpansionValveBrandForm = '';
       this.eqExpansionValveModelForm = '';
+      this.eqExpansionOrificeForm = '';
+      this.eqExpansionFilterMeasureForm = '';
+      this.eqExpansionReceiverTubeForm = '';
+      this.eqExpansionSolenoidForm = '';
       this.eqEvapAirTypeForm = '';
       this.eqEvapFanCountForm = '';
       this.eqEvapFanPhasesForm = '';
@@ -3546,6 +3562,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.eqExpansionCapillaryForm = row.expansionCapillaryMeasure ?? '';
     this.eqExpansionValveBrandForm = row.expansionValveBrand ?? '';
     this.eqExpansionValveModelForm = row.expansionValveModel ?? '';
+    this.eqExpansionOrificeForm = row.expansionOrificeText ?? '';
+    this.eqExpansionFilterMeasureForm = row.expansionFilterMeasureText ?? '';
+    this.eqExpansionReceiverTubeForm = row.expansionReceiverTubeText ?? '';
+    this.eqExpansionSolenoidForm = row.expansionSolenoidValveText ?? '';
     this.eqEvapAirTypeForm = row.evaporatorAirType ?? '';
     this.eqEvapFanCountForm =
       row.evaporatorFanCount != null && Number.isFinite(row.evaporatorFanCount)
@@ -3727,6 +3747,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
         expansionCapillaryMeasure,
         expansionValveBrand,
         expansionValveModel,
+        expansionOrificeText: this.eqExpansionOrificeForm.trim() || null,
+        expansionFilterMeasureText: this.eqExpansionFilterMeasureForm.trim() || null,
+        expansionReceiverTubeText: this.eqExpansionReceiverTubeForm.trim() || null,
+        expansionSolenoidValveText: this.eqExpansionSolenoidForm.trim() || null,
         evaporatorAirType: this.eqEvapAirTypeForm.trim() || null,
         evaporatorFanCount: evapFanCount != null && Number.isFinite(evapFanCount) ? evapFanCount : null,
         evaporatorFanMotorPhases: this.eqEvapFanPhasesForm.trim() || null,
@@ -4259,6 +4283,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
           pushField(fields, 'Marca', ficha.expansionValveBrand);
           pushField(fields, 'Modelo', ficha.expansionValveModel);
         }
+        pushField(fields, 'Orificio', ficha.expansionOrificeText);
+        pushField(fields, 'Medida filtro / secador', ficha.expansionFilterMeasureText);
+        pushField(fields, 'Tubo recibidor', ficha.expansionReceiverTubeText);
+        pushField(fields, 'Válvula solenoide', ficha.expansionSolenoidValveText);
 
         const eat = ficha.evaporatorAirType;
         if (eat === 'static') {
@@ -4288,7 +4316,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
         pushField(fields, 'Pump down', ficha.pumpDown ? 'Sí' : 'No');
         pushField(fields, 'Descongelamiento', mapDefrostLabel(ficha.defrost));
         pushField(fields, 'Tipo de cámara', mapChamberTypeLabel(ficha.chamberType));
-        if (ficha.freeNotes?.trim()) {
         pushField(fields, 'Línea de succión', ficha.suctionLineDiameter);
         pushField(fields, 'Línea de líquido', ficha.liquidLineDiameter);
         pushField(fields, 'Aislación de líneas', ficha.lineInsulationStatus);
@@ -4311,7 +4338,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         if (ficha.compressorCurrentA != null && Number.isFinite(ficha.compressorCurrentA)) {
           pushField(fields, 'Corriente compresor (A)', ficha.compressorCurrentA.toFixed(2));
         }
-        pushField(fields, 'Descripción', ficha.freeNotes.trim());
+        if (ficha.freeNotes?.trim()) {
+          pushField(fields, 'Descripción', ficha.freeNotes.trim());
         }
         pushField(
           fields,

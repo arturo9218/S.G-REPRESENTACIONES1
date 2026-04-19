@@ -1404,7 +1404,7 @@
                   <div>
                     <h2 class="card__title card__title--sm equipment-page__section-title">Expansión</h2>
                     <p class="card__hint card__hint--tight">
-                      Tubo capilar (medida) o válvula de expansión (marca y modelo).
+                      Capilar o válvula (marca / modelo), orificio, filtro o secador, recibidor y válvula solenoide.
                     </p>
                   </div>
                 </div>
@@ -1453,6 +1453,46 @@
                       />
                     </label>
                   </ng-container>
+                  <label class="notify-panel__field" *ngIf="eqExpansionTypeForm === 'valve'">
+                    <span>Orificio / cartucho</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="eqExpansionOrificeForm"
+                      name="eq-exp-orifice"
+                      maxlength="120"
+                      placeholder="Ej. n.º orificio, kit"
+                    />
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Medida filtro / secador de líquido</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="eqExpansionFilterMeasureForm"
+                      name="eq-exp-filter"
+                      maxlength="160"
+                      placeholder="Ej. 052, 3/8 × 30 cm, marca"
+                    />
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Tubo recibidor</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="eqExpansionReceiverTubeForm"
+                      name="eq-exp-receiver"
+                      maxlength="160"
+                      placeholder="Diámetro, longitud, ubicación"
+                    />
+                  </label>
+                  <label class="notify-panel__field notify-panel__field--full">
+                    <span>Válvula solenoide</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="eqExpansionSolenoidForm"
+                      name="eq-exp-solenoid"
+                      maxlength="200"
+                      placeholder="Modelo, bobina, línea que corta"
+                    />
+                  </label>
                 </div>
               </article>
 

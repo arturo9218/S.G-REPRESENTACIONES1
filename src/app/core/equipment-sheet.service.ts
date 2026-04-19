@@ -24,6 +24,10 @@ export interface DeviceEquipmentFichaRow {
   expansionCapillaryMeasure: string | null;
   expansionValveBrand: string | null;
   expansionValveModel: string | null;
+  expansionOrificeText: string | null;
+  expansionFilterMeasureText: string | null;
+  expansionReceiverTubeText: string | null;
+  expansionSolenoidValveText: string | null;
   evaporatorAirType: string | null;
   evaporatorFanCount: number | null;
   evaporatorFanMotorPhases: string | null;
@@ -115,6 +119,10 @@ export class EquipmentSheetService {
       expansionCapillaryMeasure: (r['expansion_capillary_measure'] as string) ?? null,
       expansionValveBrand: (r['expansion_valve_brand'] as string) ?? null,
       expansionValveModel: (r['expansion_valve_model'] as string) ?? null,
+      expansionOrificeText: (r['expansion_orifice_text'] as string) ?? null,
+      expansionFilterMeasureText: (r['expansion_filter_measure_text'] as string) ?? null,
+      expansionReceiverTubeText: (r['expansion_receiver_tube_text'] as string) ?? null,
+      expansionSolenoidValveText: (r['expansion_solenoid_valve_text'] as string) ?? null,
       evaporatorAirType: (r['evaporator_air_type'] as string) ?? null,
       evaporatorFanCount:
         typeof r['evaporator_fan_count'] === 'number' ? (r['evaporator_fan_count'] as number) : null,
@@ -191,6 +199,10 @@ export class EquipmentSheetService {
       expansion_capillary_measure: payload.expansionCapillaryMeasure || null,
       expansion_valve_brand: payload.expansionValveBrand || null,
       expansion_valve_model: payload.expansionValveModel || null,
+      expansion_orifice_text: payload.expansionOrificeText || null,
+      expansion_filter_measure_text: payload.expansionFilterMeasureText || null,
+      expansion_receiver_tube_text: payload.expansionReceiverTubeText || null,
+      expansion_solenoid_valve_text: payload.expansionSolenoidValveText || null,
       evaporator_air_type: payload.evaporatorAirType || null,
       evaporator_fan_count: payload.evaporatorFanCount,
       evaporator_fan_motor_phases: payload.evaporatorFanMotorPhases || null,
