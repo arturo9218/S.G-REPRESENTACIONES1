@@ -4206,7 +4206,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
         return 'Borrador';
       };
 
-      for (const ficha of allFichas) {
+      const selectedInList = this.selectedFichaId
+        ? allFichas.find((f) => f.id === this.selectedFichaId)
+        : undefined;
+      /** Solo la ficha activa en la UI (tarjeta / selector), no todas las del equipo. */
+      const fichasToExport = selectedInList
+        ? [selectedInList]
+        : allFichas[0]
+          ? [allFichas[0]]
+          : [];
+
+      for (const ficha of fichasToExport) {
         y = drawSectionTitle(`Ficha: ${ficha.label}`, y);
 
         const fields: PdfField[] = [];
