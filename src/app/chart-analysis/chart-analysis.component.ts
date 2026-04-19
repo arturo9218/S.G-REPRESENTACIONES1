@@ -61,6 +61,12 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   private narrowUiMql?: MediaQueryList;
   private onNarrowUiMediaChange?: () => void;
 
+  /**
+   * Tarjeta "Series del gráfico" (estilo ficha): al tocar el encabezado se pliega / despliega.
+   * En móvil arranca cerrada para dejar a la vista filtros y rango.
+   */
+  seriesChartSectionOpen = true;
+
   /** Serie para filtros de fecha en dispositivo nube (RPC Supabase). */
   remoteChartSeries: TemperatureReading[] | null = null;
   /** Lecturas nube ordenadas por tiempo, tope para dibujo (evita re-sort/re-cap en cada zoom). */
@@ -148,6 +154,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       };
       this.narrowUiMql.addEventListener('change', this.onNarrowUiMediaChange);
     }
+
+    this.seriesChartSectionOpen = !this.narrowUi;
 
     // deviceId (correcto), deviceid (minúsculas), deviceld (typo viejo).
     const qp = this.route.snapshot.queryParamMap;
@@ -1021,6 +1029,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.syncSensorLabelsWithSelected();
     this.resetChartZoom();
     this.scheduleRemoteChartLoad();
+  }
+
+  toggleSeriesChartSection(): void {
+    this.seriesChartSectionOpen = !this.seriesChartSectionOpen;
   }
 
   toggleSidebar(): void {

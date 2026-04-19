@@ -32,42 +32,67 @@
           {{ sidebarCollapsed ? 'Mostrar panel' : 'Ocultar panel' }}
         </button>
       </div>
-      <h2 class="panel__title">Series del gráfico</h2>
-
       <div class="controls controls--series">
-        <div class="control control--checkboxes">
-          <span class="control__label-block">Mostrar en el gráfico</span>
-          <label class="control control--inline">
-            <input
-              type="checkbox"
-              [(ngModel)]="seriesShowTemp1"
-              (ngModelChange)="onSeriesCheckboxChange()"
-              name="ch-t1"
-            />
-            <span>Sensor 1 (°C)</span>
-          </label>
-          <label class="control control--inline" *ngIf="hasSecondSeries">
-            <input
-              type="checkbox"
-              [(ngModel)]="seriesShowTemp2"
-              (ngModelChange)="onSeriesCheckboxChange()"
-              name="ch-t2"
-            />
-            <span>Sensor 2 (°C)</span>
-          </label>
-          <label class="control control--inline">
-            <input
-              type="checkbox"
-              [(ngModel)]="seriesShowCurrent"
-              (ngModelChange)="onSeriesCheckboxChange()"
-              name="ch-i"
-            />
-            <span>Corriente (A)</span>
-          </label>
-        </div>
-        <p class="panel__hint panel__hint--tight" *ngIf="chartDualAxis">
-          Doble eje: °C a la izquierda, amperes a la derecha.
-        </p>
+        <article class="panel-series-card">
+          <div
+            class="panel-series-card__head panel-series-card__head--toggle"
+            role="button"
+            tabindex="0"
+            [attr.aria-expanded]="seriesChartSectionOpen"
+            aria-controls="chart-analysis-series-body"
+            (click)="toggleSeriesChartSection()"
+            (keydown.enter)="toggleSeriesChartSection()"
+            (keydown.space)="$event.preventDefault(); toggleSeriesChartSection()"
+          >
+            <span class="panel-series-card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 3v18h18" />
+                <path d="M7 16l4-4 4 4 6-7" />
+              </svg>
+            </span>
+            <div class="panel-series-card__head-text">
+              <h2 class="panel__title panel-series-card__title">Series del gráfico</h2>
+              <p class="panel__hint panel__hint--tight panel-series-card__subtitle">
+                Tocá el encabezado para mostrar u ocultar las curvas.
+              </p>
+            </div>
+          </div>
+          <div id="chart-analysis-series-body" class="panel-series-card__body" *ngIf="seriesChartSectionOpen">
+            <div class="control control--checkboxes">
+              <span class="control__label-block">Mostrar en el gráfico</span>
+              <label class="control control--inline">
+                <input
+                  type="checkbox"
+                  [(ngModel)]="seriesShowTemp1"
+                  (ngModelChange)="onSeriesCheckboxChange()"
+                  name="ch-t1"
+                />
+                <span>Sensor 1 (°C)</span>
+              </label>
+              <label class="control control--inline" *ngIf="hasSecondSeries">
+                <input
+                  type="checkbox"
+                  [(ngModel)]="seriesShowTemp2"
+                  (ngModelChange)="onSeriesCheckboxChange()"
+                  name="ch-t2"
+                />
+                <span>Sensor 2 (°C)</span>
+              </label>
+              <label class="control control--inline">
+                <input
+                  type="checkbox"
+                  [(ngModel)]="seriesShowCurrent"
+                  (ngModelChange)="onSeriesCheckboxChange()"
+                  name="ch-i"
+                />
+                <span>Corriente (A)</span>
+              </label>
+            </div>
+            <p class="panel__hint panel__hint--tight" *ngIf="chartDualAxis">
+              Doble eje: °C a la izquierda, amperes a la derecha.
+            </p>
+          </div>
+        </article>
 
         <label class="control" *ngIf="devices.length">
           <span>Dispositivo</span>
