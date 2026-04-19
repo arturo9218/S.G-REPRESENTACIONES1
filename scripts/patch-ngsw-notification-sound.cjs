@@ -20,10 +20,10 @@ if (s.includes('\n    "sound",\n')) {
 
 const needle = '"silent",\n    "tag",';
 if (!s.includes(needle)) {
-  console.error(
-    '[patch-ngsw-notification-sound] Patrón no encontrado (¿cambió @angular/service-worker?). Editá el script.'
+  console.warn(
+    '[patch-ngsw-notification-sound] Patrón no encontrado (¿cambió @angular/service-worker?). Se omite; el build en Vercel no debe fallar por esto.'
   );
-  process.exit(1);
+  process.exit(0);
 }
 
 s = s.replace(needle, '"silent",\n    "sound",\n    "tag",');
