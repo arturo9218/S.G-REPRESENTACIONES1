@@ -2791,7 +2791,22 @@ $border: rgba(148, 163, 184, 0.18);
 /* Ficha del equipo — planilla alineada al panel (Configuración / tarjetas) */
 .settings-page.equipment-page {
   max-width: min(880px, 100%);
+  width: 100%;
+  min-width: 0;
+  margin-inline: auto;
   padding-bottom: 2rem;
+  box-sizing: border-box;
+
+  /* Campos largos / selects no fuerzan scroll horizontal */
+  .notify-panel__field {
+    min-width: 0;
+  }
+
+  .notify-panel__field input,
+  .notify-panel__field select.notify-panel__select {
+    max-width: 100%;
+    min-width: 0;
+  }
 }
 
 .equipment-page__title {
@@ -2897,6 +2912,9 @@ $border: rgba(148, 163, 184, 0.18);
 .equipment-page__hero-meta-id {
   font-size: 0.75rem;
   opacity: 0.9;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 .card--ficha-section {
@@ -2909,6 +2927,23 @@ $border: rgba(148, 163, 184, 0.18);
   align-items: flex-start;
   gap: 0.85rem;
   margin-bottom: 1rem;
+
+  &--toggle {
+    cursor: pointer;
+    border-radius: 12px;
+    margin: -0.35rem -0.35rem 0.65rem;
+    padding: 0.35rem;
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: rgba(59, 130, 246, 0.08);
+    }
+
+    &:focus-visible {
+      outline: 2px solid rgba(59, 130, 246, 0.55);
+      outline-offset: 2px;
+    }
+  }
 }
 
 .equipment-page__section-title {
@@ -3167,9 +3202,10 @@ $border: rgba(148, 163, 184, 0.18);
 
 .equipment-ficha-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr));
   gap: 0.65rem;
   width: 100%;
+  min-width: 0;
   flex-basis: 100%;
 }
 
@@ -3373,5 +3409,26 @@ $border: rgba(148, 163, 184, 0.18);
 
   .equipment-page__actions {
     padding-bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Formulario ficha: una columna en tablet/móvil para que quepa en el ancho útil */
+  .settings-page.equipment-page .notify-panel__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-page.equipment-page .equipment-page__title {
+    font-size: clamp(1.05rem, 4.2vw, 1.35rem);
+  }
+
+  .settings-page.equipment-page .card--equipment-hero {
+    padding-top: 0.95rem;
+    padding-bottom: 0.95rem;
+  }
+}
+
+/* Portátiles angostos: toolbar ficha en una columna antes de que rompa el layout de 2 cols */
+@media (max-width: 1024px) and (min-width: 901px) {
+  .settings-page.equipment-page .equipment-page__ficha-toolbar.notify-panel__grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -217,16 +217,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Rango para el gráfico del PDF (`yyyy-MM-dd`, vacío = últimos 7 días). */
   equipmentPdfChartFromDate = '';
   equipmentPdfChartToDate = '';
+  /** Secciones de la ficha: clic en el título muestra u oculta el cuerpo (independientes entre sí). */
   equipmentSectionOpen: Record<string, boolean> = {
     compression: true,
-    condenser: false,
-    expansion: false,
-    evaporator: false,
-    piping: false,
-    notes: false,
-    maintenance: false,
-    log: false,
-    photos: false,
+    condenser: true,
+    expansion: true,
+    evaporator: true,
+    piping: true,
+    notes: true,
+    maintenance: true,
+    log: true,
+    photos: true,
   };
   private readonly equipmentSectionKeys = [
     'compression',
@@ -239,6 +240,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     'log',
     'photos',
   ] as const;
+  /** Último equipo para el que cargamos la ficha (reabrir paneles al cambiar de equipo). */
+  private lastEquipmentPanelDeviceId: string | null = null;
   /** Mensaje breve al crear una ficha nueva desde el panel. */
   equipmentNewFichaHint = '';
   /** Tras guardar, se colapsa el editor y quedan solo las tarjetas de ficha. */
@@ -3159,6 +3162,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.selectedFichaId = null;
       this.equipmentLogRows = [];
       this.equipmentPhotos = [];
+      this.lastEquipmentPanelDeviceId = null;
       return;
     }
     const id = this.selectedDeviceId as string;
@@ -3170,6 +3174,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (errFichas) {
         this.equipmentFichas = [];
         this.selectedFichaId = null;
+        this.lastEquipmentPanelDeviceId = null;
         const low = errFichas.toLowerCase();
         this.equipmentFeedback =
           low.includes('does not exist') ||
@@ -3184,6 +3189,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.equipmentFichas = [];
         this.selectedFichaId = null;
         this.equipmentFichaEditorVisible = false;
+        this.lastEquipmentPanelDeviceId = null;
         this.hydrateEquipmentFormsFromFicha(null);
         await this.loadEquipmentLogsAndPhotos();
         void this.notifyMaintenanceForAllFichasIfDue([]);
@@ -3205,6 +3211,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.initLogDateTimeDefaults();
       }
       void this.notifyMaintenanceForAllFichasIfDue(fichas);
+      if (this.selectedFichaId && fichas.length && id !== this.lastEquipmentPanelDeviceId) {
+        this.lastEquipmentPanelDeviceId = id;
+        this.resetEquipmentSectionPanels();
+      }
     } finally {
       this.equipmentLoading = false;
     }
@@ -3219,6 +3229,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (f) {
       this.hydrateEquipmentFormsFromFicha(f);
     }
+    this.resetEquipmentSectionPanels();
     await this.loadEquipmentLogsAndPhotos();
     this.initLogDateTimeDefaults();
   }
@@ -3231,13 +3242,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
     await this.onEquipmentFichaChange(fichaId);
   }
 
-  toggleEquipmentSection(key: string): void {
-    if (this.equipmentSectionOpen[key]) {
-      return;
-    }
+  /** Abre todas las secciones del editor (al cambiar equipo/ficha). */
+  private resetEquipmentSectionPanels(): void {
     for (const k of this.equipmentSectionKeys) {
-      this.equipmentSectionOpen[k] = k === key;
+      this.equipmentSectionOpen[k] = true;
     }
+  }
+
+  toggleEquipmentSection(key: string): void {
+    this.equipmentSectionOpen[key] = !this.equipmentSectionOpen[key];
   }
 
   isEquipmentSectionOpen(key: string): boolean {
@@ -3390,7 +3403,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.equipmentFichaEditorVisible = true;
     this.equipmentNewFichaHint =
       'Estás en una ficha nueva: completá los datos y tocá Guardar. El PDF puede incluir alarmas y tabla de lecturas (opciones abajo).';
-    void this.loadEquipmentPage();
+    await this.loadEquipmentPage();
+    this.resetEquipmentSectionPanels();
   }
 
   async deleteEquipmentFicha(): Promise<void> {
