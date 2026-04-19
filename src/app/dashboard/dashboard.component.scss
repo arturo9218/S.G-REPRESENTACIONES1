@@ -3393,6 +3393,17 @@ $border: rgba(148, 163, 184, 0.18);
   opacity: 0.9;
 }
 
+.equipment-page__chart-open-btn {
+  margin-top: 0.35rem;
+}
+
+.equipment-photos-add__inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .equipment-page__actions.card {
   display: flex;
   flex-wrap: wrap;

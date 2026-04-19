@@ -660,7 +660,7 @@
                   type="button"
                   class="device-card__btn"
                   *ngIf="deviceCanOpenEquipmentSheet(d)"
-                  title="Ficha técnica, bitácora y fotos"
+                  title="Ficha técnica, trabajo realizado y fotos"
                   [attr.aria-label]="'Ir a ficha del equipo ' + d.name"
                   (click)="goToEquipmentSheet(d.id, $event)"
                 >
@@ -943,7 +943,7 @@
               <div>
                 <h1 id="equipment-page-title" class="equipment-page__title">Ficha del equipo</h1>
                 <p class="card__hint card__hint--tight equipment-page__hint">
-                  Planilla técnica: instalación, bitácora, fotos y mantenimiento (nube + UUID de panel).
+                  Planilla técnica: instalación, trabajo realizado, fotos y mantenimiento (nube + UUID de panel).
                 </p>
               </div>
               <div class="equipment-page__hero-badge" *ngIf="selectedDevice as sd">
@@ -1006,7 +1006,7 @@
                   Varias instalaciones por el mismo dispositivo (ej. dos cámaras). Elegí la ficha en la lista; las tarjetas de resumen solo aparecen cuando hay datos técnicos guardados.
                 </p>
                 <p class="card__hint card__hint--tight" *ngIf="!equipmentFichas.length">
-                  Este equipo no tiene fichas. Creá una para cargar datos técnicos, bitácora y fotos.
+                  Este equipo no tiene fichas. Creá una para cargar datos técnicos, trabajo realizado y fotos.
                 </p>
                 <div class="notify-panel notify-panel__grid equipment-page__ficha-toolbar">
                   <ng-container *ngIf="equipmentFichas.length">
@@ -1151,11 +1151,38 @@
                     <span>Refrigerante</span>
                     <select class="notify-panel__select" [(ngModel)]="eqRefrigerantForm" name="eq-ref">
                       <option value="">—</option>
-                      <option value="R404A">R404A</option>
+                      <option value="R22">R22</option>
+                      <option value="R32">R32</option>
                       <option value="R134a">R134a</option>
-                      <option value="R507">R507</option>
+                      <option value="R404A">R404A</option>
+                      <option value="R407A">R407A</option>
+                      <option value="R407C">R407C</option>
+                      <option value="R407F">R407F</option>
+                      <option value="R410A">R410A</option>
+                      <option value="R422D">R422D</option>
+                      <option value="R438A">R438A</option>
                       <option value="R448A">R448A</option>
                       <option value="R449A">R449A</option>
+                      <option value="R452A">R452A</option>
+                      <option value="R454A">R454A</option>
+                      <option value="R454B">R454B</option>
+                      <option value="R454C">R454C</option>
+                      <option value="R507">R507</option>
+                      <option value="R513A">R513A</option>
+                      <option value="R600a">R600a (isobutano)</option>
+                      <option value="R290">R290 (propano)</option>
+                      <option value="R1270">R1270 (propileno)</option>
+                      <option value="R744">R744 (CO₂)</option>
+                      <option value="R717">R717 (amoniaco)</option>
+                      <option value="R23">R23</option>
+                      <option value="R508B">R508B</option>
+                      <option value="R401A">R401A</option>
+                      <option value="R409A">R409A</option>
+                      <option value="R417A">R417A</option>
+                      <option value="R423A">R423A</option>
+                      <option value="R502">R502</option>
+                      <option value="R503">R503</option>
+                      <option value="R500">R500</option>
                       <option value="otro">Otro</option>
                     </select>
                   </label>
@@ -1177,7 +1204,6 @@
                       <option value="">—</option>
                       <option value="hot_gas">Gas caliente</option>
                       <option value="resistance">Resistencia</option>
-                      <option value="both">Ambos</option>
                     </select>
                   </label>
                   <label class="notify-panel__field">
@@ -1478,6 +1504,17 @@
                         autocomplete="off"
                       />
                     </label>
+                    <label class="notify-panel__field notify-panel__field--full">
+                      <span>Diámetro de pala (ej. Ø 910 mm)</span>
+                      <input
+                        type="text"
+                        [(ngModel)]="eqEvapBladeDiameterForm"
+                        name="eq-evap-blade"
+                        maxlength="120"
+                        autocomplete="off"
+                        placeholder="Ej. Ø 910 mm, 4 palas"
+                      />
+                    </label>
                     <label class="notify-panel__field">
                       <span>Motores forzadores</span>
                       <select class="notify-panel__select" [(ngModel)]="eqEvapFanPhasesForm" name="eq-evap-ph">
@@ -1627,7 +1664,7 @@
                     </svg>
                   </span>
                   <div>
-                    <h2 class="card__title card__title--sm equipment-page__section-title">Bitácora</h2>
+                    <h2 class="card__title card__title--sm equipment-page__section-title">Trabajo realizado</h2>
                     <p class="card__hint card__hint--tight">Visitas e intervenciones (más reciente arriba).</p>
                   </div>
                 </div>
@@ -1642,7 +1679,7 @@
                     <input type="time" [(ngModel)]="logTimeForm" name="log-t" />
                   </label>
                   <label class="notify-panel__field notify-panel__field--full">
-                    <span>Observación</span>
+                    <span>Trabajo realizado</span>
                     <input type="text" [(ngModel)]="logNoteForm" name="log-note" maxlength="2000" />
                   </label>
                   <div class="equipment-log-add__submit">
@@ -1656,7 +1693,7 @@
                     <thead>
                       <tr>
                         <th>Fecha y hora</th>
-                        <th>Observación</th>
+                        <th>Trabajo realizado</th>
                         <th class="equipment-log-table__col-actions"></th>
                       </tr>
                     </thead>
@@ -1711,15 +1748,27 @@
                     <span>Leyenda (opcional)</span>
                     <input type="text" [(ngModel)]="photoCaptionForm" name="ph-cap" maxlength="120" />
                   </label>
-                  <label class="btn btn--ghost equipment-photos-add__file">
-                    Elegir foto
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif"
-                      (change)="onEquipmentPhotoSelected($event)"
-                      [disabled]="equipmentPhotoUploading"
-                    />
-                  </label>
+                  <div class="equipment-photos-add__inputs">
+                    <label class="btn btn--ghost equipment-photos-add__file">
+                      Galería / archivo
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        (change)="onEquipmentPhotoSelected($event)"
+                        [disabled]="equipmentPhotoUploading"
+                      />
+                    </label>
+                    <label class="btn btn--ghost equipment-photos-add__file">
+                      Cámara
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        (change)="onEquipmentPhotoSelected($event)"
+                        [disabled]="equipmentPhotoUploading"
+                      />
+                    </label>
+                  </div>
                   <span class="equipment-photos-add__hint" *ngIf="equipmentPhotoUploading">Subiendo…</span>
                 </div>
                 <div class="equipment-photo-grid" *ngIf="equipmentPhotos.length">
@@ -1812,9 +1861,9 @@
                     class="equipment-page__chart-range"
                     *ngIf="equipmentPdfIncludeChart"
                   >
-                    <span class="equipment-page__chart-range-label">Rango del gráfico</span>
+                    <span class="equipment-page__chart-range-label">Rango del gráfico (fecha y hora)</span>
                     <label>
-                      Desde
+                      Desde (fecha)
                       <input
                         type="date"
                         class="equipment-page__chart-date"
@@ -1824,7 +1873,18 @@
                       />
                     </label>
                     <label>
-                      Hasta
+                      Hora
+                      <input
+                        type="time"
+                        class="equipment-page__chart-date"
+                        [(ngModel)]="equipmentPdfChartFromTime"
+                        name="eq-pdf-chart-from-t"
+                        step="60"
+                        [disabled]="!equipmentPdfIncludeChart"
+                      />
+                    </label>
+                    <label>
+                      Hasta (fecha)
                       <input
                         type="date"
                         class="equipment-page__chart-date"
@@ -1833,7 +1893,26 @@
                         [disabled]="!equipmentPdfIncludeChart"
                       />
                     </label>
-                    <span class="equipment-page__chart-range-hint">Vacío = últimos 7 días</span>
+                    <label>
+                      Hora
+                      <input
+                        type="time"
+                        class="equipment-page__chart-date"
+                        [(ngModel)]="equipmentPdfChartToTime"
+                        name="eq-pdf-chart-to-t"
+                        step="60"
+                        [disabled]="!equipmentPdfIncludeChart"
+                      />
+                    </label>
+                    <span class="equipment-page__chart-range-hint">Vacío en fechas = últimos 7 días. Horas solo aplican si elegís fechas.</span>
+                    <button
+                      type="button"
+                      class="btn btn--ghost equipment-page__chart-open-btn"
+                      [disabled]="!selectedDeviceId"
+                      (click)="openEquipmentChartInAnalysis()"
+                    >
+                      Ver gráfico (Análisis)
+                    </button>
                   </div>
                   <label class="equipment-page__pdf-opt">
                     <input type="checkbox" [(ngModel)]="equipmentPdfIncludeReadings" name="eq-pdf-readings" />

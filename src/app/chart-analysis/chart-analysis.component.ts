@@ -161,6 +161,16 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     const qp = this.route.snapshot.queryParamMap;
     this.selectedDeviceId = qp.get('deviceId') ?? qp.get('deviceld');
     this.deviceIdFromUrl = this.selectedDeviceId;
+    const qFrom = qp.get('from')?.trim();
+    const qTo = qp.get('to')?.trim();
+    if (qFrom) {
+      this.filterFrom = qFrom;
+      this.filterDay = '';
+    }
+    if (qTo) {
+      this.filterTo = qTo;
+      this.filterDay = '';
+    }
 
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
       this.devices = list;

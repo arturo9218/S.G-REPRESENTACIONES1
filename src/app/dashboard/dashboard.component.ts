@@ -145,7 +145,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
    */
   shellRoute: 'dashboard' | 'devices' | 'equipment' | 'alerts' | 'settings' = 'dashboard';
 
-  /** Ficha técnica / bitácora (solo nube + UUID). */
+  /** Ficha técnica / trabajo realizado (solo nube + UUID). */
   equipmentLoading = false;
   equipmentSaving = false;
   equipmentFeedback = '';
@@ -172,6 +172,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   eqEvapFanCountForm = '';
   eqEvapFanPhasesForm = '';
   eqEvapSingleDetailForm = '';
+  /** Diámetro de pala / forzadores del evaporador (ej. Ø 910 mm). */
+  eqEvapBladeDiameterForm = '';
   eqEvapNotesForm = '';
   eqSupplyForm = '';
   eqPumpDownForm = false;
@@ -202,7 +204,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   photoCaptionForm = '';
   /** Evita múltiples `loadEquipmentPage` seguidos (ruta + query + lista de equipos). */
   private equipmentPageReloadTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Solo reinicia la bitácora (fecha/nota) al cambiar de ficha o de equipo, no en cada recarga de lista. */
+  /** Solo reinicia el formulario de trabajo realizado (fecha/nota) al cambiar de ficha o de equipo, no en cada recarga de lista. */
   private lastEquipmentLogFichaId: string | null = null;
   /** Tarjeta “Ficha guardada” (clic → scroll al formulario). */
   equipmentSavedCard: { label: string; at: string } | null = null;
@@ -217,6 +219,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Rango para el gráfico del PDF (`yyyy-MM-dd`, vacío = últimos 7 días). */
   equipmentPdfChartFromDate = '';
   equipmentPdfChartToDate = '';
+  /** Hora local (HH:mm) para el rango del gráfico en PDF / vista en Análisis. */
+  equipmentPdfChartFromTime = '00:00';
+  equipmentPdfChartToTime = '23:59';
   /** Secciones de la ficha: clic en el título muestra u oculta el cuerpo (independientes entre sí). */
   equipmentSectionOpen: Record<string, boolean> = {
     compression: true,
@@ -1352,21 +1357,69 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (a) {
       const p = this.parsePdfYmdLocal(a);
       if (!p) return null;
-      from = p;
+      from = this.applyPdfChartTime(p, this.equipmentPdfChartFromTime, 'from');
     } else {
       from = new Date(0);
     }
     if (b) {
       const p = this.parsePdfYmdLocal(b);
       if (!p) return null;
-      to = new Date(p);
-      to.setHours(23, 59, 59, 999);
+      to = this.applyPdfChartTime(p, this.equipmentPdfChartToTime, 'to');
     } else {
       const n = new Date();
       to = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 23, 59, 59, 999);
     }
     if (from > to) return null;
     return { from, to };
+  }
+
+  /** Combina día local con hora (PDF / enlace a Análisis). */
+  private applyPdfChartTime(baseDay: Date, hmRaw: string | undefined, which: 'from' | 'to'): Date {
+    const d = new Date(baseDay.getFullYear(), baseDay.getMonth(), baseDay.getDate());
+    const t = (hmRaw ?? '').trim();
+    if (!t) {
+      if (which === 'from') d.setHours(0, 0, 0, 0);
+      else d.setHours(23, 59, 59, 999);
+      return d;
+    }
+    const m = t.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) {
+      if (which === 'from') d.setHours(0, 0, 0, 0);
+      else d.setHours(23, 59, 59, 999);
+      return d;
+    }
+    const hh = Math.min(23, Math.max(0, Number(m[1])));
+    const mm = Math.min(59, Math.max(0, Number(m[2])));
+    if (which === 'from') d.setHours(hh, mm, 0, 0);
+    else d.setHours(hh, mm, 59, 999);
+    return d;
+  }
+
+  /** Formato `yyyy-MM-ddTHH:mm` para query de Análisis (datetime-local). */
+  private formatDateForChartQuery(d: Date): string {
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    const h = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${y}-${mo}-${da}T${h}:${mi}`;
+  }
+
+  /** Abre Análisis con el mismo equipo y rango fecha/hora que el PDF. */
+  openEquipmentChartInAnalysis(): void {
+    const deviceId = this.selectedDeviceId;
+    if (!deviceId) return;
+    const bounds = this.equipmentChartRangeBounds();
+    if (!bounds) {
+      alert('Revisá las fechas y horas del rango del gráfico.');
+      return;
+    }
+    const from = this.formatDateForChartQuery(bounds.from);
+    const to = this.formatDateForChartQuery(bounds.to);
+    const url = this.router.serializeUrl(
+      this.router.createUrlTree(['/chart'], { queryParams: { deviceId, from, to } })
+    );
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 
   private async readingsForEquipmentChart(
@@ -3289,6 +3342,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (f.evaporatorFanCount != null && Number.isFinite(f.evaporatorFanCount)) return true;
     if (t(f.evaporatorFanMotorPhases)) return true;
     if (t(f.evaporatorFanSinglePhaseDetail)) return true;
+    if (t(f.evaporatorFanBladeDiameterText)) return true;
     if (t(f.evaporatorNotes)) return true;
     if (t(f.supply)) return true;
     if (f.pumpDown) return true;
@@ -3413,7 +3467,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const isLast = this.equipmentFichas.length <= 1;
     const msg = isLast
       ? '¿Eliminar esta ficha? El equipo quedará sin fichas hasta que agregues una nueva.'
-      : '¿Eliminar esta ficha junto con su bitácora y fotos de esta ficha?';
+      : '¿Eliminar esta ficha junto con su trabajo realizado y fotos de esta ficha?';
     if (!confirm(msg)) return;
     const { error } = await this.equipmentSheet.deleteFicha(fid);
     if (error) {
@@ -3447,6 +3501,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.eqEvapFanCountForm = '';
       this.eqEvapFanPhasesForm = '';
       this.eqEvapSingleDetailForm = '';
+      this.eqEvapBladeDiameterForm = '';
       this.eqEvapNotesForm = '';
       this.eqSupplyForm = '';
       this.eqPumpDownForm = false;
@@ -3498,10 +3553,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
         : '';
     this.eqEvapFanPhasesForm = row.evaporatorFanMotorPhases ?? '';
     this.eqEvapSingleDetailForm = row.evaporatorFanSinglePhaseDetail ?? '';
+    this.eqEvapBladeDiameterForm = row.evaporatorFanBladeDiameterText ?? '';
     this.eqEvapNotesForm = row.evaporatorNotes ?? '';
     this.eqSupplyForm = row.supply ?? '';
     this.eqPumpDownForm = row.pumpDown;
-    this.eqDefrostForm = row.defrost ?? '';
+    this.eqDefrostForm = row.defrost === 'both' ? '' : row.defrost ?? '';
     this.eqChamberForm = row.chamberType ?? '';
     this.eqSuctionLineDiameterForm = row.suctionLineDiameter ?? '';
     this.eqLiquidLineDiameterForm = row.liquidLineDiameter ?? '';
@@ -3675,6 +3731,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         evaporatorFanCount: evapFanCount != null && Number.isFinite(evapFanCount) ? evapFanCount : null,
         evaporatorFanMotorPhases: this.eqEvapFanPhasesForm.trim() || null,
         evaporatorFanSinglePhaseDetail: this.eqEvapSingleDetailForm.trim() || null,
+        evaporatorFanBladeDiameterText: this.eqEvapBladeDiameterForm.trim() || null,
         evaporatorNotes: this.eqEvapNotesForm.trim() || null,
         supply: this.eqSupplyForm.trim() || null,
         pumpDown: this.eqPumpDownForm,
@@ -3807,12 +3864,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!this.equipmentSheetAvailable() || !this.selectedFichaId) return;
     const note = this.logNoteForm.trim();
     if (!note) {
-      this.equipmentFeedback = 'Escribí una observación para la bitácora.';
+      this.equipmentFeedback = 'Escribí el trabajo realizado (observación).';
       return;
     }
     const iso = this.combineDateTimeToIso(this.logDateForm, this.logTimeForm);
     if (!iso) {
-      this.equipmentFeedback = 'Revisá fecha y hora de la bitácora.';
+      this.equipmentFeedback = 'Revisá fecha y hora del trabajo realizado.';
       return;
     }
     const { error } = await this.equipmentSheet.insertLog(
@@ -3825,7 +3882,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.equipmentFeedback = error;
       return;
     }
-    this.equipmentFeedback = 'Entrada agregada a la bitácora.';
+    this.equipmentFeedback = 'Entrada agregada (trabajo realizado).';
     window.setTimeout(() => {
       this.equipmentFeedback = '';
     }, 3000);
@@ -3833,7 +3890,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   async deleteEquipmentLogEntry(row: DeviceEquipmentLogRow): Promise<void> {
-    if (!confirm('¿Eliminar esta entrada de la bitácora?')) return;
+    if (!confirm('¿Eliminar esta entrada de trabajo realizado?')) return;
     const { error } = await this.equipmentSheet.deleteLog(row.id);
     if (error) {
       this.equipmentFeedback = error;
@@ -4129,6 +4186,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         if (!v) return '';
         const n = v.trim().toLowerCase();
         if (n === 'hot_gas') return 'Gas caliente';
+        if (n === 'resistance') return 'Resistencia';
         if (n === 'electric') return 'Eléctrico';
         if (n === 'off_cycle') return 'Paro de ciclo';
         return v;
@@ -4200,6 +4258,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           if (ficha.evaporatorFanCount != null) {
             pushField(fields, 'Cantidad forzadores', String(ficha.evaporatorFanCount));
           }
+          pushField(fields, 'Diámetro de pala', ficha.evaporatorFanBladeDiameterText);
           pushField(
             fields,
             'Alimentación motores',
@@ -4287,7 +4346,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
         const { rows: logs } = await this.equipmentSheet.listLog(devId, ficha.id);
         y += 2;
-        y = drawSectionTitle(`Bitácora — ${ficha.label}`, y);
+        y = drawSectionTitle(`Trabajo realizado — ${ficha.label}`, y);
         doc.setFontSize(8.3);
         doc.setTextColor(45);
         for (const log of [...logs].sort(

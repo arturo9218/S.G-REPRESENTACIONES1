@@ -28,6 +28,8 @@ export interface DeviceEquipmentFichaRow {
   evaporatorFanCount: number | null;
   evaporatorFanMotorPhases: string | null;
   evaporatorFanSinglePhaseDetail: string | null;
+  /** Diámetro de pala u observación de forzadores del evaporador. */
+  evaporatorFanBladeDiameterText: string | null;
   evaporatorNotes: string | null;
   supply: string | null;
   pumpDown: boolean;
@@ -118,6 +120,7 @@ export class EquipmentSheetService {
         typeof r['evaporator_fan_count'] === 'number' ? (r['evaporator_fan_count'] as number) : null,
       evaporatorFanMotorPhases: (r['evaporator_fan_motor_phases'] as string) ?? null,
       evaporatorFanSinglePhaseDetail: (r['evaporator_fan_single_phase_detail'] as string) ?? null,
+      evaporatorFanBladeDiameterText: (r['evaporator_fan_blade_diameter_text'] as string) ?? null,
       evaporatorNotes: (r['evaporator_notes'] as string) ?? null,
       supply: (r['supply'] as string) ?? null,
       pumpDown: Boolean(r['pump_down']),
@@ -192,6 +195,7 @@ export class EquipmentSheetService {
       evaporator_fan_count: payload.evaporatorFanCount,
       evaporator_fan_motor_phases: payload.evaporatorFanMotorPhases || null,
       evaporator_fan_single_phase_detail: payload.evaporatorFanSinglePhaseDetail || null,
+      evaporator_fan_blade_diameter_text: payload.evaporatorFanBladeDiameterText || null,
       evaporator_notes: payload.evaporatorNotes || null,
       supply: payload.supply || null,
       pump_down: payload.pumpDown,
