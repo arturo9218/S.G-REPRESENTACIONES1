@@ -63,6 +63,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   /** Serie para filtros de fecha en dispositivo nube (RPC Supabase). */
   remoteChartSeries: TemperatureReading[] | null = null;
+  /** Lecturas nube ordenadas por tiempo, tope para dibujo (evita re-sort/re-cap en cada zoom). */
+  private remoteChartDisplayPoints: TemperatureReading[] | null = null;
   remoteChartLoading = false;
   remoteChartError = '';
 
@@ -289,6 +291,58 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     return Math.hypot(dx, dy);
   }
 
+  private static readingAtMs(r: TemperatureReading): number {
+    const t = Date.parse(r.at as string);
+    return Number.isFinite(t) ? t : new Date(r.at).getTime();
+  }
+
+  /** `sorted` ordenado por `readingAtMs`. Primer índice con tiempo >= tMs. */
+  private static lowerBoundSortedByTime(sorted: TemperatureReading[], tMs: number): number {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (ChartAnalysisComponent.readingAtMs(sorted[mid]) < tMs) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /** `sorted` ordenado por tiempo. Último índice con tiempo <= tMs, o -1 si ninguno. */
+  private static upperBoundSortedByTime(sorted: TemperatureReading[], tMs: number): number {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (ChartAnalysisComponent.readingAtMs(sorted[mid]) <= tMs) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo - 1;
+  }
+
+  private static sortedCountBetweenMs(
+    sorted: TemperatureReading[],
+    ta: number,
+    tb: number
+  ): number {
+    if (!sorted.length || ta > tb) return 0;
+    const i0 = ChartAnalysisComponent.lowerBoundSortedByTime(sorted, ta);
+    const i1 = ChartAnalysisComponent.upperBoundSortedByTime(sorted, tb);
+    return i1 >= i0 ? i1 - i0 + 1 : 0;
+  }
+
+  private static sortedSliceBetweenMs(
+    sorted: TemperatureReading[],
+    ta: number,
+    tb: number
+  ): TemperatureReading[] {
+    if (!sorted.length || ta > tb) return [];
+    const i0 = ChartAnalysisComponent.lowerBoundSortedByTime(sorted, ta);
+    const i1 = ChartAnalysisComponent.upperBoundSortedByTime(sorted, tb);
+    if (i1 < i0) return [];
+    return sorted.slice(i0, i1 + 1);
+  }
+
   onChartTouchStart(event: TouchEvent): void {
     if (!this.hasChartData) return;
     if (event.touches.length === 2) {
@@ -373,10 +427,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     if (!Number.isFinite(span) || span <= 0) return;
     const ta = domPinch.fromMs + newLo * span;
     const tb = domPinch.fromMs + newHi * span;
-    const count = full.filter((r) => {
-      const t = new Date(r.at).getTime();
-      return t >= ta && t <= tb;
-    }).length;
+    const count = ChartAnalysisComponent.sortedCountBetweenMs(full, ta, tb);
     if (count < 2) return;
 
     this.chartZoomLo = newLo;
@@ -483,10 +534,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
     const ta = tMin + newLo * span;
     const tb = tMin + newHi * span;
-    const count = full.filter((r) => {
-      const t = new Date(r.at).getTime();
-      return t >= ta && t <= tb;
-    }).length;
+    const count = ChartAnalysisComponent.sortedCountBetweenMs(full, ta, tb);
     if (count < 2) return false;
 
     this.chartZoomLo = newLo;
@@ -532,10 +580,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     if (!Number.isFinite(span) || span <= 0) return false;
     const ta = dom.fromMs + newLo * span;
     const tb = dom.fromMs + newHi * span;
-    const count = full.filter((r) => {
-      const t = new Date(r.at).getTime();
-      return t >= ta && t <= tb;
-    }).length;
+    const count = ChartAnalysisComponent.sortedCountBetweenMs(full, ta, tb);
     if (count < 2) return false;
 
     this.chartZoomLo = newLo;
@@ -1047,10 +1092,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     if (!Number.isFinite(span) || span <= 0) return full;
     const ta = dom.fromMs + this.chartZoomLo * span;
     const tb = dom.fromMs + this.chartZoomHi * span;
-    const out = full.filter((r) => {
-      const t = new Date(r.at).getTime();
-      return t >= ta && t <= tb;
-    });
+    const out = ChartAnalysisComponent.sortedSliceBetweenMs(full, ta, tb);
     if (out.length < 2 && full.length >= 2) return full;
     return out;
   }
@@ -1628,10 +1670,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     if (useRemote) {
       if (this.remoteChartLoading) return [];
       if (this.remoteChartSeries !== null) {
-        const sorted = [...this.remoteChartSeries].sort(
-          (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
-        );
-        return applyDisplayCap ? capChartPointsSorted(sorted) : sorted;
+        if (applyDisplayCap) {
+          return this.remoteChartDisplayPoints ?? capChartPointsSorted(this.remoteChartSeries);
+        }
+        return this.remoteChartSeries;
       }
       if (this.remoteChartError) {
         return this.chartReadingsLocalFiltered(applyDisplayCap);
@@ -1906,6 +1948,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   private clearRemoteChartState(): void {
     this.remoteChartSeries = null;
+    this.remoteChartDisplayPoints = null;
     this.remoteChartLoading = false;
     this.remoteChartError = '';
   }
@@ -1935,6 +1978,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.remoteChartLoading = true;
     this.remoteChartError = '';
     this.remoteChartSeries = null;
+    this.remoteChartDisplayPoints = null;
     this.remoteLoadTimer = window.setTimeout(() => {
       this.remoteLoadTimer = null;
       void this.loadRemoteChartSeries(loadGen);
@@ -1968,10 +2012,15 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       }
       if (error) {
         this.remoteChartSeries = null;
+        this.remoteChartDisplayPoints = null;
         this.remoteChartError = error;
         return;
       }
-      this.remoteChartSeries = rows;
+      const sorted = [...rows].sort(
+        (a, b) => ChartAnalysisComponent.readingAtMs(a) - ChartAnalysisComponent.readingAtMs(b)
+      );
+      this.remoteChartSeries = sorted;
+      this.remoteChartDisplayPoints = capChartPointsSorted(sorted);
       this.remoteChartError = '';
     } finally {
       if (expectedGen === this.remoteLoadGeneration) {
