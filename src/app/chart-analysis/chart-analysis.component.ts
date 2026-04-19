@@ -135,12 +135,6 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.loadChartStylePreset();
     this.loadChartSeriesPrefs();
 
-    // Celular / tablet estrecho: panel de filtros plegado para que el gráfico entre primero.
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches) {
-      this.sidebarCollapsed = true;
-      this.sidebarPeek = false;
-    }
-
     if (typeof window !== 'undefined' && window.matchMedia) {
       this.narrowUiMql = window.matchMedia('(max-width: 768px)');
       this.narrowUi = this.narrowUiMql.matches;

@@ -117,50 +117,63 @@ $border: rgba(148, 163, 184, 0.18);
   grid-template-columns: 0 1fr;
 }
 
-/* Móvil: gráfico a ancho completo; filtros en cajón fijo (no display:none). */
+/* Con sidebar colapsado, 0 + 1fr rompe el ancho útil entre ~769px y 1024px (una columna “0”). */
+@media (max-width: 1024px) {
+  .grid.grid--sidebar-hidden {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Móvil: filtros y gráfico en el flujo (scroll); sin cajón fixed ni visibility:hidden que deje el SVG sin alto. */
 @media (max-width: 768px) {
   .grid.grid--sidebar-hidden {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .panel--chart {
+    order: -1;
   }
 
   .panel--side {
-    position: fixed;
-    top: max(0.45rem, env(safe-area-inset-top, 0px));
-    bottom: max(0.45rem, env(safe-area-inset-bottom, 0px));
-    left: max(0.35rem, env(safe-area-inset-left, 0px));
-    width: min(360px, calc(100vw - 0.75rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
-    max-width: min(360px, 92vw);
-    z-index: 36;
+    position: relative;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    width: 100%;
+    max-width: 100%;
+    z-index: auto;
     margin: 0;
-    transition:
-      transform 0.22s ease,
-      visibility 0.22s ease,
-      box-shadow 0.22s ease;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
-  }
-
-  .grid.grid--sidebar-hidden .panel--side {
-    transform: translateX(calc(-100% - 28px));
-    visibility: hidden;
-    pointer-events: none;
+    transform: none;
+    visibility: visible;
+    pointer-events: auto;
     box-shadow: none;
+    transition: none;
+    overflow: visible;
   }
 
+  .grid.grid--sidebar-hidden .panel--side,
   .grid:not(.grid--sidebar-hidden) .panel--side {
-    transform: translateX(0);
+    transform: none;
     visibility: visible;
     pointer-events: auto;
   }
 
-  /* Altura del gráfico sigue el ancho de pantalla (se ajusta solo al rotar o redimensionar). */
+  .sidebar-backdrop,
+  .sidebar-hotspot {
+    display: none !important;
+  }
+
+  /*
+   * WebKit móvil: height:auto + aspect-ratio + SVG height:100% a veces deja el contenedor en 0px de alto.
+   * Altura explícita para que el gráfico siempre pinte.
+   */
   .chart__svg-wrap {
-    height: auto;
     width: 100%;
-    aspect-ratio: 11 / 8;
-    min-height: clamp(200px, 54vw, 300px);
-    max-height: min(72dvh, 72svh, 480px);
+    aspect-ratio: unset;
+    height: clamp(260px, 68vw, 420px);
+    min-height: clamp(240px, 60vw, 360px);
+    max-height: min(72dvh, 72svh, 520px);
   }
 }
 
@@ -1198,9 +1211,9 @@ $border: rgba(148, 163, 184, 0.18);
 
   .chart__svg-wrap {
     border-radius: 10px;
-    /* Tamaño ya definido en bloque ≤768px (aspect-ratio); aquí solo refina en pantallas muy angostas */
-    min-height: clamp(190px, 56vw, 280px);
-    max-height: min(70dvh, 70svh, 440px);
+    min-height: clamp(220px, 62vw, 320px);
+    height: clamp(240px, 72vw, 400px);
+    max-height: min(68dvh, 68svh, 460px);
   }
 
   .chart-stats {
@@ -1227,9 +1240,9 @@ $border: rgba(148, 163, 184, 0.18);
 
 @media (max-width: 380px) {
   .chart__svg-wrap {
-    aspect-ratio: 5 / 4;
-    min-height: clamp(180px, 52vw, 250px);
-    max-height: min(66dvh, 66svh, 400px);
+    min-height: clamp(200px, 58vw, 280px);
+    height: clamp(220px, 68vw, 360px);
+    max-height: min(64dvh, 64svh, 420px);
   }
 
   .chart__x-axis-tick {

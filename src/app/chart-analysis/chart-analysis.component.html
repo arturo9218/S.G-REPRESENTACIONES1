@@ -27,7 +27,7 @@
 
   <section class="grid" [class.grid--sidebar-hidden]="sidebarCollapsed && !sidebarPeek">
     <div class="panel panel--side" (mouseleave)="closeSidebarPeek()">
-      <div class="panel__side-actions">
+      <div class="panel__side-actions" *ngIf="!narrowUi">
         <button type="button" class="btn btn--ghost panel__collapse" (click)="toggleSidebar()">
           {{ sidebarCollapsed ? 'Mostrar panel' : 'Ocultar panel' }}
         </button>
