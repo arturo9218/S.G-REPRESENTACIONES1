@@ -61,11 +61,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   private narrowUiMql?: MediaQueryList;
   private onNarrowUiMediaChange?: () => void;
 
-  /**
-   * Tarjeta "Series del gráfico" (estilo ficha): al tocar el encabezado se pliega / despliega.
-   * En móvil arranca cerrada para dejar a la vista filtros y rango.
-   */
-  seriesChartSectionOpen = true;
+  /** Tarjetas del panel lateral: clic en encabezado; al entrar en análisis, todas plegadas. */
+  seriesChartSectionOpen = false;
+  chartSideFiltersOpen = false;
+  chartSideSensorsOpen = false;
 
   /** Serie para filtros de fecha en dispositivo nube (RPC Supabase). */
   remoteChartSeries: TemperatureReading[] | null = null;
@@ -155,7 +154,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       this.narrowUiMql.addEventListener('change', this.onNarrowUiMediaChange);
     }
 
-    this.seriesChartSectionOpen = !this.narrowUi;
+    this.resetChartSidePanelCards();
 
     // deviceId (correcto), deviceid (minúsculas), deviceld (typo viejo).
     const qp = this.route.snapshot.queryParamMap;
@@ -1031,8 +1030,22 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.scheduleRemoteChartLoad();
   }
 
+  private resetChartSidePanelCards(): void {
+    this.seriesChartSectionOpen = false;
+    this.chartSideFiltersOpen = false;
+    this.chartSideSensorsOpen = false;
+  }
+
   toggleSeriesChartSection(): void {
     this.seriesChartSectionOpen = !this.seriesChartSectionOpen;
+  }
+
+  toggleChartFiltersSection(): void {
+    this.chartSideFiltersOpen = !this.chartSideFiltersOpen;
+  }
+
+  toggleChartSensorsSection(): void {
+    this.chartSideSensorsOpen = !this.chartSideSensorsOpen;
   }
 
   toggleSidebar(): void {

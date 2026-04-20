@@ -230,17 +230,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Hora local (HH:mm) para el rango del gráfico en PDF / vista en Análisis. */
   equipmentPdfChartFromTime = '00:00';
   equipmentPdfChartToTime = '23:59';
-  /** Secciones de la ficha: clic en el título muestra u oculta el cuerpo (independientes entre sí). */
+  /** Secciones de la ficha: clic en el título muestra u oculta el cuerpo (independientes entre sí). Arrancan plegadas. */
   equipmentSectionOpen: Record<string, boolean> = {
-    compression: true,
-    condenser: true,
-    expansion: true,
-    evaporator: true,
-    piping: true,
-    notes: true,
-    maintenance: true,
-    log: true,
-    photos: true,
+    compression: false,
+    condenser: false,
+    expansion: false,
+    evaporator: false,
+    piping: false,
+    notes: false,
+    maintenance: false,
+    log: false,
+    photos: false,
   };
   private readonly equipmentSectionKeys = [
     'compression',
@@ -3303,10 +3303,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     await this.onEquipmentFichaChange(fichaId);
   }
 
-  /** Abre todas las secciones del editor (al cambiar equipo/ficha). */
+  /** Pliega todas las secciones del editor (al cambiar equipo/ficha o crear ficha). */
   private resetEquipmentSectionPanels(): void {
     for (const k of this.equipmentSectionKeys) {
-      this.equipmentSectionOpen[k] = true;
+      this.equipmentSectionOpen[k] = false;
     }
   }
 
