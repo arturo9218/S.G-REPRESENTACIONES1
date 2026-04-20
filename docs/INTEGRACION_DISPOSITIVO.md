@@ -1,5 +1,18 @@
 # Integración del dispositivo (temperatura, corriente, presión)
 
+## Cabeceras HTTP (Supabase)
+
+Las Edge Functions se publican en `https://<ref>.supabase.co/functions/v1/<nombre>`. El **gateway** de Supabase espera la clave pública del proyecto en las cabeceras (igual que el cliente JS del frontend):
+
+- `apikey: <anon public>`
+- `Authorization: Bearer <anon public>`
+- `Content-Type: application/json`
+
+La clave **anon** está en **Project Settings → API → Project API keys → anon public**.  
+El campo JSON `deviceToken` es **otra cosa**: es el token del dispositivo guardado en la fila de `devices`, no sustituye a la anon.
+
+El sketch de ejemplo (`docs/esp8266_wifimanager_supabase.ino`) envía esas cabeceras si definís `DEFAULT_SUPABASE_ANON_KEY` en el firmware o si agregás `supabaseAnonKey` en `/config.json` (LittleFS). Si ves `401` en el Serial (`[HTTP] code=401`), revisá esto antes que `moduleId` / `deviceToken`.
+
 ## Payload recomendado
 
 Enviar `POST` a la Function `ingest-reading` con JSON:

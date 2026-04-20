@@ -107,6 +107,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
   dailyEnergyKwh: number | null = null;
   dailyEnergyLoading = false;
   dailyEnergyError = '';
+  /** Invitar usuarios al equipo (dueño / admin). */
+  shareInviteEmail = '';
+  shareInviteRole: 'viewer' | 'editor' = 'viewer';
+  shareInviteBusy = false;
+  shareInviteFeedback = '';
+  shareInviteFeedbackIsError = false;
+  deviceMembersRows: { member_user_id: string; role: string; created_at?: string }[] = [];
+  deviceMembersLoading = false;
+  leaveSharedBusy = false;
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
   private subAdmin: Subscription | null = null;
@@ -823,7 +832,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         id: `${deviceId}-${r.at}`,
         deviceName: d?.name ?? deviceId,
         deviceId,
-        online: d?.online ?? true,
+        online: d?.online ?? false,
         timeLabel: this.formatShortDate(r.at),
         accent: accents[i % accents.length],
       });
@@ -1009,6 +1018,22 @@ export class DashboardComponent implements OnInit, OnDestroy {
   get selectedDevice(): DashboardDevice | null {
     if (!this.selectedDeviceId) return null;
     return this.devices.find((d) => d.id === this.selectedDeviceId) ?? null;
+  }
+
+  get selectedDeviceCloudReadOnly(): boolean {
+    return this.deviceStore.isCloudViewerOnly(this.selectedDevice);
+  }
+
+  get selectedDeviceCanManageMembers(): boolean {
+    const d = this.selectedDevice;
+    if (!d?.cloudSynced || !this.deviceStore.isCloudDeviceId(d.id)) return false;
+    if (this.isAdminView) return true;
+    return d.accessRole === 'owner';
+  }
+
+  get selectedDeviceIsSharedMember(): boolean {
+    const d = this.selectedDevice;
+    return !!(d?.cloudSynced && (d.accessRole === 'viewer' || d.accessRole === 'editor'));
   }
 
   get editingDevice(): DashboardDevice | null {
@@ -1807,6 +1832,102 @@ export class DashboardComponent implements OnInit, OnDestroy {
           });
       }
     }
+    void this.refreshDeviceMembers();
+  }
+
+  async refreshDeviceMembers(): Promise<void> {
+    const id = this.selectedDeviceId;
+    if (!id || !this.selectedDeviceCanManageMembers || !this.environment.deviceCloudSync) {
+      this.deviceMembersRows = [];
+      return;
+    }
+    this.deviceMembersLoading = true;
+    try {
+      const { data, error } = await this.auth.client
+        .from('device_members')
+        .select('member_user_id, role, created_at')
+        .eq('device_id', id)
+        .order('created_at', { ascending: true });
+      if (error) {
+        this.deviceMembersRows = [];
+        return;
+      }
+      this.deviceMembersRows = (data ?? []) as {
+        member_user_id: string;
+        role: string;
+        created_at?: string;
+      }[];
+    } finally {
+      this.deviceMembersLoading = false;
+    }
+  }
+
+  formatMemberUserIdShort(uid: string): string {
+    if (!uid || uid.length < 8) return uid;
+    return `${uid.slice(0, 4)}…${uid.slice(-4)}`;
+  }
+
+  async submitDeviceShareInvite(): Promise<void> {
+    const id = this.selectedDeviceId;
+    if (!id || !this.selectedDeviceCanManageMembers) return;
+    const raw = this.shareInviteEmail.trim().toLowerCase();
+    if (!raw || !raw.includes('@')) {
+      this.shareInviteFeedback = 'Ingresá un email válido.';
+      this.shareInviteFeedbackIsError = true;
+      window.setTimeout(() => {
+        this.shareInviteFeedback = '';
+      }, 5000);
+      return;
+    }
+    this.shareInviteBusy = true;
+    this.shareInviteFeedback = '';
+    this.shareInviteFeedbackIsError = false;
+    try {
+      const { error } = await this.auth.client.rpc('add_device_member_by_email', {
+        p_device_id: id,
+        p_email: raw,
+        p_role: this.shareInviteRole,
+      });
+      if (error) {
+        this.shareInviteFeedbackIsError = true;
+        this.shareInviteFeedback = error.message;
+      } else {
+        this.shareInviteFeedback = 'Listo: el usuario ya puede ver el equipo con el rol elegido.';
+        this.shareInviteEmail = '';
+        await this.refreshDeviceMembers();
+      }
+    } finally {
+      this.shareInviteBusy = false;
+      window.setTimeout(() => {
+        this.shareInviteFeedback = '';
+      }, 7000);
+    }
+  }
+
+  async leaveSharedDevice(): Promise<void> {
+    const id = this.selectedDeviceId;
+    if (!id || !this.selectedDeviceIsSharedMember) return;
+    if (!confirm('¿Dejar de ver este equipo compartido? Se quitará de tu lista.')) return;
+    this.leaveSharedBusy = true;
+    try {
+      const res = await this.deviceStore.leaveSharedDeviceAsync(id);
+      if (!res.ok) {
+        alert(res.error ?? 'No se pudo completar.');
+        return;
+      }
+      const next = this.deviceStore.snapshot[0]?.id ?? null;
+      this.selectDevice(next, true);
+    } finally {
+      this.leaveSharedBusy = false;
+    }
+  }
+
+  private assertEquipmentNotViewer(): boolean {
+    if (this.deviceStore.isCloudViewerOnly(this.selectedDevice)) {
+      this.equipmentFeedback = 'Solo lectura: no podés modificar la ficha con este rol.';
+      return true;
+    }
+    return false;
   }
 
   onSensorLabelsInput(): void {
@@ -1816,6 +1937,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
   async saveSensorLabels(): Promise<void> {
     const d = this.selectedDevice;
     if (!d) return;
+    if (this.selectedDeviceCloudReadOnly) {
+      this.sensorLabelsFeedback = 'Solo lectura: no podés cambiar etiquetas con este rol.';
+      window.setTimeout(() => {
+        this.sensorLabelsFeedback = '';
+      }, 5000);
+      return;
+    }
     this.sensorLabelsSaving = true;
     this.sensorLabelsFeedback = '';
     try {
@@ -1861,6 +1989,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
   async saveTempCalibration(): Promise<void> {
     const device = this.selectedDevice;
     if (!device) return;
+    if (this.selectedDeviceCloudReadOnly) {
+      this.calibrationFeedback = 'Solo lectura: no podés guardar corrección con este rol.';
+      window.setTimeout(() => {
+        this.calibrationFeedback = '';
+      }, 6000);
+      return;
+    }
     this.calibrationSaving = true;
     this.calibrationFeedback = '';
     let cloudError: string | undefined;
@@ -1906,6 +2041,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!device) return;
     this.notificationSettingsFeedback = '';
     this.notificationSettingsFeedbackIsError = false;
+
+    if (this.selectedDeviceCloudReadOnly) {
+      this.notificationSettingsFeedbackIsError = true;
+      this.notificationSettingsFeedback =
+        'Solo lectura: no podés cambiar umbrales con este rol.';
+      this.scheduleNotificationFeedbackClear();
+      return;
+    }
 
     if (this.alertsEnabledForm && typeof window !== 'undefined' && 'Notification' in window) {
       if (Notification.permission === 'default') {
@@ -2288,8 +2431,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return `${amps.toFixed(2)} A`;
   }
 
-  /** Tarjeta tipo sensor: hay pinza/potencia cuando llega corriente o potencia > 0. */
+  /**
+   * Fila pinza/corriente: en equipos nube (UUID) siempre se muestra el bloque (valor o "—").
+   * En locales/demo solo si hay dato de corriente o potencia > 0.
+   */
   deviceShowClampRow(d: DashboardDevice): boolean {
+    if (d.cloudSynced && this.deviceStore.isCloudDeviceId(d.id)) {
+      return true;
+    }
     return (
       (d.currentA != null && Number.isFinite(d.currentA)) ||
       (d.powerW != null && Number.isFinite(d.powerW) && d.powerW > 0)
@@ -3506,6 +3655,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async addEquipmentFicha(): Promise<void> {
     if (!this.equipmentSheetAvailable() || !this.selectedDeviceId) return;
+    if (this.assertEquipmentNotViewer()) return;
     const n = this.equipmentFichas.length + 1;
     const label = `Cámara ${n}`;
     const { id, error } = await this.equipmentSheet.createFicha(this.selectedDeviceId, label);
@@ -3524,6 +3674,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   async deleteEquipmentFicha(): Promise<void> {
     const fid = this.selectedFichaId;
     if (!fid || !this.selectedDeviceId) return;
+    if (this.assertEquipmentNotViewer()) return;
     const isLast = this.equipmentFichas.length <= 1;
     const msg = isLast
       ? '¿Eliminar esta ficha? El equipo quedará sin fichas hasta que agregues una nueva.'
@@ -3756,6 +3907,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async saveEquipmentSheet(): Promise<void> {
     if (!this.equipmentSheetAvailable() || !this.selectedFichaId) return;
+    if (this.assertEquipmentNotViewer()) return;
     this.equipmentSaving = true;
     this.equipmentFeedback = '';
     try {
@@ -3934,6 +4086,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async addEquipmentLogEntry(): Promise<void> {
     if (!this.equipmentSheetAvailable() || !this.selectedFichaId) return;
+    if (this.assertEquipmentNotViewer()) return;
     const note = this.logNoteForm.trim();
     if (!note) {
       this.equipmentFeedback = 'Escribí el trabajo realizado (observación).';
@@ -3963,6 +4116,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async deleteEquipmentLogEntry(row: DeviceEquipmentLogRow): Promise<void> {
     if (!confirm('¿Eliminar esta entrada de trabajo realizado?')) return;
+    if (this.assertEquipmentNotViewer()) return;
     const { error } = await this.equipmentSheet.deleteLog(row.id);
     if (error) {
       this.equipmentFeedback = error;
@@ -3976,6 +4130,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const file = input.files?.[0];
     input.value = '';
     if (!file || !this.equipmentSheetAvailable() || !this.selectedFichaId) return;
+    if (this.assertEquipmentNotViewer()) return;
     this.equipmentPhotoUploading = true;
     this.equipmentFeedback = '';
     try {
@@ -3999,6 +4154,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async deleteEquipmentPhoto(p: DeviceEquipmentPhotoRow): Promise<void> {
     if (!confirm('¿Quitar esta foto?')) return;
+    if (this.assertEquipmentNotViewer()) return;
     const { error } = await this.equipmentSheet.deletePhoto(p);
     if (error) {
       this.equipmentFeedback = error;

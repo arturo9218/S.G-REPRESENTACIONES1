@@ -14,6 +14,7 @@ import { DeviceStoreService } from '../core/device-store.service';
 import {
   ChartStylePreset,
   DashboardDevice,
+  DeviceChartMarker,
   TemperatureReading,
 } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
@@ -65,6 +66,16 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   seriesChartSectionOpen = false;
   chartSideFiltersOpen = false;
   chartSideSensorsOpen = false;
+  chartSideMarkersOpen = false;
+
+  /** Marcadores en nube (visitas, fallas) en el rango del gráfico. */
+  chartMarkers: DeviceChartMarker[] = [];
+  chartMarkersError = '';
+  chartMarkerAtLocal = '';
+  chartMarkerLabelInput = 'Visita';
+  chartMarkerNoteInput = '';
+  chartMarkerSaving = false;
+  chartMarkerFeedback = '';
 
   /** Serie para filtros de fecha en dispositivo nube (RPC Supabase). */
   remoteChartSeries: TemperatureReading[] | null = null;
@@ -213,7 +224,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     });
 
     // Primera carga del gráfico (p. ej. deviceId en URL válido sin tocar filtros).
-    queueMicrotask(() => this.scheduleRemoteChartLoad());
+    queueMicrotask(() => {
+      this.resetChartMarkerFormDefaults();
+      this.scheduleRemoteChartLoad();
+    });
 
     // Al abrir en pestaña nueva, forzamos una lectura de nube para evitar gráfico vacío.
     window.setTimeout(() => {
@@ -637,6 +651,28 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     return this.deviceStore.isCloudDeviceId(this.selectedDeviceId);
   }
 
+  get selectedCloudReadOnly(): boolean {
+    return this.deviceStore.isCloudViewerOnly(this.selectedDevice);
+  }
+
+  get chartMarkersCloudEnabled(): boolean {
+    return this.deviceStore.isCloudSyncActive() && this.selectedIsCloudDevice;
+  }
+
+  /** Líneas verticales en el viewBox 0–100 (misma ventana temporal que el gráfico). */
+  get chartMarkerSvgLines(): { x: number; id: string; title: string }[] {
+    const out: { x: number; id: string; title: string }[] = [];
+    for (const m of this.chartMarkers) {
+      const t = new Date(m.markedAt).getTime();
+      if (!Number.isFinite(t)) continue;
+      const x = this.chartSvgXForTimeMs(t);
+      if (x == null) continue;
+      const title = m.note?.trim() ? `${m.label}: ${m.note.trim()}` : m.label;
+      out.push({ x, id: m.id, title });
+    }
+    return out;
+  }
+
   /**
    * Texto del rango que usa el gráfico (nube o filtros), para móvil y confirmación Desde/Hasta.
    */
@@ -1030,6 +1066,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   onChartDeviceChange(): void {
     this.deviceIdFromUrl = null;
     this.syncSensorLabelsWithSelected();
+    this.resetChartMarkerFormDefaults();
     this.resetChartZoom();
     this.scheduleRemoteChartLoad();
   }
@@ -1038,6 +1075,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.seriesChartSectionOpen = false;
     this.chartSideFiltersOpen = false;
     this.chartSideSensorsOpen = false;
+    this.chartSideMarkersOpen = false;
   }
 
   toggleSeriesChartSection(): void {
@@ -1050,6 +1088,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   toggleChartSensorsSection(): void {
     this.chartSideSensorsOpen = !this.chartSideSensorsOpen;
+  }
+
+  toggleChartMarkersSection(): void {
+    this.chartSideMarkersOpen = !this.chartSideMarkersOpen;
   }
 
   toggleSidebar(): void {
@@ -1160,6 +1202,13 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   async saveSensorLabels(): Promise<void> {
     const d = this.selectedDevice;
     if (!d) return;
+    if (this.selectedCloudReadOnly) {
+      this.sensorLabelsFeedback = 'Solo lectura: no podés cambiar etiquetas con este rol.';
+      window.setTimeout(() => {
+        this.sensorLabelsFeedback = '';
+      }, 5000);
+      return;
+    }
 
     this.sensorLabelsSaving = true;
     this.sensorLabelsFeedback = '';
@@ -1186,6 +1235,78 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
         this.sensorLabelsFeedback = '';
       }, 5000);
     }
+  }
+
+  async saveChartMarker(): Promise<void> {
+    const id = this.selectedDeviceId;
+    if (!id || !this.chartMarkersCloudEnabled || this.selectedCloudReadOnly) {
+      return;
+    }
+    const bounds = this.getEffectiveChartBounds();
+    if (!bounds) {
+      this.chartMarkerFeedback = 'Definí un rango de fechas o esperá a que carguen los datos.';
+      window.setTimeout(() => {
+        this.chartMarkerFeedback = '';
+      }, 4500);
+      return;
+    }
+    const raw = this.chartMarkerAtLocal?.trim();
+    if (!raw) {
+      this.chartMarkerFeedback = 'Elegí fecha y hora del marcador.';
+      window.setTimeout(() => {
+        this.chartMarkerFeedback = '';
+      }, 4500);
+      return;
+    }
+    const d = new Date(raw);
+    if (!Number.isFinite(d.getTime())) {
+      this.chartMarkerFeedback = 'Fecha u hora no válida.';
+      window.setTimeout(() => {
+        this.chartMarkerFeedback = '';
+      }, 4500);
+      return;
+    }
+    this.chartMarkerSaving = true;
+    this.chartMarkerFeedback = '';
+    try {
+      const { error } = await this.deviceStore.addChartMarker({
+        deviceId: id,
+        markedAtIso: d.toISOString(),
+        label: this.chartMarkerLabelInput,
+        note: this.chartMarkerNoteInput,
+      });
+      if (error) {
+        this.chartMarkerFeedback = error;
+      } else {
+        this.chartMarkerFeedback = 'Marcador guardado.';
+        void this.loadChartMarkersForRange(id, bounds, this.remoteLoadGeneration);
+      }
+    } finally {
+      this.chartMarkerSaving = false;
+      window.setTimeout(() => {
+        this.chartMarkerFeedback = '';
+      }, 5000);
+    }
+  }
+
+  async deleteChartMarker(markerId: string): Promise<void> {
+    const id = this.selectedDeviceId;
+    if (!id || this.selectedCloudReadOnly) {
+      return;
+    }
+    const bounds = this.getEffectiveChartBounds();
+    if (!bounds) {
+      return;
+    }
+    const { error } = await this.deviceStore.deleteChartMarker(markerId, id);
+    if (error) {
+      this.chartMarkerFeedback = error;
+      window.setTimeout(() => {
+        this.chartMarkerFeedback = '';
+      }, 5000);
+      return;
+    }
+    void this.loadChartMarkersForRange(id, bounds, this.remoteLoadGeneration);
   }
 
   syncSensorLabelsWithSelected(): void {
@@ -1980,6 +2101,44 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     this.remoteChartDisplayPoints = null;
     this.remoteChartLoading = false;
     this.remoteChartError = '';
+    this.chartMarkers = [];
+    this.chartMarkersError = '';
+  }
+
+  private toDatetimeLocalValue(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
+      d.getMinutes()
+    )}`;
+  }
+
+  private resetChartMarkerFormDefaults(): void {
+    this.chartMarkerAtLocal = this.toDatetimeLocalValue(new Date());
+    this.chartMarkerLabelInput = 'Visita';
+    this.chartMarkerNoteInput = '';
+    this.chartMarkerFeedback = '';
+  }
+
+  private async loadChartMarkersForRange(
+    deviceId: string,
+    bounds: { from: Date; to: Date },
+    expectedGen: number
+  ): Promise<void> {
+    const { rows, error } = await this.deviceStore.fetchChartMarkersForRange(
+      deviceId,
+      bounds.from.toISOString(),
+      bounds.to.toISOString()
+    );
+    if (expectedGen !== this.remoteLoadGeneration) {
+      return;
+    }
+    if (error) {
+      this.chartMarkers = [];
+      this.chartMarkersError = error;
+      return;
+    }
+    this.chartMarkers = rows;
+    this.chartMarkersError = '';
   }
 
   /** Reintenta cargar el historial desde la nube tras un error de red o de API. */
@@ -2043,6 +2202,8 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
         this.remoteChartSeries = null;
         this.remoteChartDisplayPoints = null;
         this.remoteChartError = error;
+        this.chartMarkers = [];
+        this.chartMarkersError = '';
         return;
       }
       const sorted = [...rows].sort(
@@ -2051,6 +2212,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       this.remoteChartSeries = sorted;
       this.remoteChartDisplayPoints = capChartPointsSorted(sorted);
       this.remoteChartError = '';
+      void this.loadChartMarkersForRange(deviceId, bounds, expectedGen);
     } finally {
       if (expectedGen === this.remoteLoadGeneration) {
         this.remoteChartLoading = false;

@@ -482,6 +482,10 @@
               <header class="device-card__head">
                 <div class="device-card__head-text">
                   <h3 class="device-card__name">{{ d.name }}</h3>
+                  <span class="device-card__role-pill" *ngIf="d.accessRole === 'viewer'">Solo lectura</span>
+                  <span class="device-card__role-pill device-card__role-pill--editor" *ngIf="d.accessRole === 'editor'"
+                    >Invitado editor</span
+                  >
                   <span class="device-card__id">ID panel: {{ d.id }}</span>
                   <span class="device-card__module" *ngIf="d.moduleId">ID dispositivo: {{ d.moduleId }}</span>
                 </div>
@@ -638,6 +642,13 @@
                   <span class="device-card__sensor-subline" *ngIf="formatDeviceClampSub(d)">{{
                     formatDeviceClampSub(d)
                   }}</span>
+                  <span
+                    class="device-card__sensor-subline device-card__sensor-subline--hint"
+                    *ngIf="d.cloudSynced && formatDeviceClampAmpNum(d) === '—'"
+                  >
+                    Sin corriente/potencia en lecturas: el ESP debe enviar <code>current_a</code> y/o
+                    <code>power_w</code> en cada POST.
+                  </span>
                   <div class="device-card__sensor-foot">
                     <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
                   </div>
@@ -2076,45 +2087,47 @@
             <p class="card__hint card__hint--tight">
               Se guardan en este equipo y en la nube (cuando el dispositivo tiene ID de panel UUID). Se usan en el gráfico, telemetría e historial.
             </p>
-            <div class="notify-panel notify-panel--labels">
-              <label class="notify-panel__field notify-panel__field--full">
-                <span>Sensor 1 (temp. principal)</span>
-                <input
-                  type="text"
-                  [(ngModel)]="sensor1LabelForm"
-                  (ngModelChange)="onSensorLabelsInput()"
-                  maxlength="48"
-                  autocomplete="off"
-                  placeholder="Ej. Evaporador"
-                />
-              </label>
-              <label class="notify-panel__field notify-panel__field--full">
-                <span>Sensor 2 (segundo canal)</span>
-                <input
-                  type="text"
-                  [(ngModel)]="sensor2LabelForm"
-                  (ngModelChange)="onSensorLabelsInput()"
-                  maxlength="48"
-                  autocomplete="off"
-                  placeholder="Ej. Condensador"
-                />
-              </label>
-              <p
-                class="sensor-labels-feedback"
-                *ngIf="sensorLabelsFeedback && !sensorLabelsSaving"
-                [class.sensor-labels-feedback--warn]="sensorLabelsFeedback.includes('No se pudo')"
-              >
-                {{ sensorLabelsFeedback }}
-              </p>
-              <button
-                type="button"
-                class="btn btn--primary notify-panel__save"
-                [disabled]="sensorLabelsSaving"
-                (click)="saveSensorLabels()"
-              >
-                {{ sensorLabelsSaving ? 'Guardando…' : 'Guardar nombres' }}
-              </button>
-            </div>
+            <fieldset class="notify-panel-fieldset" [disabled]="selectedDeviceCloudReadOnly">
+              <div class="notify-panel notify-panel--labels">
+                <label class="notify-panel__field notify-panel__field--full">
+                  <span>Sensor 1 (temp. principal)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="sensor1LabelForm"
+                    (ngModelChange)="onSensorLabelsInput()"
+                    maxlength="48"
+                    autocomplete="off"
+                    placeholder="Ej. Evaporador"
+                  />
+                </label>
+                <label class="notify-panel__field notify-panel__field--full">
+                  <span>Sensor 2 (segundo canal)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="sensor2LabelForm"
+                    (ngModelChange)="onSensorLabelsInput()"
+                    maxlength="48"
+                    autocomplete="off"
+                    placeholder="Ej. Condensador"
+                  />
+                </label>
+                <p
+                  class="sensor-labels-feedback"
+                  *ngIf="sensorLabelsFeedback && !sensorLabelsSaving"
+                  [class.sensor-labels-feedback--warn]="sensorLabelsFeedback.includes('No se pudo')"
+                >
+                  {{ sensorLabelsFeedback }}
+                </p>
+                <button
+                  type="button"
+                  class="btn btn--primary notify-panel__save"
+                  [disabled]="sensorLabelsSaving"
+                  (click)="saveSensorLabels()"
+                >
+                  {{ sensorLabelsSaving ? 'Guardando…' : 'Guardar nombres' }}
+                </button>
+              </div>
+            </fieldset>
           </article>
 
           <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync">
@@ -2122,84 +2135,87 @@
             <p class="card__hint card__hint--tight">
               Sumás o restás al valor que envía el dispositivo al guardar cada lectura en la nube: temperatura en °C, corriente en A y potencia en W. Con pinza / SCT, la <strong>corriente en A</strong> corrige el amperaje RMS que calcula el equipo a partir del sensor; si el consumo en pantalla queda sistemáticamente alto o bajo, ajustá este valor (y la tensión nominal del equipo arriba) antes que la potencia en W. La tarjeta y el historial usan bruto + offset cuando hay columnas crudas en la nube. Para que el gráfico de <strong>Análisis</strong> use el mismo criterio, ejecutá en Supabase el SQL <code>024_get_device_readings_chart_raw.sql</code>.
             </p>
-            <div class="notify-panel notify-panel__grid">
-              <label class="notify-panel__field">
-                <span>Sensor 1 (°C)</span>
-                <input
-                  type="text"
-                  [(ngModel)]="temp1OffsetForm"
-                  (ngModelChange)="onCalibrationFormChange()"
-                  placeholder="0"
-                  name="temp-offset-1"
-                  autocomplete="off"
-                />
-              </label>
-              <label class="notify-panel__field">
-                <span>Sensor 2 (°C)</span>
-                <input
-                  type="text"
-                  [(ngModel)]="temp2OffsetForm"
-                  (ngModelChange)="onCalibrationFormChange()"
-                  placeholder="0"
-                  name="temp-offset-2"
-                  autocomplete="off"
-                />
-              </label>
-              <label class="notify-panel__field">
-                <span>Sensor 3 (°C)</span>
-                <input
-                  type="text"
-                  [(ngModel)]="temp3OffsetForm"
-                  (ngModelChange)="onCalibrationFormChange()"
-                  placeholder="0"
-                  name="temp-offset-3"
-                  autocomplete="off"
-                />
-              </label>
-              <label class="notify-panel__field">
-                <span>Corriente (A)</span>
-                <input
-                  type="text"
-                  [(ngModel)]="currentOffsetForm"
-                  (ngModelChange)="onCalibrationFormChange()"
-                  placeholder="0"
-                  name="current-offset-a"
-                  autocomplete="off"
-                />
-              </label>
-              <label class="notify-panel__field">
-                <span>Potencia (W)</span>
-                <input
-                  type="text"
-                  [(ngModel)]="powerOffsetForm"
-                  (ngModelChange)="onCalibrationFormChange()"
-                  placeholder="0"
-                  name="power-offset-w"
-                  autocomplete="off"
-                />
-              </label>
-            </div>
-            <p
-              class="sensor-labels-feedback"
-              *ngIf="calibrationFeedback && !calibrationSaving"
-              [class.sensor-labels-feedback--warn]="calibrationFeedback.includes('No se pudo') || calibrationFeedback.includes('Ejecutá')"
-            >
-              {{ calibrationFeedback }}
-            </p>
-            <button
-              type="button"
-              class="btn btn--primary notify-panel__save"
-              [disabled]="calibrationSaving"
-              (click)="saveTempCalibration()"
-            >
-              {{ calibrationSaving ? 'Guardando…' : 'Guardar corrección' }}
-            </button>
+            <fieldset class="notify-panel-fieldset" [disabled]="selectedDeviceCloudReadOnly">
+              <div class="notify-panel notify-panel__grid">
+                <label class="notify-panel__field">
+                  <span>Sensor 1 (°C)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="temp1OffsetForm"
+                    (ngModelChange)="onCalibrationFormChange()"
+                    placeholder="0"
+                    name="temp-offset-1"
+                    autocomplete="off"
+                  />
+                </label>
+                <label class="notify-panel__field">
+                  <span>Sensor 2 (°C)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="temp2OffsetForm"
+                    (ngModelChange)="onCalibrationFormChange()"
+                    placeholder="0"
+                    name="temp-offset-2"
+                    autocomplete="off"
+                  />
+                </label>
+                <label class="notify-panel__field">
+                  <span>Sensor 3 (°C)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="temp3OffsetForm"
+                    (ngModelChange)="onCalibrationFormChange()"
+                    placeholder="0"
+                    name="temp-offset-3"
+                    autocomplete="off"
+                  />
+                </label>
+                <label class="notify-panel__field">
+                  <span>Corriente (A)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="currentOffsetForm"
+                    (ngModelChange)="onCalibrationFormChange()"
+                    placeholder="0"
+                    name="current-offset-a"
+                    autocomplete="off"
+                  />
+                </label>
+                <label class="notify-panel__field">
+                  <span>Potencia (W)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="powerOffsetForm"
+                    (ngModelChange)="onCalibrationFormChange()"
+                    placeholder="0"
+                    name="power-offset-w"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+              <p
+                class="sensor-labels-feedback"
+                *ngIf="calibrationFeedback && !calibrationSaving"
+                [class.sensor-labels-feedback--warn]="calibrationFeedback.includes('No se pudo') || calibrationFeedback.includes('Ejecutá')"
+              >
+                {{ calibrationFeedback }}
+              </p>
+              <button
+                type="button"
+                class="btn btn--primary notify-panel__save"
+                [disabled]="calibrationSaving"
+                (click)="saveTempCalibration()"
+              >
+                {{ calibrationSaving ? 'Guardando…' : 'Guardar corrección' }}
+              </button>
+            </fieldset>
           </article>
 
           <article id="section-settings" class="card" aria-labelledby="settings-notify-heading">
             <h2 id="settings-notify-heading" class="card__title card__title--sm">Notificaciones temperatura y corriente</h2>
             <div class="notify-panel" *ngIf="selectedDevice as sd; else noDeviceSelectedSettings">
               <p class="notify-panel__device">{{ sd.name }}</p>
+              <fieldset class="notify-panel-fieldset" [disabled]="selectedDeviceCloudReadOnly">
               <label class="notify-panel__toggle">
                 <input type="checkbox" [(ngModel)]="alertsEnabledForm" (ngModelChange)="onNotificationFormChange()" />
                 <span>Activar notificaciones</span>
@@ -2347,10 +2363,78 @@
               >
                 {{ notificationSettingsSaving ? 'Guardando…' : 'Guardar umbrales' }}
               </button>
+              </fieldset>
             </div>
             <ng-template #noDeviceSelectedSettings>
               <p class="card__empty">Seleccioná un dispositivo.</p>
             </ng-template>
+          </article>
+
+          <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync && selectedDeviceCanManageMembers">
+            <h2 class="card__title card__title--sm">Compartir equipo</h2>
+            <p class="card__hint card__hint--tight">
+              Invitá por email a un usuario ya registrado en la app.
+              <strong>Visor</strong>: solo consulta.
+              <strong>Editor</strong>: puede umbrales, ficha técnica y marcadores del gráfico (no puede borrar el equipo ni cambiar el ID módulo).
+              Requiere SQL <code>029_device_members_chart_markers.sql</code> y, si aparece recursión en policies,
+              <code>031_device_members_rls_break_recursion.sql</code> en Supabase.
+            </p>
+            <div class="notify-panel">
+              <label class="notify-panel__field notify-panel__field--full">
+                <span>Email del usuario</span>
+                <input
+                  type="email"
+                  [(ngModel)]="shareInviteEmail"
+                  name="share-invite-email"
+                  autocomplete="email"
+                  placeholder="nombre@ejemplo.com"
+                />
+              </label>
+              <label class="notify-panel__field notify-panel__field--full">
+                <span>Rol</span>
+                <select class="notify-panel__select" [(ngModel)]="shareInviteRole" name="share-invite-role">
+                  <option value="viewer">Solo lectura (visor)</option>
+                  <option value="editor">Editor</option>
+                </select>
+              </label>
+              <p
+                class="sensor-labels-feedback"
+                *ngIf="shareInviteFeedback"
+                [class.sensor-labels-feedback--warn]="shareInviteFeedbackIsError"
+              >
+                {{ shareInviteFeedback }}
+              </p>
+              <button
+                type="button"
+                class="btn btn--primary notify-panel__save"
+                [disabled]="shareInviteBusy"
+                (click)="submitDeviceShareInvite()"
+              >
+                {{ shareInviteBusy ? 'Guardando…' : 'Invitar' }}
+              </button>
+              <p class="card__hint card__hint--tight" *ngIf="deviceMembersLoading">Cargando invitados…</p>
+              <ul class="device-members-list" *ngIf="deviceMembersRows.length && !deviceMembersLoading">
+                <li *ngFor="let m of deviceMembersRows">
+                  Usuario {{ formatMemberUserIdShort(m.member_user_id) }} —
+                  {{ m.role === 'editor' ? 'Editor' : 'Visor' }}
+                </li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="card" *ngIf="selectedDeviceIsSharedMember">
+            <h2 class="card__title card__title--sm">Equipo compartido</h2>
+            <p class="card__hint card__hint--tight">
+              No sos el dueño. Para sacar este equipo de tu lista (sigue existiendo para quien te invitó), usá el botón.
+            </p>
+            <button
+              type="button"
+              class="btn btn--ghost notify-panel__save"
+              [disabled]="leaveSharedBusy"
+              (click)="leaveSharedDevice()"
+            >
+              {{ leaveSharedBusy ? 'Quitando…' : 'Dejar de ver este equipo' }}
+            </button>
           </article>
 
           <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync">

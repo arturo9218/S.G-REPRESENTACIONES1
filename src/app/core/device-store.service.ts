@@ -10,7 +10,9 @@ import { AuthService } from './auth.service';
 import { ingestFunctionUrl, isSupabaseConfigured } from './supabase-config';
 import {
   DashboardDevice,
+  DashboardDeviceAccessRole,
   DeviceAlarmEvent,
+  DeviceChartMarker,
   TemperatureReading,
 } from './models/dashboard.models';
 
@@ -28,6 +30,23 @@ const MAX_READINGS = 40000;
 const CLOUD_READINGS_PER_DEVICE = 25000;
 const DEFAULT_SENSOR_1_LABEL = 'Sensor 1';
 const DEFAULT_SENSOR_2_LABEL = 'Sensor 2';
+
+/**
+ * PostgREST / JSON: columnas `double precision` suelen ser `number`, pero a veces llegan como `string`.
+ * Sin esto, corriente/potencia quedan en null y el panel no muestra amperaje aunque exista en la DB.
+ */
+function readingsJsonNumber(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    return v;
+  }
+  if (typeof v === 'string') {
+    const t = v.trim().replace(',', '.');
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
 
 export const DASHBOARD_SAMPLE_DEVICES: DashboardDevice[] = [
   {
@@ -263,6 +282,8 @@ export class DeviceStoreService {
         batteryPct: null,
         moduleId,
         espLocalIp: espLocalIp || undefined,
+        accessRole: 'owner',
+        ownerUserId: session.user.id,
         alertsEnabled: true,
         tempLowC: 2,
         tempHighC: 8,
@@ -585,14 +606,8 @@ export class DeviceStoreService {
           typeof row['temp2_c'] === 'number' && Number.isFinite(row['temp2_c'] as number)
             ? (row['temp2_c'] as number)
             : null,
-        currentA:
-          typeof row['current_a'] === 'number' && Number.isFinite(row['current_a'] as number)
-            ? (row['current_a'] as number)
-            : null,
-        powerW:
-          typeof row['power_w'] === 'number' && Number.isFinite(row['power_w'] as number)
-            ? (row['power_w'] as number)
-            : null,
+        currentA: readingsJsonNumber(row['current_a']),
+        powerW: readingsJsonNumber(row['power_w']),
       };
     });
     return { rows, error: null };
@@ -648,6 +663,158 @@ export class DeviceStoreService {
   /** Dispositivo con UUID en Supabase (historial en la nube). */
   isCloudDeviceId(id: string | null | undefined): boolean {
     return !!id && this.isUuid(id);
+  }
+
+  /** Invitado con rol viewer: sin escritura en umbrales, ficha, marcadores ni borrar equipo. */
+  isCloudViewerOnly(d: DashboardDevice | undefined | null): boolean {
+    return !!(d && d.cloudSynced && d.accessRole === 'viewer');
+  }
+
+  /** Umbrales, offsets, ficha, marcadores (no incluye borrar equipo ni cambiar nombre/módulo). */
+  canEditDeviceDataOnCloud(d: DashboardDevice | undefined | null): boolean {
+    if (!d?.cloudSynced || !this.isUuid(d.id)) return true;
+    return !this.isCloudViewerOnly(d);
+  }
+
+  /** Nombre, ubicación, ID módulo (tabla `devices`): solo dueño (o admin de app). */
+  canEditDeviceIdentityOnCloud(d: DashboardDevice | undefined | null): boolean {
+    if (!d?.cloudSynced || !this.isUuid(d.id)) return true;
+    if (this.isCloudViewerOnly(d)) return false;
+    const r = d.accessRole;
+    return r === 'owner' || r === 'admin_view' || r === undefined;
+  }
+
+  /** Eliminar fila `devices` en Supabase: solo dueño; invitados no. */
+  canDeleteCloudDevice(d: DashboardDevice | undefined | null): boolean {
+    if (!d?.cloudSynced || !this.isUuid(d.id)) return true;
+    if (this.isCloudViewerOnly(d)) return false;
+    if (d.accessRole === 'editor') return false;
+    return true;
+  }
+
+  async fetchChartMarkersForRange(
+    deviceId: string,
+    fromIso: string,
+    toIso: string
+  ): Promise<{ rows: DeviceChartMarker[]; error: string | null }> {
+    if (!this.isCloudSyncEnabled() || !this.isUuid(deviceId)) {
+      return { rows: [], error: null };
+    }
+    const { data, error } = await this.auth.client
+      .from('device_chart_markers')
+      .select('id, device_id, marked_at, label, note, created_by, created_at')
+      .eq('device_id', deviceId)
+      .gte('marked_at', fromIso)
+      .lte('marked_at', toIso)
+      .order('marked_at', { ascending: true });
+    if (error) {
+      const msg = error.message ?? '';
+      if (msg.includes('device_chart_markers') || msg.includes('schema cache')) {
+        return { rows: [], error: null };
+      }
+      return { rows: [], error: msg };
+    }
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const out: DeviceChartMarker[] = [];
+    for (const r of rows) {
+      const id = r['id'];
+      const did = r['device_id'];
+      const at = r['marked_at'];
+      if (typeof id !== 'string' || typeof did !== 'string' || typeof at !== 'string') continue;
+      out.push({
+        id,
+        deviceId: did,
+        markedAt: at,
+        label: typeof r['label'] === 'string' ? r['label'] : '—',
+        note: typeof r['note'] === 'string' ? r['note'] : null,
+        createdBy: typeof r['created_by'] === 'string' ? r['created_by'] : undefined,
+        createdAt: typeof r['created_at'] === 'string' ? r['created_at'] : undefined,
+      });
+    }
+    return { rows: out, error: null };
+  }
+
+  async addChartMarker(input: {
+    deviceId: string;
+    markedAtIso: string;
+    label: string;
+    note?: string;
+  }): Promise<{ id?: string; error?: string }> {
+    const session = await this.auth.getSession();
+    if (!session?.user?.id) {
+      return { error: 'Iniciá sesión para guardar marcadores.' };
+    }
+    const dev = this.snapshot.find((d) => d.id === input.deviceId);
+    if (!this.canEditDeviceDataOnCloud(dev)) {
+      return { error: 'Solo lectura: no podés agregar marcadores con este rol.' };
+    }
+    if (!this.isCloudSyncEnabled() || !this.isUuid(input.deviceId)) {
+      return { error: 'Solo disponible con equipos en la nube.' };
+    }
+    const label = input.label.trim() || 'Sin título';
+    const { data, error } = await this.auth.client
+      .from('device_chart_markers')
+      .insert({
+        device_id: input.deviceId,
+        marked_at: input.markedAtIso,
+        label,
+        note: input.note?.trim() ? input.note.trim() : null,
+        created_by: session.user.id,
+      })
+      .select('id')
+      .single();
+    if (error) {
+      return { error: error.message };
+    }
+    const rid = data && typeof (data as { id?: unknown }).id === 'string' ? (data as { id: string }).id : undefined;
+    return { id: rid };
+  }
+
+  async deleteChartMarker(markerId: string, deviceId: string): Promise<{ error?: string }> {
+    const dev = this.snapshot.find((d) => d.id === deviceId);
+    if (!this.canEditDeviceDataOnCloud(dev)) {
+      return { error: 'Solo lectura.' };
+    }
+    if (!this.isCloudSyncEnabled() || !this.isUuid(deviceId)) {
+      return { error: 'No aplica.' };
+    }
+    const { error } = await this.auth.client
+      .from('device_chart_markers')
+      .delete()
+      .eq('id', markerId)
+      .eq('device_id', deviceId);
+    return error ? { error: error.message } : {};
+  }
+
+  /**
+   * Deja de ser miembro invitado de un equipo (no borra el dispositivo en la nube).
+   */
+  async leaveSharedDeviceAsync(id: string): Promise<{ ok: boolean; error?: string }> {
+    const session = await this.auth.getSession();
+    if (!session?.user?.id) {
+      return { ok: false, error: 'Sesión requerida.' };
+    }
+    const dev = this.snapshot.find((d) => d.id === id);
+    if (!dev?.cloudSynced || !this.isUuid(id)) {
+      return { ok: false, error: 'No aplica.' };
+    }
+    if (dev.accessRole !== 'viewer' && dev.accessRole !== 'editor') {
+      return { ok: false, error: 'Solo aplica a equipos compartidos contigo.' };
+    }
+    if (!this.isCloudSyncEnabled()) {
+      return { ok: false, error: 'Sincronización con nube desactivada.' };
+    }
+    const { error } = await this.auth.client
+      .from('device_members')
+      .delete()
+      .eq('device_id', id)
+      .eq('member_user_id', session.user.id);
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    this.persistDevices(this.snapshot.filter((d) => d.id !== id));
+    this.persistReadings(this.readingsSnapshot.filter((r) => r.deviceId !== id));
+    return { ok: true };
   }
 
   /**
@@ -707,10 +874,7 @@ export class DeviceStoreService {
 
   /** Mapea filas del RPC get_device_readings_chart (incl. crudos si existen en la nube). */
   private mapChartRpcRowToReading(deviceId: string, row: Record<string, unknown>): TemperatureReading {
-    const num = (k: string): number | null => {
-      const v = row[k];
-      return typeof v === 'number' && !Number.isNaN(v) ? v : null;
-    };
+    const num = (k: string): number | null => readingsJsonNumber(row[k]);
     const t1Raw = num('temp1_raw_c');
     const t2Raw = num('temp2_raw_c');
     const t3Raw = num('temp3_raw_c');
@@ -795,30 +959,12 @@ export class DeviceStoreService {
           temp1RawC: t1Raw,
           temp2RawC: t2Raw,
           temp3RawC: t3Raw,
-          temp2C:
-            typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
-              ? (row['temp2_c'] as number)
-              : null,
-          temp3C:
-            typeof row['temp3_c'] === 'number' && !Number.isNaN(row['temp3_c'] as number)
-              ? (row['temp3_c'] as number)
-              : null,
-          currentA:
-            typeof row['current_a'] === 'number' && !Number.isNaN(row['current_a'] as number)
-              ? (row['current_a'] as number)
-              : null,
-          powerW:
-            typeof row['power_w'] === 'number' && !Number.isNaN(row['power_w'] as number)
-              ? (row['power_w'] as number)
-              : null,
-          currentARaw:
-            typeof row['current_a_raw'] === 'number' && !Number.isNaN(row['current_a_raw'] as number)
-              ? (row['current_a_raw'] as number)
-              : null,
-          powerWRaw:
-            typeof row['power_w_raw'] === 'number' && !Number.isNaN(row['power_w_raw'] as number)
-              ? (row['power_w_raw'] as number)
-              : null,
+          temp2C: readingsJsonNumber(row['temp2_c']),
+          temp3C: readingsJsonNumber(row['temp3_c']),
+          currentA: readingsJsonNumber(row['current_a']),
+          powerW: readingsJsonNumber(row['power_w']),
+          currentARaw: readingsJsonNumber(row['current_a_raw']),
+          powerWRaw: readingsJsonNumber(row['power_w_raw']),
         });
       }
 
@@ -900,30 +1046,12 @@ export class DeviceStoreService {
           temp1RawC: t1Raw,
           temp2RawC: t2Raw,
           temp3RawC: t3Raw,
-          temp2C:
-            typeof row['temp2_c'] === 'number' && !Number.isNaN(row['temp2_c'] as number)
-              ? (row['temp2_c'] as number)
-              : null,
-          temp3C:
-            typeof row['temp3_c'] === 'number' && !Number.isNaN(row['temp3_c'] as number)
-              ? (row['temp3_c'] as number)
-              : null,
-          currentA:
-            typeof row['current_a'] === 'number' && !Number.isNaN(row['current_a'] as number)
-              ? (row['current_a'] as number)
-              : null,
-          powerW:
-            typeof row['power_w'] === 'number' && !Number.isNaN(row['power_w'] as number)
-              ? (row['power_w'] as number)
-              : null,
-          currentARaw:
-            typeof row['current_a_raw'] === 'number' && !Number.isNaN(row['current_a_raw'] as number)
-              ? (row['current_a_raw'] as number)
-              : null,
-          powerWRaw:
-            typeof row['power_w_raw'] === 'number' && !Number.isNaN(row['power_w_raw'] as number)
-              ? (row['power_w_raw'] as number)
-              : null,
+          temp2C: readingsJsonNumber(row['temp2_c']),
+          temp3C: readingsJsonNumber(row['temp3_c']),
+          currentA: readingsJsonNumber(row['current_a']),
+          powerW: readingsJsonNumber(row['power_w']),
+          currentARaw: readingsJsonNumber(row['current_a_raw']),
+          powerWRaw: readingsJsonNumber(row['power_w_raw']),
         };
       })
       .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
@@ -1027,22 +1155,7 @@ export class DeviceStoreService {
 
     const baseFields =
       'id, module_id, name, location, active, updated_at, sensor_1_label, sensor_2_label';
-    const selectFields = isAdmin ? `${baseFields}, owner_user_id` : baseFields;
-
-    let q = this.auth.client
-      .from('devices')
-      .select(selectFields)
-      .order('created_at', { ascending: true });
-    if (!isAdmin) {
-      q = q.eq('owner_user_id', session.user.id);
-    }
-
-    const { data, error } = await q;
-
-    if (error || !data) {
-      console.warn('Supabase devices:', error?.message);
-      return;
-    }
+    const selectOwned = `${baseFields}, owner_user_id`;
 
     type DeviceRow = {
       id: string;
@@ -1053,7 +1166,65 @@ export class DeviceStoreService {
       sensor_2_label: string | null;
       owner_user_id?: string | null;
     };
-    const rows = data as unknown as DeviceRow[];
+    type DeviceRowWithAccess = DeviceRow & { _access: DashboardDeviceAccessRole };
+
+    const byId = new Map<string, DeviceRowWithAccess>();
+
+    if (isAdmin) {
+      const { data, error } = await this.auth.client
+        .from('devices')
+        .select(selectOwned)
+        .order('created_at', { ascending: true });
+      if (error || !data) {
+        console.warn('Supabase devices:', error?.message);
+        return;
+      }
+      for (const r of data as unknown as DeviceRow[]) {
+        byId.set(r.id, { ...r, _access: 'admin_view' });
+      }
+    } else {
+      const { data: owned, error: eOwned } = await this.auth.client
+        .from('devices')
+        .select(selectOwned)
+        .eq('owner_user_id', session.user.id)
+        .order('created_at', { ascending: true });
+      if (eOwned) {
+        console.warn('Supabase devices (propios):', eOwned.message);
+        return;
+      }
+      for (const r of (owned ?? []) as unknown as DeviceRow[]) {
+        byId.set(r.id, { ...r, _access: 'owner' });
+      }
+
+      const { data: shared, error: eMem } = await this.auth.client
+        .from('device_members')
+        .select(`role, devices (${baseFields}, owner_user_id)`)
+        .eq('member_user_id', session.user.id);
+      if (eMem) {
+        const msg = eMem.message ?? '';
+        if (!msg.includes('device_members') && !msg.includes('schema cache')) {
+          console.warn('Supabase device_members:', msg);
+        }
+      } else {
+        for (const row of (shared ?? []) as {
+          role: string;
+          devices: DeviceRow | DeviceRow[] | null;
+        }[]) {
+          const dev = Array.isArray(row.devices) ? row.devices[0] : row.devices;
+          if (!dev?.id) continue;
+          const role: DashboardDeviceAccessRole =
+            row.role === 'editor' ? 'editor' : 'viewer';
+          const prev = byId.get(dev.id);
+          if (prev?._access === 'owner') continue;
+          if (prev?._access === 'editor' && role === 'viewer') continue;
+          byId.set(dev.id, { ...dev, _access: role });
+        }
+      }
+    }
+
+    const rows = [...byId.values()].sort((a, b) =>
+      (a.name ?? '').localeCompare(b.name ?? '', 'es', { sensitivity: 'base' })
+    );
 
     const ids = rows.map((r) => r.id);
     const thresholdsByDevice = new Map<
@@ -1146,17 +1317,21 @@ export class DeviceStoreService {
       const th = thresholdsByDevice.get(rid);
       const s1 = row.sensor_1_label as string | null | undefined;
       const s2 = row.sensor_2_label as string | null | undefined;
-      const ownerId =
-        isAdmin && typeof row.owner_user_id === 'string' ? row.owner_user_id : undefined;
+      const ownerUid =
+        typeof row.owner_user_id === 'string' && row.owner_user_id.trim()
+          ? row.owner_user_id.trim()
+          : prev?.ownerUserId;
       return {
         id: rid,
         name: row.name,
         location: (row.location as string)?.trim() || 'Sin ubicación',
         moduleId: row.module_id,
-        ownerUserId: ownerId,
+        ownerUserId: ownerUid,
+        accessRole: row._access,
         temperatureC: prev?.temperatureC ?? null,
         temperature2C: prev?.temperature2C ?? null,
-        online: prev?.online ?? false,
+        /** No heredar `online` del localStorage: si falla la lectura de `device_readings`, se corregirá abajo. */
+        online: false,
         updatedAtLabel: prev?.updatedAtLabel ?? '—',
         batteryPct: prev?.batteryPct ?? null,
         espLocalIp: prev?.espLocalIp,
@@ -1320,7 +1495,13 @@ export class DeviceStoreService {
       if (data?.length) rows.push(...data);
     }
 
-    if (!rows.length) return;
+    if (!rows.length) {
+      const localReadings = this.readingsSnapshot.filter((r) => !this.isUuid(r.deviceId));
+      const applied = this.applyOffsetsToReadings(localReadings, this.snapshot);
+      this.persistReadings(applied);
+      this.updateDeviceSnapshotsFromReadings(applied);
+      return;
+    }
 
     const cloudReadings: TemperatureReading[] = rows.map((r) => {
       const t1Raw =
@@ -1350,22 +1531,10 @@ export class DeviceStoreService {
           typeof r['temp3_c'] === 'number' && !Number.isNaN(r['temp3_c'] as number)
             ? (r['temp3_c'] as number)
             : null,
-        currentA:
-          typeof r['current_a'] === 'number' && !Number.isNaN(r['current_a'] as number)
-            ? (r['current_a'] as number)
-            : null,
-        powerW:
-          typeof r['power_w'] === 'number' && !Number.isNaN(r['power_w'] as number)
-            ? (r['power_w'] as number)
-            : null,
-        currentARaw:
-          typeof r['current_a_raw'] === 'number' && !Number.isNaN(r['current_a_raw'] as number)
-            ? (r['current_a_raw'] as number)
-            : null,
-        powerWRaw:
-          typeof r['power_w_raw'] === 'number' && !Number.isNaN(r['power_w_raw'] as number)
-            ? (r['power_w_raw'] as number)
-            : null,
+        currentA: readingsJsonNumber(r['current_a']),
+        powerW: readingsJsonNumber(r['power_w']),
+        currentARaw: readingsJsonNumber(r['current_a_raw']),
+        powerWRaw: readingsJsonNumber(r['power_w_raw']),
         press1Bar:
           typeof r['press1_bar'] === 'number' && !Number.isNaN(r['press1_bar'] as number)
             ? (r['press1_bar'] as number)
@@ -1440,7 +1609,14 @@ export class DeviceStoreService {
    * Si el DELETE falla (red, RLS, etc.), la lista local no cambia.
    */
   async removeDeviceAsync(id: string): Promise<{ ok: boolean; error?: string }> {
+    const dev = this.snapshot.find((d) => d.id === id);
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
+      if (!this.canDeleteCloudDevice(dev)) {
+        return {
+          ok: false,
+          error: 'Solo el dueño puede eliminar este equipo en la nube. Si fuiste invitado, usá «Dejar de ver este equipo».',
+        };
+      }
       const { error } = await this.auth.client.from('devices').delete().eq('id', id);
       if (error) {
         return { ok: false, error: error.message };
@@ -1464,6 +1640,12 @@ export class DeviceStoreService {
     const moduleForDb = moduleId || current?.moduleId;
 
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
+      if (!this.canEditDeviceIdentityOnCloud(current)) {
+        return {
+          ok: false,
+          error: 'Solo el dueño puede cambiar nombre, ubicación o ID módulo en la nube.',
+        };
+      }
       const patch: Record<string, unknown> = { name, location };
       if (moduleForDb) {
         patch['module_id'] = moduleForDb;
@@ -1505,13 +1687,33 @@ export class DeviceStoreService {
     const s1 = sensor1Label.trim() || DEFAULT_SENSOR_1_LABEL;
     const s2 = sensor2Label.trim() || DEFAULT_SENSOR_2_LABEL;
     let cloudError: string | undefined;
+    const dev = this.snapshot.find((d) => d.id === id);
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
-      const { error } = await this.auth.client
-        .from('devices')
-        .update({ sensor_1_label: s1, sensor_2_label: s2 })
-        .eq('id', id);
-      if (error) {
-        cloudError = error.message;
+      if (!this.canEditDeviceDataOnCloud(dev)) {
+        return {
+          cloudError: 'Solo lectura: no podés cambiar etiquetas con este rol.',
+        };
+      }
+      const { error: rpcErr } = await this.auth.client.rpc('update_device_sensor_labels', {
+        p_device_id: id,
+        p_sensor_1_label: s1,
+        p_sensor_2_label: s2,
+      });
+      if (rpcErr) {
+        const msg = rpcErr.message ?? '';
+        const fnMissing =
+          /update_device_sensor_labels|Could not find|schema cache/i.test(msg);
+        if (fnMissing && this.canEditDeviceIdentityOnCloud(dev)) {
+          const { error: upErr } = await this.auth.client
+            .from('devices')
+            .update({ sensor_1_label: s1, sensor_2_label: s2 })
+            .eq('id', id);
+          if (upErr) {
+            cloudError = upErr.message;
+          }
+        } else {
+          cloudError = msg;
+        }
       }
     }
     this.persistDevices(
@@ -1538,9 +1740,15 @@ export class DeviceStoreService {
         ? input.nominalVoltageV
         : 220;
     let cloudError: string | undefined;
+    const dev = this.snapshot.find((d) => d.id === id);
+    if (this.isCloudSyncEnabled() && this.isUuid(id) && !this.canEditDeviceDataOnCloud(dev)) {
+      return {
+        cloudError: 'Solo lectura: este equipo fue compartido sin permiso de edición.',
+      };
+    }
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
       const nowIso = new Date().toISOString();
-        const { error } = await this.auth.client
+      const { error } = await this.auth.client
         .from('device_thresholds')
         .upsert(
           {
@@ -1615,6 +1823,11 @@ export class DeviceStoreService {
   ): Promise<{ cloudError?: string }> {
     let cloudError: string | undefined;
     const dev = this.snapshot.find((d) => d.id === id);
+    if (this.isCloudSyncEnabled() && this.isUuid(id) && !this.canEditDeviceDataOnCloud(dev)) {
+      return {
+        cloudError: 'Solo lectura: este equipo fue compartido sin permiso de edición.',
+      };
+    }
     if (this.isCloudSyncEnabled() && this.isUuid(id)) {
       const nowIso = new Date().toISOString();
       // Si ya hay fila: solo offsets (no pisar min/máx con null). Si no hay fila: insert con defaults.

@@ -243,12 +243,86 @@
               <button
                 type="button"
                 class="btn btn--primary sensor-save"
-                [disabled]="sensorLabelsSaving || !selectedDevice"
+                [disabled]="sensorLabelsSaving || !selectedDevice || selectedCloudReadOnly"
                 (click)="saveSensorLabels()"
               >
                 {{ sensorLabelsSaving ? 'Guardando…' : 'Guardar nombres' }}
               </button>
+              <p class="panel__hint panel__hint--tight" *ngIf="selectedCloudReadOnly">
+                Solo lectura: no podés cambiar etiquetas con este rol.
+              </p>
             </div>
+          </div>
+        </article>
+
+        <article class="panel-side-card" *ngIf="chartMarkersCloudEnabled">
+          <div
+            class="panel-side-card__head panel-side-card__head--toggle"
+            role="button"
+            tabindex="0"
+            [attr.aria-expanded]="chartSideMarkersOpen"
+            aria-controls="chart-analysis-markers-body"
+            (click)="toggleChartMarkersSection()"
+            (keydown.enter)="toggleChartMarkersSection()"
+            (keydown.space)="$event.preventDefault(); toggleChartMarkersSection()"
+          >
+            <span class="panel-side-card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2v20M2 12h20" />
+              </svg>
+            </span>
+            <div class="panel-side-card__head-text">
+              <h2 class="panel__title panel-side-card__title">Marcadores del gráfico</h2>
+              <p class="panel__hint panel__hint--tight panel-side-card__subtitle">
+                Visitas, fallas u otros hitos en el tiempo (se guardan en la nube).
+              </p>
+            </div>
+          </div>
+          <div id="chart-analysis-markers-body" class="panel-side-card__body" *ngIf="chartSideMarkersOpen">
+            <p class="panel__hint panel__hint--tight" *ngIf="chartMarkersError">{{ chartMarkersError }}</p>
+            <p class="panel__hint panel__hint--tight" *ngIf="selectedCloudReadOnly">
+              Solo lectura: podés ver marcadores pero no agregar ni borrar.
+            </p>
+            <div class="fields" *ngIf="!selectedCloudReadOnly">
+              <label class="field">
+                <span>Fecha y hora</span>
+                <input type="datetime-local" class="field__input" step="60" [(ngModel)]="chartMarkerAtLocal" />
+              </label>
+              <label class="field">
+                <span>Etiqueta</span>
+                <input type="text" class="field__input" [(ngModel)]="chartMarkerLabelInput" maxlength="64" />
+              </label>
+              <label class="field">
+                <span>Nota (opcional)</span>
+                <input type="text" class="field__input" [(ngModel)]="chartMarkerNoteInput" maxlength="200" />
+              </label>
+              <p class="sensor-feedback" *ngIf="chartMarkerFeedback">{{ chartMarkerFeedback }}</p>
+              <button
+                type="button"
+                class="btn btn--primary sensor-save"
+                [disabled]="chartMarkerSaving || !selectedDeviceId"
+                (click)="saveChartMarker()"
+              >
+                {{ chartMarkerSaving ? 'Guardando…' : 'Agregar marcador' }}
+              </button>
+            </div>
+            <ul class="chart-marker-list" *ngIf="chartMarkers.length">
+              <li *ngFor="let m of chartMarkers" class="chart-marker-list__item">
+                <div>
+                  <strong>{{ m.label }}</strong>
+                  <span class="chart-marker-list__time">{{ m.markedAt | date: 'short' }}</span>
+                  <span *ngIf="m.note" class="chart-marker-list__note">{{ m.note }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn--ghost chart-marker-list__btn"
+                  *ngIf="!selectedCloudReadOnly"
+                  (click)="deleteChartMarker(m.id)"
+                >
+                  Quitar
+                </button>
+              </li>
+            </ul>
           </div>
         </article>
       </div>
@@ -582,6 +656,18 @@
                 x2="100"
                 [attr.y2]="hyp"
               />
+            </g>
+            <g *ngIf="chartMarkerSvgLines.length" clip-path="url(#chartPlotClip)" class="chart-markers-layer">
+              <line
+                *ngFor="let mk of chartMarkerSvgLines"
+                class="chart-marker-line"
+                [attr.x1]="mk.x"
+                [attr.x2]="mk.x"
+                y1="8"
+                y2="92"
+              >
+                <title>{{ mk.title }}</title>
+              </line>
             </g>
             <g *ngIf="chartStylePreset === 'trend' && hoverIndex != null && hoverYTemp1 != null">
               <circle

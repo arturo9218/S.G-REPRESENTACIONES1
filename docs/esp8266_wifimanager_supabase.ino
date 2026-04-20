@@ -30,6 +30,13 @@ static const unsigned long DEFAULT_INTERVAL_MS = 15000;
 /** Endpoint fijo POST (ingest-reading). Cambiar solo aquí si migrás de proyecto Supabase. */
 static const char *DEFAULT_API_URL =
   "https://fohbhymulrmdsgrubtlo.supabase.co/functions/v1/ingest-reading";
+/**
+ * Clave anon pública del proyecto (Supabase → Project Settings → API → anon public).
+ * El gateway exige cabeceras `apikey` y `Authorization: Bearer <anon>` para invocar Edge Functions;
+ * sin ellas el POST suele responder 401 aunque el JSON sea correcto.
+ * Alternativa: dejar esto vacío y guardar `supabaseAnonKey` en /config.json (LittleFS).
+ */
+static const char *DEFAULT_SUPABASE_ANON_KEY = "";
 static const char *DEFAULT_MODULE_ID = "";
 static const char *DEFAULT_API_KEY = "";
 static const uint8_t PIN_CONSUMO_A0 = A0;
@@ -103,7 +110,11 @@ AppConfig g_snap;
 unsigned long lastSend = 0;
 volatile bool g_portalUserSaved = false;
 
-static StaticJsonDocument<512> g_jsonDoc;
+/** Clave anon (opcional en config.json); si queda vacío se usa DEFAULT_SUPABASE_ANON_KEY. */
+static char g_supabaseAnonKey[512];
+static bool g_warnedMissingAnon;
+
+static StaticJsonDocument<768> g_jsonDoc;
 
 OneWire oneWire(PIN_TEMP_GPIO2);
 DallasTemperature ds18b20(&oneWire);
@@ -291,6 +302,7 @@ bool validateLoadedCfg() {
 }
 
 void wipeAllStoredConfig() {
+  memset(g_supabaseAnonKey, 0, sizeof(g_supabaseAnonKey));
   if (mountLittleFs()) {
     if (LittleFS.exists(CFG_FILE)) {
       LittleFS.remove(CFG_FILE);
@@ -364,6 +376,12 @@ bool loadConfigLittleFs() {
   strlcpy(cfg.apiKey, g_jsonDoc["apiKey"] | "", sizeof(cfg.apiKey));
   snprintf(cfg.intervalMs, sizeof(cfg.intervalMs), "%lu",
            (unsigned long)(g_jsonDoc["intervalMs"] | DEFAULT_INTERVAL_MS));
+  {
+    const char *ak = g_jsonDoc["supabaseAnonKey"] | "";
+    if (ak && ak[0]) {
+      strlcpy(g_supabaseAnonKey, ak, sizeof(g_supabaseAnonKey));
+    }
+  }
   return true;
 }
 
@@ -385,6 +403,8 @@ void safePrintModuleIdLine() {
 
 /** Carga: LittleFS luego EEPROM; sanea y descarta datos corruptos. */
 void loadConfig() {
+  memset(g_supabaseAnonKey, 0, sizeof(g_supabaseAnonKey));
+  g_warnedMissingAnon = false;
   setDefaults();
   bool fromFs = loadConfigLittleFs();
   if (fromFs) Serial.println(F("[CFG] config.json (LittleFS) cargado."));
@@ -417,6 +437,9 @@ bool saveConfigLittleFs() {
   g_jsonDoc["moduleId"] = cfg.moduleId;
   g_jsonDoc["apiKey"] = cfg.apiKey;
   g_jsonDoc["intervalMs"] = strtoul(cfg.intervalMs, nullptr, 10);
+  if (g_supabaseAnonKey[0]) {
+    g_jsonDoc["supabaseAnonKey"] = g_supabaseAnonKey;
+  }
   size_t n = serializeJson(g_jsonDoc, f);
   f.flush();
   f.close();
@@ -737,8 +760,22 @@ static bool httpPostIngestBody(const String &body, int *outCode) {
   std::unique_ptr<BearSSL::WiFiClientSecure> secure(new BearSSL::WiFiClientSecure);
   secure->setInsecure();
   HTTPClient http;
-  if (!http.begin(*secure, DEFAULT_API_URL)) return false;
+  const char *url = (cfg.apiUrl[0] != '\0') ? cfg.apiUrl : DEFAULT_API_URL;
+  if (!http.begin(*secure, url)) return false;
   http.addHeader("Content-Type", "application/json");
+  const char *anon = g_supabaseAnonKey[0] ? g_supabaseAnonKey
+                                          : (DEFAULT_SUPABASE_ANON_KEY[0] ? DEFAULT_SUPABASE_ANON_KEY : nullptr);
+  if (anon && anon[0]) {
+    http.addHeader("apikey", anon);
+    char authHdr[640];
+    snprintf(authHdr, sizeof(authHdr), "Bearer %s", anon);
+    http.addHeader("Authorization", authHdr);
+  } else if (!g_warnedMissingAnon) {
+    g_warnedMissingAnon = true;
+    Serial.println(F(
+      "[HTTP] Aviso: falta clave anon de Supabase (DEFAULT_SUPABASE_ANON_KEY o supabaseAnonKey en config.json). "
+      "Sin apikey/Authorization el gateway suele responder 401."));
+  }
   int code = http.POST(body);
   String resp = http.getString();
   http.end();

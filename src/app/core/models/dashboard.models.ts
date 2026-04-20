@@ -1,3 +1,6 @@
+/** Rol del usuario actual sobre el equipo en Supabase (compartido / invitación). */
+export type DashboardDeviceAccessRole = 'owner' | 'editor' | 'viewer' | 'admin_view';
+
 export interface DashboardDevice {
   id: string;
   name: string;
@@ -39,8 +42,10 @@ export interface DashboardDevice {
   tempPushCooldownMs?: number | null;
   /** Retardo entre avisos de “desconectado” (ms); independiente del de temperatura */
   offlinePushCooldownMs?: number | null;
-  /** UUID del dueño en Supabase (solo relleno en vista admin) */
+  /** UUID del dueño en Supabase (relleno en nube cuando la columna está disponible) */
   ownerUserId?: string;
+  /** Permisos de escritura en nube: viewer = solo lectura; editor/dueño pueden cambiar umbrales y ficha */
+  accessRole?: DashboardDeviceAccessRole;
   /** Creado en Supabase; lecturas vienen de la nube */
   cloudSynced?: boolean;
   /** Código de 6 dígitos para el portal del dispositivo (api_key); solo en este navegador tras el alta */
@@ -56,6 +61,17 @@ export interface DashboardDevice {
   currentOffsetA?: number;
   /** Suma en W al valor de potencia del dispositivo (ingesta); default 0 */
   powerOffsetW?: number;
+}
+
+/** Marca vertical en el análisis de gráfico (Supabase: device_chart_markers). */
+export interface DeviceChartMarker {
+  id: string;
+  deviceId: string;
+  markedAt: string;
+  label: string;
+  note?: string | null;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 /** Una lectura guardada para historial y gráficos */
