@@ -1,6 +1,8 @@
 import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
+import * as Sentry from '@sentry/angular-ivy';
 
 import { AppModule } from './app/app.module';
+import { environment } from './environments/environment';
 
 /**
  * El mail de recuperación abre la URL con los tokens en el hash (#...).
@@ -23,5 +25,13 @@ function ensureRecoveryHashOnResetRoute(): void {
 
 ensureRecoveryHashOnResetRoute();
 
-platformBrowserDynamic().bootstrapModule(AppModule)
-  .catch(err => console.error(err));
+const sentryDsn = typeof environment.sentryDsn === 'string' ? environment.sentryDsn.trim() : '';
+if (sentryDsn) {
+  Sentry.init({
+    dsn: sentryDsn,
+    environment: environment.production ? 'production' : 'development',
+    tracesSampleRate: environment.production ? 0.12 : 0,
+  });
+}
+
+platformBrowserDynamic().bootstrapModule(AppModule).catch((err) => console.error(err));

@@ -14,4 +14,7 @@ export const environment = {
   displayLineVoltageVForFallback: 220,
   vapidPublicKey: VAPID_INJECT,
   serviceWorkerEnabled: true,
+
+  /** DSN de Sentry para producción; vacío = desactivado. */
+  sentryDsn: '',
 };

@@ -28,6 +28,16 @@ import {
   UserBrandingRow,
 } from '../core/equipment-sheet.service';
 
+/** Estadísticas de las lecturas del equipo seleccionado en la ventana móvil de 24 h (datos ya cargados en la app). */
+export interface SelectedDevice24hStats {
+  count: number;
+  t1min: number;
+  t1max: number;
+  t1avg: number;
+  t2: { min: number; max: number; avg: number } | null;
+  current: { min: number; max: number; avg: number } | null;
+}
+
 @Component({
   selector: 'app-dashboard',
   templateUrl: './dashboard.component.html',
@@ -621,6 +631,44 @@ export class DashboardComponent implements OnInit, OnDestroy {
   get summaryNews(): number {
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     return this.readings.filter((r) => new Date(r.at).getTime() >= cutoff).length;
+  }
+
+  /** Min / max / promedio en las últimas 24 h para el dispositivo seleccionado (store en memoria; no garantiza historial completo). */
+  get selectedDevice24hStats(): SelectedDevice24hStats | null {
+    const id = this.selectedDeviceId;
+    if (!id) return null;
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const rows = this.readings.filter((r) => {
+      if (r.deviceId !== id) return false;
+      const t = new Date(r.at).getTime();
+      return Number.isFinite(t) && t >= cutoff;
+    });
+    if (!rows.length) return null;
+    const mean = (vals: number[]) =>
+      vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    const t1s = rows.map((r) => r.temperatureC).filter((n) => Number.isFinite(n)) as number[];
+    if (!t1s.length) return null;
+    const t2vals = rows
+      .map((r) => r.temp2C)
+      .filter((n): n is number => n != null && Number.isFinite(n));
+    const nomV = this.selectedDevice?.nominalVoltageV;
+    const ivals = rows
+      .map((r) => effectiveCurrentAWithNominal(r, nomV))
+      .filter((n): n is number => n != null && Number.isFinite(n));
+    return {
+      count: rows.length,
+      t1min: Math.min(...t1s),
+      t1max: Math.max(...t1s),
+      t1avg: mean(t1s),
+      t2:
+        t2vals.length > 0
+          ? { min: Math.min(...t2vals), max: Math.max(...t2vals), avg: mean(t2vals) }
+          : null,
+      current:
+        ivals.length > 0
+          ? { min: Math.min(...ivals), max: Math.max(...ivals), avg: mean(ivals) }
+          : null,
+    };
   }
 
   get activeAlerts(): DashboardAlert[] {

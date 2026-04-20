@@ -840,6 +840,53 @@
             </ng-template>
           </article>
 
+          <article
+            class="card card--summary-24h"
+            *ngIf="(shellRoute === 'dashboard' || shellRoute === 'alerts') && selectedDeviceId"
+          >
+            <h2 class="card__title card__title--sm">Resumen últimas 24 h</h2>
+            <p class="card__hint card__hint--tight">
+              Calculado con las lecturas que ya tiene cargadas esta sesión (panel + nube). Para el historial
+              completo usá <strong>Análisis de gráfico</strong>.
+            </p>
+            <ng-container *ngIf="selectedDevice24hStats as s24">
+              <p class="summary-24h__meta">{{ s24.count }} lecturas en ventana móvil de 24 h</p>
+              <div class="telemetry__rows summary-24h__block">
+                <div class="telemetry__row">
+                  <span>{{ selectedSensor1Name }} · mín</span>
+                  <strong>{{ formatTempCard(s24.t1min) }}</strong>
+                </div>
+                <div class="telemetry__row">
+                  <span>{{ selectedSensor1Name }} · máx</span>
+                  <strong>{{ formatTempCard(s24.t1max) }}</strong>
+                </div>
+                <div class="telemetry__row">
+                  <span>{{ selectedSensor1Name }} · prom.</span>
+                  <strong>{{ formatTempCard(s24.t1avg) }}</strong>
+                </div>
+                <ng-container *ngIf="s24.t2 as t2">
+                  <div class="telemetry__row">
+                    <span>{{ selectedSensor2Name }} · mín / máx / prom.</span>
+                    <strong
+                      >{{ formatTempCard(t2.min) }} · {{ formatTempCard(t2.max) }} ·
+                      {{ formatTempCard(t2.avg) }}</strong
+                    >
+                  </div>
+                </ng-container>
+                <ng-container *ngIf="s24.current as cur">
+                  <div class="telemetry__row">
+                    <span>Corriente · mín / máx / prom.</span>
+                    <strong>{{ formatCurrent(cur.min) }} · {{ formatCurrent(cur.max) }} · {{ formatCurrent(cur.avg) }}</strong>
+                  </div>
+                </ng-container>
+              </div>
+            </ng-container>
+            <p class="card__empty" *ngIf="!selectedDevice24hStats">
+              Sin lecturas de este equipo en las últimas 24 h en el panel todavía (o el equipo lleva poco sin
+              datos).
+            </p>
+          </article>
+
           <article class="card" *ngIf="shellRoute === 'dashboard' || shellRoute === 'alerts'">
             <h2 class="card__title card__title--sm">Actividad reciente</h2>
             <ul class="activity-list">

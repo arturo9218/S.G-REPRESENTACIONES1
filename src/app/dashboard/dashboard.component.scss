@@ -626,6 +626,22 @@ $border: rgba(148, 163, 184, 0.18);
   background: linear-gradient(165deg, rgba(244, 63, 94, 0.06) 0%, $card-elevated 40%);
 }
 
+.card--summary-24h {
+  border-color: rgba(59, 130, 246, 0.2);
+  background: linear-gradient(165deg, rgba(59, 130, 246, 0.07) 0%, $card-elevated 42%);
+}
+
+.summary-24h__meta {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: $muted;
+  margin: 0 0 0.5rem;
+}
+
+.summary-24h__block {
+  margin-top: 0.2rem;
+}
+
 .card__head {
   display: flex;
   align-items: baseline;

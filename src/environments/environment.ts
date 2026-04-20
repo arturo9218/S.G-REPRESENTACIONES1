@@ -29,4 +29,10 @@ export const environment = {
    * Registrar Service Worker (requerido para Web Push). Debe ser true en dev si el build incluye ngsw (angular.json).
    */
   serviceWorkerEnabled: true,
+
+  /**
+   * Sentry (opcional): pegá el DSN del proyecto en sentry.io.
+   * Vacío = no se envía telemetría de errores.
+   */
+  sentryDsn: '',
 };

@@ -27,6 +27,7 @@
     "@angular/platform-browser-dynamic": "^16.2.0",
     "@angular/router": "^16.2.0",
     "@angular/service-worker": "^16.2.12",
+    "@sentry/angular-ivy": "^7.120.0",
     "@supabase/supabase-js": "^2.100.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
