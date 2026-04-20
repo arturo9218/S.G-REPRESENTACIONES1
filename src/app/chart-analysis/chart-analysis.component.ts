@@ -103,6 +103,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   private readonly trendDrawPointCap = 420;
 
   private readonly pdfTableMaxRows = 4000;
+  /** CSV: más filas que el PDF; si hay más, muestreo uniforme como en PDF. */
+  private readonly csvExportMaxRows = 80000;
+
+  csvExporting = false;
 
   /**
    * Zoom horizontal sobre la serie cargada: 0–1 = fracción del rango temporal [primera, última lectura].
@@ -2151,6 +2155,128 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   private delayPdf(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /**
+   * Exporta lecturas del mismo rango que el gráfico/PDF (tabla numérica), en CSV UTF-8 con BOM para Excel.
+   */
+  downloadAnalysisCsv(event?: Event): void {
+    event?.stopPropagation();
+    event?.preventDefault();
+    const deviceId = this.selectedDeviceId;
+    if (!deviceId) {
+      alert('Seleccioná un dispositivo para exportar.');
+      return;
+    }
+    let rows = [...this.chartReadingsUncapped()].sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+    );
+    if (!rows.length) {
+      alert('No hay lecturas en el rango del gráfico. Ajustá filtros o esperá datos.');
+      return;
+    }
+    const rawLen = rows.length;
+    let sampleNote = '';
+    if (rawLen > this.csvExportMaxRows) {
+      rows = this.evenSamplePdfRows(rows, this.csvExportMaxRows);
+      sampleNote = `Muestreo: ${this.csvExportMaxRows} de ${rawLen} lecturas.`;
+    }
+
+    this.ngZone.run(() => {
+      this.csvExporting = true;
+    });
+    this.ngZone.runOutsideAngular(() => {
+      try {
+        const device = this.selectedDevice;
+        const name = device?.name ?? 'dispositivo';
+        const s1 = this.sensor1Name;
+        const s2 = this.sensor2Name;
+        const has2 = rows.some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
+        const nomV = device?.nominalVoltageV;
+        const hasCurrent = rows.some((r) => effectiveCurrentAWithNominal(r, nomV) != null);
+
+        const headerCells: string[] = ['dispositivo', 'dispositivo_id', 'fecha_hora_iso'];
+        if (this.seriesShowTemp1) headerCells.push(`${this.escapeCsvHeaderToken(s1)}_celsius`);
+        if (this.seriesShowTemp2 && has2) headerCells.push(`${this.escapeCsvHeaderToken(s2)}_celsius`);
+        if (this.analysisShowsCurrent && hasCurrent) headerCells.push('corriente_a');
+
+        const lines: string[] = [headerCells.join(',')];
+        for (const r of rows) {
+          const cells: string[] = [
+            this.escapeCsvField(name),
+            this.escapeCsvField(deviceId),
+            this.escapeCsvField(r.at),
+          ];
+          if (this.seriesShowTemp1) {
+            cells.push(this.escapeCsvField(Number.isFinite(r.temperatureC) ? String(r.temperatureC) : ''));
+          }
+          if (this.seriesShowTemp2 && has2) {
+            const t2 = r.temp2C;
+            cells.push(
+              this.escapeCsvField(t2 != null && Number.isFinite(t2) ? String(t2) : '')
+            );
+          }
+          if (this.analysisShowsCurrent && hasCurrent) {
+            const ia = effectiveCurrentAWithNominal(r, nomV);
+            cells.push(
+              this.escapeCsvField(ia != null && Number.isFinite(ia) ? String(ia) : '')
+            );
+          }
+          lines.push(cells.join(','));
+        }
+
+        const meta = [
+          `# AR Monitoreo — export CSV`,
+          `# Generado: ${new Date().toISOString()}`,
+          `# Rango: ${this.analysisPdfRangeLabel()}`,
+          `# Series: ${this.analysisPdfSeriesLabel()}`,
+          sampleNote ? `# ${sampleNote}` : '',
+        ]
+          .filter(Boolean)
+          .join('\r\n');
+
+        const csvBody = lines.join('\r\n');
+        const blob = new Blob([`\uFEFF${meta}\r\n${csvBody}`], {
+          type: 'text/csv;charset=utf-8',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safe = name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);
+        a.download = `lecturas_${safe}_${this.pdfDateStamp()}.csv`;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.ngZone.run(() => alert(`No se pudo generar el CSV: ${msg}`));
+      } finally {
+        this.ngZone.run(() => {
+          this.csvExporting = false;
+        });
+      }
+    });
+  }
+
+  private escapeCsvHeaderToken(s: string): string {
+    return s
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w]+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '') || 'col';
+  }
+
+  private escapeCsvField(value: string): string {
+    const s = value.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    if (/[",\n]/.test(s)) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
   }
 
   async downloadAnalysisPdf(event?: Event): Promise<void> {
