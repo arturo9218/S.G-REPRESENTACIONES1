@@ -202,7 +202,7 @@ $border: rgba(148, 163, 184, 0.18);
     align-self: stretch;
     /* Sin tope max-height: el hueco 1fr es todo el alto útil bajo la cabecera del gráfico */
     max-height: none;
-    min-height: 12rem;
+    min-height: 18rem;
   }
 
   .chart-stats {
@@ -1136,9 +1136,9 @@ $border: rgba(148, 163, 184, 0.18);
   cursor: crosshair;
   width: 100%;
   min-width: 0;
-  min-height: clamp(200px, 36dvh, 420px);
-  height: clamp(240px, 42dvh, 640px);
-  max-height: min(78dvh, 820px);
+  min-height: clamp(240px, 44dvh, 500px);
+  height: clamp(300px, 52dvh, 720px);
+  max-height: min(86dvh, 920px);
   /* Scroll vertical con un dedo; el pellizco lo maneja el componente (touchmove). */
   touch-action: pan-y;
 }
@@ -1146,9 +1146,9 @@ $border: rgba(148, 163, 184, 0.18);
 /* Escritorio (dos columnas): más alto útil para el gráfico (menos “marco” vacío alrededor). */
 @media (min-width: 1025px) {
   .chart__svg-wrap {
-    min-height: clamp(320px, 52dvh, 560px);
-    height: clamp(340px, 58dvh, 780px);
-    max-height: min(82dvh, 880px);
+    min-height: clamp(380px, 60dvh, 640px);
+    height: clamp(400px, 66dvh, 880px);
+    max-height: min(90dvh, 980px);
   }
 }
 
@@ -1634,6 +1634,6 @@ $border: rgba(148, 163, 184, 0.18);
 /* Tablet en apaisado: un poco más de altura mínima útil para el plot */
 @media (max-width: 1024px) and (min-width: 600px) and (orientation: landscape) {
   .chart__svg-wrap {
-    min-height: clamp(240px, 42dvh, 420px);
+    min-height: clamp(280px, 50dvh, 520px);
   }
 }
