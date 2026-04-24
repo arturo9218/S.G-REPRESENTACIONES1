@@ -1,0 +1,162 @@
+<div #fullscreenRoot class="cb-page page--dark">
+  <header class="cb-head">
+    <div>
+      <h1 class="cb-title">Combistato · {{ combistatoName }}</h1>
+      <p class="cb-sub">
+        Sonda evaporador (S1 / temp1), sonda ambiente o segunda (S2 / temp2), compresor, forzador, deshielo y puerta.
+        Los estados requieren firmware reciente que envíe los campos en cada POST.
+      </p>
+    </div>
+    <div class="cb-head-actions">
+      <button type="button" class="btn btn--ghost" (click)="toggleFullscreen()" [attr.aria-pressed]="isFullscreenUi">
+        {{ isFullscreenUi ? 'Salir de pantalla completa' : 'Pantalla completa' }}
+      </button>
+      <button type="button" class="btn btn--ghost" (click)="backToApp()">Volver al panel</button>
+      <button type="button" class="btn btn--primary" [disabled]="loading || !combistatoId" (click)="loadAll()">
+        {{ loading ? 'Cargando…' : 'Actualizar' }}
+      </button>
+    </div>
+  </header>
+
+  <p class="cb-err" *ngIf="error">{{ error }}</p>
+
+  <div class="cb-layout" *ngIf="combistatoId">
+    <aside class="cb-side card">
+      <h2 class="cb-side__title">Qué graficar</h2>
+      <p class="cb-side__hint">Se guarda en este navegador por combistato.</p>
+      <label class="cb-toggle"
+        ><input type="checkbox" [(ngModel)]="showTemp1" (ngModelChange)="persistSeriesPrefs()" /> Sonda evaporador
+        (temp1)</label
+      >
+      <label class="cb-toggle"
+        ><input type="checkbox" [(ngModel)]="showTemp2" (ngModelChange)="persistSeriesPrefs()" /> Sonda ambiente / 2ª
+        (temp2)</label
+      >
+      <label class="cb-toggle"
+        ><input type="checkbox" [(ngModel)]="showComp" (ngModelChange)="persistSeriesPrefs()" /> Compresor</label
+      >
+      <label class="cb-toggle"
+        ><input type="checkbox" [(ngModel)]="showFan" (ngModelChange)="persistSeriesPrefs()" /> Forzador (ventilador)</label
+      >
+      <label class="cb-toggle"
+        ><input type="checkbox" [(ngModel)]="showDefrost" (ngModelChange)="persistSeriesPrefs()" /> Deshielo</label
+      >
+      <label class="cb-toggle"
+        ><input type="checkbox" [(ngModel)]="showDoor" (ngModelChange)="persistSeriesPrefs()" /> Puerta abierta</label
+      >
+      <label class="cb-toggle"
+        ><input type="checkbox" [(ngModel)]="showHistogram" (ngModelChange)="persistSeriesPrefs()" /> Histograma
+        (temperaturas)</label
+      >
+
+      <h2 class="cb-side__title cb-side__title--sp">Rango</h2>
+      <label class="cb-field">
+        <span>Desde</span>
+        <input type="datetime-local" [(ngModel)]="filterFrom" name="cbf" />
+      </label>
+      <label class="cb-field">
+        <span>Hasta</span>
+        <input type="datetime-local" [(ngModel)]="filterTo" name="cbt" />
+      </label>
+      <button type="button" class="btn btn--secondary cb-apply" [disabled]="loading" (click)="applyFilters()">
+        Aplicar rango
+      </button>
+    </aside>
+
+    <div class="cb-main">
+      <p class="cb-loading" *ngIf="loading">Cargando datos…</p>
+
+      <article class="card cb-panel">
+        <div class="cb-panel__head">
+          <h2 class="cb-panel__title">Temperaturas en el tiempo</h2>
+          <span class="cb-panel__meta" *ngIf="readings.length"
+            >{{ readings.length }} puntos · dibujo {{ displayPoints.length }} · eje
+            {{ tempMin | number : '1.0-1' }}…{{ tempMax | number : '1.0-1' }} °C</span
+          >
+        </div>
+        <div class="cb-empty" *ngIf="!readings.length && !loading">Sin lecturas en este rango.</div>
+        <div class="cb-chart-wrap" *ngIf="readings.length">
+          <svg class="cb-svg cb-svg--temp" viewBox="0 0 100 58" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="cbFill1" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="rgba(248,113,113,0.35)" />
+                <stop offset="100%" stop-color="rgba(248,113,113,0)" />
+              </linearGradient>
+              <linearGradient id="cbFill2" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="rgba(56,189,248,0.35)" />
+                <stop offset="100%" stop-color="rgba(56,189,248,0)" />
+              </linearGradient>
+            </defs>
+            <line
+              *ngFor="let g of [8, 22, 36, 50]"
+              class="cb-grid-h"
+              x1="0"
+              [attr.y1]="g"
+              x2="100"
+              [attr.y2]="g"
+            />
+            <path *ngIf="showTemp1 && tempPath1" class="cb-area" [attr.d]="tempPath1 + ' L100,52 L0,52 Z'" fill="url(#cbFill1)" />
+            <path *ngIf="showTemp2 && tempPath2" class="cb-area" [attr.d]="tempPath2 + ' L100,52 L0,52 Z'" fill="url(#cbFill2)" />
+            <path *ngIf="showTemp1 && tempPath1" class="cb-line cb-line--1" [attr.d]="tempPath1" fill="none" />
+            <path *ngIf="showTemp2 && tempPath2" class="cb-line cb-line--2" [attr.d]="tempPath2" fill="none" />
+            <text *ngFor="let tl of timeLabels" class="cb-x-label" [attr.x]="tl.x" y="56" text-anchor="middle">
+              {{ tl.text }}
+            </text>
+          </svg>
+          <div class="cb-legend">
+            <span class="cb-legend__i cb-legend__i--1" *ngIf="showTemp1">Sonda evaporador (temp1)</span>
+            <span class="cb-legend__i cb-legend__i--2" *ngIf="showTemp2">Sonda ambiente / 2ª (temp2)</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card cb-panel" *ngIf="showHistogram && readings.length">
+        <div class="cb-panel__head">
+          <h2 class="cb-panel__title">Histograma de temperaturas</h2>
+          <span class="cb-panel__meta">Distribución en el rango elegido</span>
+        </div>
+        <svg class="cb-svg cb-svg--hist" viewBox="0 0 100 42" preserveAspectRatio="none">
+          <rect x="0" y="0" width="100" height="42" class="cb-hist-bg" rx="1" />
+          <rect
+            *ngFor="let b of histBars"
+            class="cb-hist-bar"
+            [attr.x]="b.x + 0.1"
+            [attr.y]="40 - barDisplayHeight(b.h)"
+            [attr.width]="b.w"
+            [attr.height]="barDisplayHeight(b.h)"
+          />
+        </svg>
+      </article>
+
+      <article class="card cb-panel" *ngIf="readings.length">
+        <div class="cb-panel__head">
+          <h2 class="cb-panel__title">Actividad (relés / puerta)</h2>
+          <span class="cb-panel__meta">Verde = encendido / puerta abierta · Gris = apagado / cerrada</span>
+        </div>
+        <div class="cb-act-grid">
+          <div class="cb-act-labels">
+            <span *ngIf="showComp">Compresor</span>
+            <span *ngIf="showFan">Forzador</span>
+            <span *ngIf="showDefrost">Deshielo</span>
+            <span *ngIf="showDoor">Puerta</span>
+          </div>
+          <svg class="cb-svg cb-svg--act" viewBox="0 0 100 88" preserveAspectRatio="none">
+            <ng-container *ngFor="let r of activityRects">
+              <rect
+                class="cb-act-rect"
+                [class.cb-act-rect--on]="r.on"
+                [attr.x]="r.x0"
+                [attr.y]="8 + r.lane * 20"
+                [attr.width]="rectW(r)"
+                height="14"
+              />
+            </ng-container>
+            <text *ngFor="let tl of timeLabels" class="cb-x-label" [attr.x]="tl.x" y="86" text-anchor="middle">
+              {{ tl.text }}
+            </text>
+          </svg>
+        </div>
+      </article>
+    </div>
+  </div>
+</div>

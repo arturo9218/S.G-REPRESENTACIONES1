@@ -113,6 +113,19 @@
         />
       </div>
       <div class="topbar__right">
+        <button
+          type="button"
+          class="btn btn--ghost"
+          *ngIf="
+            (shellRoute === 'dashboard' || shellRoute === 'devices' || shellRoute === 'settings') &&
+            environment.deviceCloudSync &&
+            deviceStore.isCloudSyncActive()
+          "
+          aria-label="Agregar combistato"
+          (click)="openAddCombistatoModal()"
+        >
+          + Combistato
+        </button>
         <button type="button" class="btn btn--primary" aria-label="Agregar dispositivo" (click)="openAddDeviceModal()">
           + Dispositivo
         </button>
@@ -143,7 +156,7 @@
       </span>
     </div>
 
-    <div class="shell__content" *ngIf="hasDevices; else emptyState">
+    <div class="shell__content" *ngIf="hasShellContent; else emptyState">
       <ng-container *ngIf="shellRoute !== 'settings' && shellRoute !== 'equipment'">
       <section id="section-kpi" class="kpi-row" aria-label="Resumen">
         <article class="kpi-card">
@@ -696,6 +709,108 @@
               </div>
             </article>
           </div>
+
+          <div
+            id="section-combistatos-cards"
+            class="device-section"
+            *ngIf="
+              (shellRoute === 'dashboard' || shellRoute === 'devices') &&
+              environment.deviceCloudSync &&
+              deviceStore.isCloudSyncActive()
+            "
+          >
+            <div class="device-section__head">
+              <div class="device-section__titles">
+                <h2 class="device-section__title">Combistatos</h2>
+                <p class="device-section__hint">
+                  Tarjetas independientes de los paneles de temperatura. Los parámetros <strong>F01–F55</strong> se
+                  editan en <strong>Configuración</strong> (botón en cada tarjeta).
+                </p>
+              </div>
+              <button type="button" class="btn btn--primary btn--sm" (click)="openAddCombistatoModal()">
+                + Combistato
+              </button>
+            </div>
+            <div class="device-grid device-grid--combistatos" *ngIf="combistatos.length">
+              <article
+                class="device-card device-card--combistato"
+                *ngFor="let c of combistatos; trackBy: trackByCombistatoId"
+                [class.device-card--selected]="c.id === selectedCombistatoId"
+                (click)="selectCombistato(c.id)"
+              >
+                <header class="device-card__head">
+                  <div class="device-card__head-text">
+                    <h3 class="device-card__name">{{ c.name }}</h3>
+                    <span class="device-card__role-pill device-card__role-pill--editor">Combistato</span>
+                    <span class="device-card__id">ID: {{ c.id }}</span>
+                    <span class="device-card__module" *ngIf="c.moduleId">ID módulo: {{ c.moduleId }}</span>
+                  </div>
+                  <div class="device-card__head-actions">
+                    <span class="device-card__status" [class.device-card__status--off]="!c.online">
+                      <span class="device-card__dot"></span>
+                      {{ c.online ? 'Online' : 'Sin conexión' }}
+                    </span>
+                  </div>
+                </header>
+                <div class="device-card__head-line" aria-hidden="true"></div>
+                <div class="device-card__temps device-card__temps--pending">
+                  <p class="card__hint card__hint--tight device-card__combistato-blurb">
+                    Último envío al servidor: {{ c.lastSeenLabel }}
+                  </p>
+                  <p class="card__hint card__hint--tight device-card__combistato-blurb device-card__combistato-blurb--muted">
+                    Datos en app (nombre, etc.): {{ c.updatedAtLabel }}
+                  </p>
+                </div>
+                <footer class="device-card__foot">
+                  <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && c.ownerUserId">
+                    Cuenta {{ formatOwnerUserIdShort(c.ownerUserId) }}
+                  </span>
+                  <span class="device-card__meta">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    {{ c.location }}
+                  </span>
+                </footer>
+                <div class="device-card__actions">
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Parámetros F01–F55 de ' + c.name"
+                    (click)="goCombistatoSettings(c, $event)"
+                  >
+                    F01–F55
+                  </button>
+                  <a
+                    class="device-card__btn device-card__btn--link"
+                    [routerLink]="['/chart-combistato']"
+                    [queryParams]="{ combistatoId: c.id }"
+                    (click)="$event.stopPropagation()"
+                    title="Gráfico histórico"
+                    >Gráfico</a
+                  >
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Editar nombre de ' + c.name"
+                    (click)="openEditCombistatoModal(c); $event.stopPropagation()"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    class="device-card__btn device-card__btn--danger"
+                    [attr.aria-label]="'Eliminar combistato ' + c.name"
+                    (click)="confirmDeleteCombistato(c); $event.stopPropagation()"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </article>
+            </div>
+            <p class="card__hint card__hint--tight" *ngIf="!combistatos.length">
+              No hay combistatos. Usá <strong>+ Combistato</strong> arriba o en esta sección.
+            </p>
+          </div>
+
         </div>
 
         <aside class="grid-main__right">
@@ -920,6 +1035,10 @@
         <div class="settings-page" role="region" aria-labelledby="settings-page-title">
           <h1 id="settings-page-title" class="settings-page__title">Configuración</h1>
 
+          <ng-container *ngIf="!isAdminView && environment.deviceCloudSync">
+            <ng-container *ngTemplateOutlet="settingsConnectionGuide"></ng-container>
+          </ng-container>
+
           <article class="card card--admin-roster" *ngIf="isAdminView">
             <h2 class="card__title card__title--sm">Administradores</h2>
             <p class="card__hint card__hint--tight">
@@ -969,26 +1088,73 @@
             </p>
           </article>
 
-          <article class="card settings-page__device-pick">
-            <h2 class="card__title card__title--sm">Dispositivo a configurar</h2>
+          <ng-container *ngIf="isAdminView && environment.deviceCloudSync">
+            <ng-container *ngTemplateOutlet="settingsConnectionGuide"></ng-container>
+          </ng-container>
+
+          <article class="card settings-page__device-pick settings-page__hub">
+            <h2 class="card__title card__title--sm">Elegí qué configurar</h2>
             <p class="card__hint card__hint--tight">
-              Umbrales, nombres y corrección son <strong>por equipo</strong>. Elegí acá cuál editás; no hace falta que esté online para guardar (los cambios se aplican cuando vuelva a enviar datos).
+              Tocá un <strong>panel de medición</strong> para umbrales, nombres de sensores, corrección, compartir, etc.
+              Tocá un <strong>combistato</strong> para los parámetros <strong>F01–F55</strong> en la nube. No hace falta
+              que esté online para guardar.
             </p>
-            <label class="notify-panel__field notify-panel__field--full">
-              <span>Equipo</span>
-              <select
-                class="notify-panel__select"
-                [ngModel]="selectedDeviceId"
-                (ngModelChange)="selectDevice($event)"
-                name="settings-device-pick"
-              >
-                <option *ngFor="let d of devices" [ngValue]="d.id">
-                  {{ d.name }} — {{ d.online ? 'Online' : 'Sin conexión' }}
-                </option>
-              </select>
-            </label>
+            <p class="card__empty" *ngIf="!devices.length && !combistatos.length">
+              No hay paneles ni combistatos. Usá <strong>+ Dispositivo</strong> o <strong>+ Combistato</strong> en la
+              barra superior.
+            </p>
+            <ng-container *ngIf="devices.length">
+              <h3 class="settings-hub__group-title">Paneles de medición</h3>
+              <div class="settings-device-grid">
+                <button
+                  type="button"
+                  class="settings-device-tile"
+                  *ngFor="let d of devices; trackBy: trackByDeviceId"
+                  [class.settings-device-tile--active]="settingsConfigKind === 'device' && d.id === selectedDeviceId"
+                  (click)="openSettingsDeviceParams(d.id)"
+                >
+                  <span class="settings-device-tile__kind">Panel</span>
+                  <span class="settings-device-tile__name">{{ d.name }}</span>
+                  <span
+                    class="settings-device-tile__pill"
+                    [class.settings-device-tile__pill--off]="!d.online"
+                    >{{ d.online ? 'Online' : 'Sin conexión' }}</span
+                  >
+                  <span class="settings-device-tile__meta">{{ d.location }}</span>
+                  <span class="settings-device-tile__meta" *ngIf="d.moduleId">Módulo: {{ d.moduleId }}</span>
+                </button>
+              </div>
+            </ng-container>
+            <ng-container *ngIf="combistatos.length && environment.deviceCloudSync && deviceStore.isCloudSyncActive()">
+              <h3 class="settings-hub__group-title">Combistatos</h3>
+              <div class="settings-device-grid">
+                <button
+                  type="button"
+                  class="settings-device-tile settings-device-tile--combistato"
+                  *ngFor="let c of combistatos; trackBy: trackByCombistatoId"
+                  [class.settings-device-tile--active]="settingsConfigKind === 'combistato' && c.id === selectedCombistatoId"
+                  (click)="openSettingsCombistatoParams(c.id)"
+                >
+                  <span class="settings-device-tile__kind">Combistato</span>
+                  <span class="settings-device-tile__name">{{ c.name }}</span>
+                  <span
+                    class="settings-device-tile__pill"
+                    [class.settings-device-tile__pill--off]="!c.online"
+                    >{{ c.online ? 'Online' : 'Sin conexión' }}</span
+                  >
+                  <span class="settings-device-tile__meta">{{ c.location }}</span>
+                  <span class="settings-device-tile__meta" *ngIf="c.moduleId">Módulo: {{ c.moduleId }}</span>
+                </button>
+              </div>
+            </ng-container>
           </article>
-          <div class="settings-page__stack">
+          <div class="settings-page__params-head" *ngIf="settingsConfigKind !== 'none'">
+            <button type="button" class="btn btn--ghost btn--sm" (click)="backToSettingsHub()">
+              ← Volver a la lista
+            </button>
+          </div>
+          <div class="settings-page__stack" *ngIf="settingsConfigKind !== 'none'">
+            <div id="settings-params-anchor" tabindex="-1"></div>
             <ng-container *ngTemplateOutlet="settingsPanelsContent"></ng-container>
           </div>
         </div>
@@ -2052,36 +2218,39 @@
         </div>
       </ng-container>
 
-      <ng-template #settingsPanelsContent>
-          <article class="card" *ngIf="environment.deviceCloudSync">
-            <h2 class="card__title card__title--sm">Guía: conectar un dispositivo</h2>
-            <p class="card__hint card__hint--tight">
-              Pasos para que el equipo envíe telemetría a la nube y aparezca en el panel.
-            </p>
-            <details class="connection-guide">
-              <summary class="connection-guide__summary">Ver pasos</summary>
-              <ol class="connection-guide__steps">
-                <li>
-                  En <strong>Dispositivos</strong>, pulsá <strong>Agregar dispositivo</strong>, completá nombre y ubicación, y guardá.
-                </li>
-                <li>
-                  Si dejaste vacío el ID módulo, la app genera uno. Tras guardar se abre una ventana con
-                  <strong>api_url</strong>, <strong>module_id</strong> y <strong>api_key</strong>: copiá esos tres valores.
-                </li>
-                <li>
-                  En el equipo, abrí el <strong>portal de configuración por WiFi</strong> (red temporal del dispositivo, como al configurar un router) y pegá los mismos nombres de campo que muestra la app.
-                </li>
-                <li>
-                  Conectá el equipo a tu WiFi con internet. Cuando envíe lecturas, la tarjeta pasará de “esperando datos” a mostrar temperaturas y demás.
-                </li>
-                <li>
-                  La dirección de ingesta (campo <code>api_url</code>) suele ser:
-                  <code class="connection-guide__url">{{ ingestUrlForGuide }}</code>
-                </li>
-              </ol>
-            </details>
-          </article>
+      <ng-template #settingsConnectionGuide>
+        <article class="card" *ngIf="environment.deviceCloudSync">
+          <h2 class="card__title card__title--sm">Guía: conectar un dispositivo</h2>
+          <p class="card__hint card__hint--tight">
+            Pasos para que el equipo envíe telemetría a la nube y aparezca en el panel.
+          </p>
+          <details class="connection-guide">
+            <summary class="connection-guide__summary">Ver pasos</summary>
+            <ol class="connection-guide__steps">
+              <li>
+                En <strong>Dispositivos</strong>, pulsá <strong>Agregar dispositivo</strong>, completá nombre y ubicación, y guardá.
+              </li>
+              <li>
+                Si dejaste vacío el ID módulo, la app genera uno. Tras guardar se abre una ventana con
+                <strong>api_url</strong>, <strong>module_id</strong> y <strong>api_key</strong>: copiá esos tres valores.
+              </li>
+              <li>
+                En el equipo, abrí el <strong>portal de configuración por WiFi</strong> (red temporal del dispositivo, como al configurar un router) y pegá los mismos nombres de campo que muestra la app.
+              </li>
+              <li>
+                Conectá el equipo a tu WiFi con internet. Cuando envíe lecturas, la tarjeta pasará de “esperando datos” a mostrar temperaturas y demás.
+              </li>
+              <li>
+                La dirección de ingesta (campo <code>api_url</code>) suele ser:
+                <code class="connection-guide__url">{{ ingestUrlForGuide }}</code>
+              </li>
+            </ol>
+          </details>
+        </article>
+      </ng-template>
 
+      <ng-template #settingsPanelsContent>
+          <ng-container *ngIf="settingsConfigKind === 'device'">
           <article class="card card--sensor-labels" *ngIf="selectedDevice">
             <h2 class="card__title card__title--sm">Nombres de sensores</h2>
             <p class="card__hint card__hint--tight">
@@ -2539,19 +2708,50 @@
               </button>
             </div>
           </article>
+          </ng-container>
+
+          <ng-container *ngIf="settingsConfigKind === 'combistato'">
+            <article
+              id="section-settings-combistato"
+              class="card"
+              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
+            >
+              <div class="card__title-row">
+                <h2 class="card__title card__title--sm">Combistato — parámetros F01–F55</h2>
+                <button type="button" class="btn btn--ghost btn--sm" (click)="openAddCombistatoModal()">+ Combistato</button>
+              </div>
+              <p class="card__hint card__hint--tight">
+                Los valores se guardan en la nube por combistato. Para cambiar de equipo, usá <strong>Volver a la lista</strong>.
+              </p>
+              <app-combistato-settings
+                *ngIf="selectedCombistatoId"
+                [combistatoId]="selectedCombistatoId"
+                [canEdit]="true"
+              ></app-combistato-settings>
+            </article>
+          </ng-container>
       </ng-template>
     </div>
 
     <ng-template #emptyState>
       <div class="empty">
         <div class="empty__card">
-          <h1 class="empty__title">Sin dispositivos</h1>
+          <h1 class="empty__title">Sin contenido aún</h1>
           <p class="empty__text">
-            Agregá un dispositivo para ver temperaturas y alertas. Si ya cargaste equipos en otro momento, revisá la
-            conexión o cerrá sesión y volvé a entrar.
+            Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, o <strong>combistatos</strong> para
+            guardar la configuración F01–F55 en la nube. Son independientes: podés tener todos los que necesites de cada
+            uno. Si ya cargaste datos en otro momento, revisá la conexión o cerrá sesión y volvé a entrar.
           </p>
           <div class="empty__actions">
             <button type="button" class="btn btn--primary" (click)="openAddDeviceModal()">+ Dispositivo</button>
+            <button
+              type="button"
+              class="btn btn--ghost"
+              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
+              (click)="openAddCombistatoModal()"
+            >
+              + Combistato
+            </button>
             <button *ngIf="isDev" type="button" class="btn btn--ghost" (click)="loadDemoDevices()">Demo</button>
           </div>
           <p *ngIf="isDev" class="empty__hint">Demo solo en desarrollo.</p>
@@ -2559,7 +2759,7 @@
       </div>
     </ng-template>
 
-    <nav class="mobile-nav" *ngIf="hasDevices" aria-label="Navegación inferior">
+    <nav class="mobile-nav" *ngIf="hasShellContent" aria-label="Navegación inferior">
       <button
         type="button"
         class="mobile-nav__btn"
@@ -2678,6 +2878,97 @@
         </button>
       </div>
     </form>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="combistatoModalMode"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="combistato-modal-title"
+  (click)="closeCombistatoModal()"
+>
+  <div class="modal" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="combistato-modal-title" class="modal__title">Combistato</h2>
+      <button type="button" class="modal__close" (click)="closeCombistatoModal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro" *ngIf="combistatoModalMode === 'add'">
+      Nuevo combistato. Conecta igual que un dispositivo de mediciones: <code>api_url</code>, <code>module_id</code> y
+      <code>api_key</code>.
+    </p>
+    <p class="modal__intro" *ngIf="combistatoModalMode === 'edit'">Editar nombre, ubicación o ID módulo del combistato.</p>
+    <form class="modal__form" [formGroup]="combistatoForm" (ngSubmit)="submitCombistatoForm()">
+      <label class="modal__field">
+        <span class="modal__label">Nombre <span class="modal__req">*</span></span>
+        <input type="text" class="modal__input" formControlName="name" autocomplete="off" />
+        <span class="modal__err" *ngIf="combistatoForm.controls.name.touched && combistatoForm.controls.name.hasError('required')"
+          >Nombre requerido.</span
+        >
+        <span class="modal__err" *ngIf="combistatoForm.controls.name.touched && combistatoForm.controls.name.hasError('minlength')"
+          >Mínimo 2 caracteres.</span
+        >
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">Ubicación</span>
+        <input type="text" class="modal__input" formControlName="location" autocomplete="off" />
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">ID módulo (combistato)</span>
+        <input type="text" class="modal__input" formControlName="moduleId" autocomplete="off" />
+        <span class="modal__hint">Opcional al crear. Vacío = se genera automático para el portal del equipo.</span>
+      </label>
+      <div class="modal__field" *ngIf="combistatoModalMode === 'edit' && editingCombistato?.deviceToken">
+        <span class="modal__label">Código API (6 dígitos)</span>
+        <input type="text" class="modal__input" readonly [value]="editingCombistato?.deviceToken" />
+        <span class="modal__hint">Token recargado desde la nube para identificar este combistato.</span>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" (click)="closeCombistatoModal()">Cancelar</button>
+        <button type="submit" class="btn btn--primary" [disabled]="addCombistatoSubmitting">
+          {{ addCombistatoSubmitting ? 'Guardando…' : 'Guardar' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="combistatoProvisioningOpen && combistatoProvisioningCredentials as ccred"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="combistato-provision-title"
+  (click)="closeProvisioningModal()"
+>
+  <div class="modal modal--wide" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="combistato-provision-title" class="modal__title">Configurar el combistato</h2>
+      <button type="button" class="modal__close" (click)="closeProvisioningModal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro">Copiá estos valores en el portal del combistato (mismo método de conexión que dispositivos).</p>
+    <div class="provision-rows">
+      <div class="provision-row">
+        <span class="provision-row__label">api_url</span>
+        <code class="provision-row__val">{{ ccred.ingestUrl }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(ccred.ingestUrl)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">module_id</span>
+        <code class="provision-row__val">{{ ccred.moduleId }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(ccred.moduleId)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">api_key</span>
+        <code class="provision-row__val">{{ ccred.deviceToken }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(ccred.deviceToken)">Copiar</button>
+      </div>
+    </div>
+    <p class="modal__hint">Guardá el código de 6 dígitos: no se puede recuperar desde otro navegador.</p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--primary" (click)="closeProvisioningModal()">Listo</button>
+    </div>
   </div>
 </div>
 

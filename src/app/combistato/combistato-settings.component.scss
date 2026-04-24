@@ -1,0 +1,203 @@
+$card: #131c2e;
+$card-elevated: #1a2740;
+$text: #e8eef7;
+$muted: #94a3b8;
+$primary: #3b82f6;
+$border: rgba(148, 163, 184, 0.18);
+
+.card--combistato {
+  margin-top: 1rem;
+  border: 1px solid $border;
+  border-radius: 12px;
+  background: $card;
+  color: $text;
+  padding: 1rem;
+
+  .card__title {
+    margin: 0 0 0.5rem;
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: $text;
+  }
+
+  .card__hint {
+    margin: 0 0 1rem;
+    color: $muted;
+    font-size: 0.86rem;
+    line-height: 1.45;
+  }
+
+  .notify-panel-fieldset {
+    margin: 0;
+    padding: 0;
+    border: none;
+    min-width: 0;
+  }
+
+  .notify-panel {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .notify-panel__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .notify-panel__field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+
+    span {
+      color: $muted;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
+    input {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      background: $card-elevated;
+      color: $text;
+      padding: 0.5rem 0.65rem;
+      font-size: 0.88rem;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: rgba(59, 130, 246, 0.8);
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    }
+  }
+
+  .sensor-labels-feedback {
+    margin: 0.75rem 0 0;
+    font-size: 0.82rem;
+    color: #86efac;
+  }
+
+  .sensor-labels-feedback--warn {
+    color: #fca5a5;
+  }
+
+  .combistato-status {
+    margin: 0 0 0.75rem;
+    color: $muted;
+    font-size: 0.9rem;
+  }
+
+  .combistato-details {
+    margin-bottom: 0.65rem;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 10px;
+    padding: 0.35rem 0.65rem;
+    background: rgba(15, 23, 42, 0.35);
+  }
+
+  .combistato-details__summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: $text;
+    padding: 0.35rem 0;
+    list-style: none;
+  }
+
+  .combistato-details__summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .combistato-details__summary::before {
+    content: '▸';
+    margin-right: 0.45rem;
+    color: #93c5fd;
+  }
+
+  .combistato-details[open] .combistato-details__summary::before {
+    content: '▾';
+  }
+
+  .combistato-details__grid {
+    margin-top: 0.5rem;
+  }
+
+  .combistato-chart-link {
+    margin: 0.75rem 0 0;
+    font-size: 0.82rem;
+  }
+
+  .combistato-chart-link__a {
+    color: #93c5fd;
+    text-decoration: none;
+    font-weight: 600;
+
+    &:hover {
+      text-decoration: underline;
+      color: #bfdbfe;
+    }
+  }
+
+  .combistato-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  .btn {
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 0.5rem 0.85rem;
+    font-size: 0.83rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  }
+
+  .btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+
+  .btn--primary {
+    background: linear-gradient(180deg, #4f8ef0 0%, #3b82f6 50%, #2563eb 100%);
+    color: #fff;
+    border-color: rgba(147, 197, 253, 0.3);
+  }
+
+  .btn--secondary {
+    background: rgba(148, 163, 184, 0.12);
+    color: $text;
+    border-color: rgba(148, 163, 184, 0.25);
+  }
+
+  .btn--secondary:hover:not(:disabled) {
+    background: rgba(148, 163, 184, 0.2);
+  }
+
+  .btn--primary:hover:not(:disabled) {
+    filter: brightness(1.06);
+  }
+
+  .combistato-json {
+    margin-top: 1rem;
+    max-height: 220px;
+    overflow: auto;
+    padding: 0.75rem;
+    border-radius: 8px;
+    background: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #cbd5e1;
+  }
+}
+
+@media (max-width: 900px) {
+  .card--combistato .notify-panel__grid {
+    grid-template-columns: 1fr;
+  }
+}

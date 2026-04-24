@@ -8,6 +8,7 @@ import { ForgotPasswordComponent } from './forgot-password/forgot-password.compo
 import { ResetPasswordComponent } from './reset-password/reset-password.component';
 import { DashboardComponent } from './dashboard/dashboard.component';
 import { ChartAnalysisComponent } from './chart-analysis/chart-analysis.component';
+import { CombistatoChartComponent } from './combistato-chart/combistato-chart.component';
 
 const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'login' },
@@ -25,6 +26,7 @@ const routes: Routes = [
   { path: 'alertas', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'configuracion', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'chart', component: ChartAnalysisComponent },
+  { path: 'chart-combistato', component: CombistatoChartComponent, canActivate: [authGuard] },
   { path: '**', redirectTo: 'login' },
 ];
 

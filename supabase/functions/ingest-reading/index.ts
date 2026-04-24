@@ -24,6 +24,22 @@ interface IngestPayload {
   power_w?: number | null;
   press1_bar?: number | null;
   press2_bar?: number | null;
+  /** Combistato: estado de relés / puerta (0/1 o boolean); opcional en firmware viejo. */
+  comp_on?: unknown;
+  fan_on?: unknown;
+  defrost_on?: unknown;
+  door_open?: unknown;
+}
+
+function ingestBool(v: unknown): boolean {
+  if (v === true) return true;
+  if (v === false || v === null || v === undefined) return false;
+  if (typeof v === 'number') return v !== 0 && Number.isFinite(v);
+  if (typeof v === 'string') {
+    const t = v.trim().toLowerCase();
+    return t === '1' || t === 'true' || t === 'on' || t === 'yes';
+  }
+  return false;
 }
 
 const corsHeaders = {
@@ -72,6 +88,53 @@ Deno.serve(async (req) => {
       .single();
 
     if (devErr || !device) {
+      const { data: combi, error: combiErr } = await supabase
+        .from('combistatos')
+        .select('id, device_token_hash')
+        .eq('module_id', moduleId)
+        .maybeSingle();
+
+      if (!combiErr && combi?.id && combi.device_token_hash === deviceToken) {
+        const sentIso =
+          typeof payload.sentAt === 'string' && payload.sentAt.trim()
+            ? payload.sentAt.trim()
+            : new Date().toISOString();
+        const t2 =
+          payload.temp2_c == null || Number.isNaN(payload.temp2_c as number)
+            ? null
+            : (payload.temp2_c as number);
+        const { error: insCombErr } = await supabase.from('combistato_readings').insert({
+          combistato_id: combi.id,
+          created_at: sentIso,
+          temp1_c: payload.temp1_c,
+          temp2_c: t2,
+          comp_on: ingestBool(payload.comp_on),
+          fan_on: ingestBool(payload.fan_on),
+          defrost_on: ingestBool(payload.defrost_on),
+          door_open: ingestBool(payload.door_open),
+        });
+        if (insCombErr) {
+          return new Response(JSON.stringify({ error: insCombErr.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const { error: upErr } = await supabase
+          .from('combistatos')
+          .update({ last_seen_at: sentIso })
+          .eq('id', combi.id);
+        if (upErr) {
+          return new Response(JSON.stringify({ error: upErr.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true, kind: 'combistato' }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       return new Response(JSON.stringify({ error: 'Dispositivo no encontrado' }), {
         status: 404,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

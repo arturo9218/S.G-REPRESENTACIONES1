@@ -4,6 +4,7 @@ import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { combineLatest, fromEvent, Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { AuthService } from '../core/auth.service';
+import { CombistatoStoreService } from '../core/combistato-store.service';
 import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
 import {
   ActivityItem,
@@ -11,6 +12,7 @@ import {
   ChartStylePreset,
   DashboardAlert,
   DashboardAlertKind,
+  DashboardCombistato,
   DashboardDevice,
   DeviceAlarmEvent,
   HistoryListItem,
@@ -119,6 +121,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
   private subAdmin: Subscription | null = null;
+  private subCombistatos: Subscription | null = null;
   /** Vista admin: todos los equipos; permisos reales vienen de Supabase (admin_emails + is_app_admin). */
   isAdminView = false;
   /** Lista de emails admin (solo visible si isAdminView; tabla public.admin_emails). */
@@ -139,6 +142,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
   deviceModalMode: 'add' | 'edit' | null = null;
   editingDeviceId: string | null = null;
   addDeviceSubmitting = false;
+
+  combistatoModalMode: 'add' | 'edit' | null = null;
+  editingCombistatoId: string | null = null;
+  addCombistatoSubmitting = false;
+  combistatos: DashboardCombistato[] = [];
+  /** Combistato elegido para editar F01–F55 en Configuración. */
+  selectedCombistatoId: string | null = null;
+  /**
+   * En `/configuracion`: primero se elige equipo en la tarjeta unificada;
+   * recién después se muestran parámetros de panel o de combistato.
+   */
+  settingsConfigKind: 'none' | 'device' | 'combistato' = 'none';
 
   /** Vista compacta vs ampliada del gráfico de temperaturas */
   chartExpanded = false;
@@ -325,6 +340,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   provisioningOpen = false;
   provisioningCredentials: { moduleId: string; deviceToken: string; ingestUrl: string } | null =
     null;
+  /** Tras crear combistato: mismos datos de conexión (`api_url`, `module_id`, `api_key`). */
+  combistatoProvisioningOpen = false;
+  combistatoProvisioningCredentials: { moduleId: string; deviceToken: string; ingestUrl: string } | null =
+    null;
 
   readonly deviceForm = this.fb.group({
     name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(80)]],
@@ -334,12 +353,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
     manualTemp: ['', [Validators.maxLength(10)]],
   });
 
+  readonly combistatoForm = this.fb.group({
+    name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(80)]],
+    location: ['', [Validators.maxLength(120)]],
+    moduleId: ['', [Validators.maxLength(64)]],
+  });
+
   constructor(
     private readonly fb: FormBuilder,
     private readonly auth: AuthService,
     private readonly router: Router,
     private readonly route: ActivatedRoute,
     readonly deviceStore: DeviceStoreService,
+    readonly combistatoStore: CombistatoStoreService,
     private readonly webPush: WebPushService,
     private readonly equipmentSheet: EquipmentSheetService
   ) {
@@ -371,18 +397,42 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.alarmEventsCount = this.loadAlarmEventsCount();
     this.routeQuerySub = combineLatest([
       this.deviceStore.devices$,
+      this.combistatoStore.combistatos$,
       this.route.queryParamMap,
-    ]).subscribe(([list, params]) => {
+    ]).subscribe(([list, combList, params]) => {
       if (this.skipQueryParamDeviceSync) {
         return;
       }
+      const path = this.router.url.split('?')[0];
       const did = params.get('deviceId');
+      const cid = params.get('combistatoId');
+
+      if (path === '/configuracion') {
+        if (cid && combList.some((c) => c.id === cid)) {
+          this.settingsConfigKind = 'combistato';
+          if (this.selectedCombistatoId !== cid) {
+            this.selectCombistato(cid);
+          }
+        } else if (did && list.some((d) => d.id === did)) {
+          this.settingsConfigKind = 'device';
+          if (this.selectedDeviceId !== did) {
+            this.selectDevice(did, false);
+          }
+        } else {
+          this.settingsConfigKind = 'none';
+        }
+      }
+
       if (did && list.some((d) => d.id === did)) {
         if (this.selectedDeviceId !== did) {
           this.selectDevice(did, false);
         }
       } else if (!this.selectedDeviceId && list.length > 0) {
-        this.selectDevice(list[0].id, false);
+        const hubSinDevice =
+          path === '/configuracion' && !did;
+        if (!hubSinDevice) {
+          this.selectDevice(list[0].id, false);
+        }
       }
       // No recargar ficha en cada emisión de devices$ (provocaba bucle y borraba lo que escribías).
     });
@@ -403,6 +453,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subAdmin = this.deviceStore.admin$.subscribe((v) => {
       this.isAdminView = v;
       if (v && this.shellRoute === 'settings') void this.loadAdminEmails();
+    });
+    this.subCombistatos = this.combistatoStore.combistatos$.subscribe((list) => {
+      this.combistatos = list;
+      if (this.selectedCombistatoId && !list.some((c) => c.id === this.selectedCombistatoId)) {
+        this.selectedCombistatoId = null;
+      }
     });
   }
 
@@ -427,6 +483,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subDev?.unsubscribe();
     this.subRead?.unsubscribe();
     this.subAdmin?.unsubscribe();
+    this.subCombistatos?.unsubscribe();
     this.routerSub?.unsubscribe();
     this.routeQuerySub?.unsubscribe();
     this.visibilitySub?.unsubscribe();
@@ -536,6 +593,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   get hasDevices(): boolean {
     return this.devices.length > 0;
+  }
+
+  /** Muestra el panel principal si hay equipos de lectura y/o combistatos en nube. */
+  get hasShellContent(): boolean {
+    return (
+      this.hasDevices ||
+      (this.environment.deviceCloudSync === true && this.deviceStore.isCloudSyncActive() && this.combistatos.length > 0)
+    );
   }
 
   /** Última marca de tiempo entre todas las lecturas cargadas (referencia de frescura). */
@@ -1039,6 +1104,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   get editingDevice(): DashboardDevice | null {
     if (!this.editingDeviceId) return null;
     return this.devices.find((d) => d.id === this.editingDeviceId) ?? null;
+  }
+
+  get editingCombistato(): DashboardCombistato | null {
+    if (!this.editingCombistatoId) return null;
+    return this.combistatos.find((c) => c.id === this.editingCombistatoId) ?? null;
   }
 
   get selectedTelemetry(): TemperatureReading | null {
@@ -1783,11 +1853,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
       settings: '/configuracion',
     };
     const path = paths[section];
+    if (section === 'settings') {
+      this.settingsConfigKind = 'none';
+      void this.router.navigate([path], {
+        queryParams: { deviceId: null, combistatoId: null },
+        replaceUrl: true,
+      });
+      if (this.isAdminView) void this.loadAdminEmails();
+      return;
+    }
     void this.router.navigate([path], {
       queryParams: this.selectedDeviceId ? { deviceId: this.selectedDeviceId } : { deviceId: null },
       replaceUrl: true,
     });
-    if (section === 'settings' && this.isAdminView) void this.loadAdminEmails();
   }
 
   openChartInNewTab(e?: Event): void {
@@ -1822,9 +1900,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const shellPaths = ['/dashboard', '/dispositivos', '/ficha-equipo', '/alertas', '/configuracion'];
       if (shellPaths.includes(path)) {
         this.skipQueryParamDeviceSync = true;
+        const queryParams =
+          path === '/configuracion'
+            ? deviceId
+              ? { deviceId, combistatoId: null }
+              : { deviceId: null, combistatoId: null }
+            : deviceId
+              ? { deviceId }
+              : { deviceId: null };
         void this.router
           .navigate([path], {
-            queryParams: deviceId ? { deviceId } : { deviceId: null },
+            queryParams,
             replaceUrl: true,
           })
           .finally(() => {
@@ -2216,7 +2302,159 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.persistAlarmEventsCount();
   }
 
+  trackByCombistatoId(_index: number, c: DashboardCombistato): string {
+    return c.id;
+  }
+
+  selectCombistato(id: string | null): void {
+    this.selectedCombistatoId = id;
+  }
+
+  /** Desde Inicio / Dispositivos: abre Configuración con ese combistato para editar F01–F55. */
+  goCombistatoSettings(c: DashboardCombistato, ev?: Event): void {
+    ev?.stopPropagation();
+    this.openSettingsCombistatoParams(c.id);
+  }
+
+  openSettingsDeviceParams(deviceId: string): void {
+    this.skipQueryParamDeviceSync = true;
+    this.settingsConfigKind = 'device';
+    this.selectCombistato(null);
+    this.selectDevice(deviceId, false);
+    void this.router
+      .navigate(['/configuracion'], {
+        queryParams: { deviceId, combistatoId: null },
+        replaceUrl: true,
+      })
+      .finally(() => {
+        this.skipQueryParamDeviceSync = false;
+      });
+    this.scrollSettingsParamsIntoView();
+  }
+
+  openSettingsCombistatoParams(combistatoId: string): void {
+    this.skipQueryParamDeviceSync = true;
+    this.settingsConfigKind = 'combistato';
+    this.selectCombistato(combistatoId);
+    void this.router
+      .navigate(['/configuracion'], {
+        queryParams: { deviceId: null, combistatoId: combistatoId },
+        replaceUrl: true,
+      })
+      .finally(() => {
+        this.skipQueryParamDeviceSync = false;
+      });
+    this.scrollSettingsParamsIntoView();
+  }
+
+  backToSettingsHub(): void {
+    this.skipQueryParamDeviceSync = true;
+    this.settingsConfigKind = 'none';
+    this.selectCombistato(null);
+    void this.router
+      .navigate(['/configuracion'], {
+        queryParams: { deviceId: null, combistatoId: null },
+        replaceUrl: true,
+      })
+      .finally(() => {
+        this.skipQueryParamDeviceSync = false;
+      });
+  }
+
+  private scrollSettingsParamsIntoView(): void {
+    window.setTimeout(() => {
+      document.getElementById('settings-params-anchor')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 120);
+  }
+
+  openAddCombistatoModal(): void {
+    this.combistatoProvisioningOpen = false;
+    this.combistatoProvisioningCredentials = null;
+    this.combistatoModalMode = 'add';
+    this.editingCombistatoId = null;
+    this.combistatoForm.reset({ name: '', location: '', moduleId: '' });
+  }
+
+  openEditCombistatoModal(c: DashboardCombistato): void {
+    this.combistatoModalMode = 'edit';
+    this.editingCombistatoId = c.id;
+    this.combistatoForm.patchValue({
+      name: c.name,
+      location: c.location === 'Sin ubicación' ? '' : c.location,
+      moduleId: c.moduleId ?? '',
+    });
+  }
+
+  closeCombistatoModal(): void {
+    this.combistatoModalMode = null;
+    this.editingCombistatoId = null;
+    this.addCombistatoSubmitting = false;
+  }
+
+  async submitCombistatoForm(): Promise<void> {
+    if (this.combistatoForm.invalid) {
+      this.combistatoForm.markAllAsTouched();
+      return;
+    }
+    const v = this.combistatoForm.getRawValue();
+    if (this.combistatoModalMode === 'add') {
+      this.addCombistatoSubmitting = true;
+      try {
+        const result = await this.combistatoStore.addCombistatoFromFormAsync({
+          name: v.name ?? '',
+          location: v.location ?? '',
+          moduleId: v.moduleId ?? '',
+        });
+        if (!result.ok) {
+          alert(result.error);
+          return;
+        }
+        this.closeCombistatoModal();
+        this.selectCombistato(result.id);
+        this.combistatoProvisioningCredentials = result.credentials;
+        this.combistatoProvisioningOpen = true;
+      } finally {
+        this.addCombistatoSubmitting = false;
+      }
+      return;
+    }
+    if (this.combistatoModalMode === 'edit' && this.editingCombistatoId) {
+      this.addCombistatoSubmitting = true;
+      try {
+        const result = await this.combistatoStore.updateCombistatoMeta(this.editingCombistatoId, {
+          name: v.name ?? '',
+          location: v.location ?? '',
+          moduleId: v.moduleId ?? '',
+        });
+        if (!result.ok) {
+          alert(result.error ?? 'No se pudo guardar.');
+          return;
+        }
+      } finally {
+        this.addCombistatoSubmitting = false;
+      }
+    }
+    this.closeCombistatoModal();
+  }
+
+  async confirmDeleteCombistato(c: DashboardCombistato): Promise<void> {
+    if (!confirm(`¿Eliminar combistato «${c.name}»? Se borrarán también los parámetros en la nube.`)) return;
+    const r = await this.combistatoStore.removeCombistatoAsync(c.id);
+    if (!r.ok) {
+      alert(r.error ?? 'No se pudo eliminar.');
+      return;
+    }
+    if (this.selectedCombistatoId === c.id) {
+      this.selectedCombistatoId = null;
+    }
+  }
+
   openAddDeviceModal(): void {
+    this.combistatoProvisioningOpen = false;
+    this.combistatoProvisioningCredentials = null;
     this.provisioningOpen = false;
     this.provisioningCredentials = null;
     this.deviceModalMode = 'add';
@@ -2330,6 +2568,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   closeProvisioningModal(): void {
     this.provisioningOpen = false;
     this.provisioningCredentials = null;
+    this.combistatoProvisioningOpen = false;
+    this.combistatoProvisioningCredentials = null;
   }
 
   copyProvisioning(text: string): void {

@@ -1,0 +1,55 @@
+<article class="card card--combistato" *ngIf="combistatoId">
+  <h2 class="card__title card__title--sm">Parámetros de controlador de 2 sondas</h2>
+
+  <p class="combistato-status" *ngIf="loading">Cargando…</p>
+
+  <fieldset class="notify-panel-fieldset" *ngIf="model as m" [disabled]="!canEdit || loading || saving">
+    <ng-container *ngFor="let sec of sections">
+      <details class="combistato-details" [open]="sec.id === 'temp'">
+        <summary class="combistato-details__summary">{{ sec.title }}</summary>
+        <div class="notify-panel notify-panel__grid combistato-details__grid">
+          <label class="notify-panel__field" *ngFor="let f of sec.fields">
+            <span>{{ f.label }}</span>
+            <input
+              type="number"
+              [ngModel]="m[f.key]"
+              (ngModelChange)="onFieldChange(f.key, $event)"
+              [name]="'cb-' + sec.id + '-' + (f.key + '')"
+              [step]="f.step != null ? f.step : 1"
+            />
+          </label>
+        </div>
+      </details>
+    </ng-container>
+  </fieldset>
+
+  <p
+    class="sensor-labels-feedback"
+    *ngIf="feedback"
+    [class.sensor-labels-feedback--warn]="feedback.includes('No se pudo') || feedback.includes('No se pudo cargar')"
+  >
+    {{ feedback }}
+  </p>
+
+  <p class="combistato-chart-link" *ngIf="combistatoId">
+    <a
+      class="combistato-chart-link__a"
+      [routerLink]="['/chart-combistato']"
+      [queryParams]="{ combistatoId: combistatoId }"
+      >Ver gráfico histórico (sondas, compresor, forzador, deshielo, puerta)</a
+    >
+  </p>
+
+  <div class="combistato-actions">
+    <button type="button" class="btn btn--secondary" [disabled]="loading" (click)="reload()">Recargar</button>
+    <button type="button" class="btn btn--secondary" [disabled]="!canEdit || loading" (click)="resetDefaults()">
+      Valores por defecto
+    </button>
+    <button type="button" class="btn btn--secondary" [disabled]="!model" (click)="copyJson()">Copiar JSON</button>
+    <button type="button" class="btn btn--primary" [disabled]="!canEdit || !model || saving" (click)="save()">
+      {{ saving ? 'Guardando…' : 'Guardar en la nube' }}
+    </button>
+  </div>
+
+  <pre class="combistato-json" *ngIf="jsonExport">{{ jsonExport }}</pre>
+</article>

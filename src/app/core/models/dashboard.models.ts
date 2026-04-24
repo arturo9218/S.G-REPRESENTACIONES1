@@ -63,6 +63,24 @@ export interface DashboardDevice {
   powerOffsetW?: number;
 }
 
+/** Configuración de combistato en nube (tabla `combistatos`); independiente de los paneles de lectura. */
+export interface DashboardCombistato {
+  id: string;
+  name: string;
+  location: string;
+  /** Igual que en dispositivos: identificador para portal/configuración del equipo. */
+  moduleId?: string;
+  updatedAtLabel: string;
+  /** Último POST de telemetría aceptado (columna `last_seen_at`); vacío si aún no hubo envíos. */
+  lastSeenLabel: string;
+  /** Conexión reciente según `last_seen_at` y el mismo umbral que paneles (`deviceOfflineAfterMs`). */
+  online: boolean;
+  /** Dueño en Supabase (útil en vista admin). */
+  ownerUserId?: string;
+  /** Código de 6 dígitos (`api_key`) disponible solo en este navegador. */
+  deviceToken?: string;
+}
+
 /** Marca vertical en el análisis de gráfico (Supabase: device_chart_markers). */
 export interface DeviceChartMarker {
   id: string;

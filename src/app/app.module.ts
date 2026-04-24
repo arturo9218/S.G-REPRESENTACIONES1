@@ -12,6 +12,8 @@ import { ForgotPasswordComponent } from './forgot-password/forgot-password.compo
 import { ResetPasswordComponent } from './reset-password/reset-password.component';
 import { DashboardComponent } from './dashboard/dashboard.component';
 import { ChartAnalysisComponent } from './chart-analysis/chart-analysis.component';
+import { CombistatoSettingsComponent } from './combistato/combistato-settings.component';
+import { CombistatoChartComponent } from './combistato-chart/combistato-chart.component';
 import { environment } from '../environments/environment';
 
 export function rootErrorHandlerFactory(): ErrorHandler {
@@ -31,6 +33,8 @@ export function rootErrorHandlerFactory(): ErrorHandler {
     ResetPasswordComponent,
     DashboardComponent,
     ChartAnalysisComponent,
+    CombistatoSettingsComponent,
+    CombistatoChartComponent,
   ],
   imports: [
     BrowserModule,
