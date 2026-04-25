@@ -126,6 +126,19 @@
         >
           + Combistato
         </button>
+        <button
+          type="button"
+          class="btn btn--ghost"
+          *ngIf="
+            (shellRoute === 'dashboard' || shellRoute === 'devices' || shellRoute === 'settings') &&
+            environment.deviceCloudSync &&
+            deviceStore.isCloudSyncActive()
+          "
+          aria-label="Agregar controlador PR500"
+          (click)="openAddPr500Modal()"
+        >
+          + PR500
+        </button>
         <button type="button" class="btn btn--primary" aria-label="Agregar dispositivo" (click)="openAddDeviceModal()">
           + Dispositivo
         </button>
@@ -727,9 +740,6 @@
                   editan en <strong>Configuración</strong> (botón en cada tarjeta).
                 </p>
               </div>
-              <button type="button" class="btn btn--primary btn--sm" (click)="openAddCombistatoModal()">
-                + Combistato
-              </button>
             </div>
             <div class="device-grid device-grid--combistatos" *ngIf="combistatos.length">
               <article
@@ -807,7 +817,136 @@
               </article>
             </div>
             <p class="card__hint card__hint--tight" *ngIf="!combistatos.length">
-              No hay combistatos. Usá <strong>+ Combistato</strong> arriba o en esta sección.
+              No hay combistatos. Usá <strong>+ Combistato</strong> en la barra superior.
+            </p>
+          </div>
+
+          <div
+            id="section-pr500-cards"
+            class="device-section"
+            *ngIf="
+              (shellRoute === 'dashboard' || shellRoute === 'devices') &&
+              environment.deviceCloudSync &&
+              deviceStore.isCloudSyncActive()
+            "
+          >
+            <div class="device-section__head">
+              <div class="device-section__titles">
+                <h2 class="device-section__title">PR500</h2>
+                <p class="device-section__hint">
+                  Control de presión (baja / setpoints / etapas). Los parámetros <strong>F01–F21</strong> se editan en
+                  <strong>Configuración</strong> (botón en cada tarjeta). La telemetría llega por la misma función de ingesta
+                  que paneles y combistatos, con <code>pressure_bar</code> en el POST.
+                </p>
+              </div>
+            </div>
+            <div class="device-grid device-grid--combistatos" *ngIf="pr500s.length">
+              <article
+                class="device-card device-card--combistato"
+                *ngFor="let p of pr500s; trackBy: trackByPr500Id"
+                [class.device-card--selected]="p.id === selectedPr500Id"
+                (click)="selectPr500(p.id)"
+              >
+                <header class="device-card__head">
+                  <div class="device-card__head-text">
+                    <h3 class="device-card__name">{{ p.name }}</h3>
+                    <span class="device-card__role-pill device-card__role-pill--editor">PR500</span>
+                    <span class="device-card__id">ID: {{ p.id }}</span>
+                    <span class="device-card__module" *ngIf="p.moduleId">ID módulo: {{ p.moduleId }}</span>
+                  </div>
+                  <div class="device-card__head-actions">
+                    <span class="device-card__status" [class.device-card__status--off]="!p.online">
+                      <span class="device-card__dot"></span>
+                      {{ p.online ? 'Online' : 'Sin conexión' }}
+                    </span>
+                  </div>
+                </header>
+                <div class="device-card__head-line" aria-hidden="true"></div>
+                <div class="device-card__temps">
+                  <ng-container *ngIf="p.lastPressureBar != null; else pr500NoPressure">
+                    <div class="device-card__temps-inner device-card__temps-inner--single">
+                      <span class="device-card__sensor-label">Presión (línea)</span>
+                      <span class="device-card__sensor-value" [attr.aria-label]="p.lastPressureBar + ' bar'">
+                        <span class="device-card__sensor-value-num">{{ p.lastPressureBar | number : '1.2-2' }}</span>
+                        <span class="device-card__sensor-value-unit" aria-hidden="true">bar</span>
+                      </span>
+                      <span class="device-card__sensor-subline" *ngIf="pr500CompressorLine(p) as compLine">{{
+                        compLine
+                      }}</span>
+                      <div class="device-card__sensor-foot">
+                        <span class="device-card__sensor-time">Último envío: {{ p.lastSeenLabel }}</span>
+                        <a
+                          class="device-card__chart-link"
+                          [routerLink]="['/chart-pr500']"
+                          [queryParams]="{ pr500Id: p.id }"
+                          (click)="$event.stopPropagation()"
+                          title="Gráfico histórico"
+                          aria-label="Gráfico de presión PR500"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16l4-4 3 3 5-6" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                  </ng-container>
+                  <ng-template #pr500NoPressure>
+                    <div class="device-card__temps-inner device-card__temps-inner--empty">
+                      <span class="device-card__sensor-value device-card__sensor-value--muted">Sin lectura de presión</span>
+                      <span class="device-card__sensor-label device-card__sensor-label--muted"
+                        >Último contacto: {{ p.lastSeenLabel }}</span
+                      >
+                    </div>
+                  </ng-template>
+                </div>
+                <footer class="device-card__foot">
+                  <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && p.ownerUserId">
+                    Cuenta {{ formatOwnerUserIdShort(p.ownerUserId) }}
+                  </span>
+                  <span class="device-card__meta">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    {{ p.location }}
+                  </span>
+                </footer>
+                <div class="device-card__actions">
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Parámetros F01–F21 de ' + p.name"
+                    (click)="goPr500Settings(p, $event)"
+                  >
+                    F01–F21
+                  </button>
+                  <a
+                    class="device-card__btn device-card__btn--link"
+                    [routerLink]="['/chart-pr500']"
+                    [queryParams]="{ pr500Id: p.id }"
+                    (click)="$event.stopPropagation()"
+                    title="Gráfico histórico de presión"
+                    >Gráfico</a
+                  >
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Editar nombre de ' + p.name"
+                    (click)="openEditPr500Modal(p); $event.stopPropagation()"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    class="device-card__btn device-card__btn--danger"
+                    [attr.aria-label]="'Eliminar PR500 ' + p.name"
+                    (click)="confirmDeletePr500(p); $event.stopPropagation()"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </article>
+            </div>
+            <p class="card__hint card__hint--tight" *ngIf="!pr500s.length">
+              No hay controladores PR500. Usá <strong>+ PR500</strong> en la barra superior.
             </p>
           </div>
 
@@ -1096,12 +1235,13 @@
             <h2 class="card__title card__title--sm">Elegí qué configurar</h2>
             <p class="card__hint card__hint--tight">
               Tocá un <strong>panel de medición</strong> para umbrales, nombres de sensores, corrección, compartir, etc.
-              Tocá un <strong>combistato</strong> para los parámetros <strong>F01–F55</strong> en la nube. No hace falta
-              que esté online para guardar.
+              Tocá un <strong>combistato</strong> para los parámetros <strong>F01–F55</strong> en la nube, o un
+              <strong>PR500</strong> para <strong>F01–F21</strong> (presión / etapas). No hace falta que esté online para
+              guardar.
             </p>
-            <p class="card__empty" *ngIf="!devices.length && !combistatos.length">
-              No hay paneles ni combistatos. Usá <strong>+ Dispositivo</strong> o <strong>+ Combistato</strong> en la
-              barra superior.
+            <p class="card__empty" *ngIf="!devices.length && !combistatos.length && !pr500s.length">
+              No hay paneles, combistatos ni PR500. Usá <strong>+ Dispositivo</strong>, <strong>+ Combistato</strong> o
+              <strong>+ PR500</strong> en la barra superior.
             </p>
             <ng-container *ngIf="devices.length">
               <h3 class="settings-hub__group-title">Paneles de medición</h3>
@@ -1144,6 +1284,28 @@
                   >
                   <span class="settings-device-tile__meta">{{ c.location }}</span>
                   <span class="settings-device-tile__meta" *ngIf="c.moduleId">Módulo: {{ c.moduleId }}</span>
+                </button>
+              </div>
+            </ng-container>
+            <ng-container *ngIf="pr500s.length && environment.deviceCloudSync && deviceStore.isCloudSyncActive()">
+              <h3 class="settings-hub__group-title">PR500</h3>
+              <div class="settings-device-grid">
+                <button
+                  type="button"
+                  class="settings-device-tile settings-device-tile--combistato"
+                  *ngFor="let p of pr500s; trackBy: trackByPr500Id"
+                  [class.settings-device-tile--active]="settingsConfigKind === 'pr500' && p.id === selectedPr500Id"
+                  (click)="openSettingsPr500Params(p.id)"
+                >
+                  <span class="settings-device-tile__kind">PR500</span>
+                  <span class="settings-device-tile__name">{{ p.name }}</span>
+                  <span
+                    class="settings-device-tile__pill"
+                    [class.settings-device-tile__pill--off]="!p.online"
+                    >{{ p.online ? 'Online' : 'Sin conexión' }}</span
+                  >
+                  <span class="settings-device-tile__meta">{{ p.location }}</span>
+                  <span class="settings-device-tile__meta" *ngIf="p.moduleId">Módulo: {{ p.moduleId }}</span>
                 </button>
               </div>
             </ng-container>
@@ -2730,6 +2892,28 @@
               ></app-combistato-settings>
             </article>
           </ng-container>
+
+          <ng-container *ngIf="settingsConfigKind === 'pr500'">
+            <article
+              id="section-settings-pr500"
+              class="card"
+              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
+            >
+              <div class="card__title-row">
+                <h2 class="card__title card__title--sm">PR500 — parámetros F01–F21</h2>
+                <button type="button" class="btn btn--ghost btn--sm" (click)="openAddPr500Modal()">+ PR500</button>
+              </div>
+              <p class="card__hint card__hint--tight">
+                Los valores se guardan en la nube por controlador. Para cambiar de equipo, usá
+                <strong>Volver a la lista</strong>.
+              </p>
+              <app-pr500-settings
+                *ngIf="selectedPr500Id"
+                [pr500Id]="selectedPr500Id"
+                [canEdit]="true"
+              ></app-pr500-settings>
+            </article>
+          </ng-container>
       </ng-template>
     </div>
 
@@ -2738,9 +2922,10 @@
         <div class="empty__card">
           <h1 class="empty__title">Sin contenido aún</h1>
           <p class="empty__text">
-            Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, o <strong>combistatos</strong> para
-            guardar la configuración F01–F55 en la nube. Son independientes: podés tener todos los que necesites de cada
-            uno. Si ya cargaste datos en otro momento, revisá la conexión o cerrá sesión y volvé a entrar.
+            Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, <strong>combistatos</strong> para la
+            configuración F01–F55 en la nube, o <strong>PR500</strong> para presión y F01–F21. Son independientes: podés
+            tener todos los que necesites de cada tipo. Si ya cargaste datos en otro momento, revisá la conexión o
+            cerrá sesión y volvé a entrar.
           </p>
           <div class="empty__actions">
             <button type="button" class="btn btn--primary" (click)="openAddDeviceModal()">+ Dispositivo</button>
@@ -2751,6 +2936,14 @@
               (click)="openAddCombistatoModal()"
             >
               + Combistato
+            </button>
+            <button
+              type="button"
+              class="btn btn--ghost"
+              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
+              (click)="openAddPr500Modal()"
+            >
+              + PR500
             </button>
             <button *ngIf="isDev" type="button" class="btn btn--ghost" (click)="loadDemoDevices()">Demo</button>
           </div>
@@ -2963,6 +3156,101 @@
         <span class="provision-row__label">api_key</span>
         <code class="provision-row__val">{{ ccred.deviceToken }}</code>
         <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(ccred.deviceToken)">Copiar</button>
+      </div>
+    </div>
+    <p class="modal__hint">Guardá el código de 6 dígitos: no se puede recuperar desde otro navegador.</p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--primary" (click)="closeProvisioningModal()">Listo</button>
+    </div>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="pr500ModalMode"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="pr500-modal-title"
+  (click)="closePr500Modal()"
+>
+  <div class="modal" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="pr500-modal-title" class="modal__title">PR500</h2>
+      <button type="button" class="modal__close" (click)="closePr500Modal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro" *ngIf="pr500ModalMode === 'add'">
+      Nuevo controlador PR500. Conectá el firmware con la misma URL de ingesta que los paneles:
+      <code>moduleId</code>, <code>deviceToken</code> y en cada envío <code>pressure_bar</code> (y estados
+      <code>r1_on</code>…<code>r4_alarm</code>).
+    </p>
+    <p class="modal__intro" *ngIf="pr500ModalMode === 'edit'">Editar nombre, ubicación o ID módulo del PR500.</p>
+    <form class="modal__form" [formGroup]="pr500Form" (ngSubmit)="submitPr500Form()">
+      <label class="modal__field">
+        <span class="modal__label">Nombre <span class="modal__req">*</span></span>
+        <input type="text" class="modal__input" formControlName="name" autocomplete="off" />
+        <span class="modal__err" *ngIf="pr500Form.controls.name.touched && pr500Form.controls.name.hasError('required')"
+          >Nombre requerido.</span
+        >
+        <span class="modal__err" *ngIf="pr500Form.controls.name.touched && pr500Form.controls.name.hasError('minlength')"
+          >Mínimo 2 caracteres.</span
+        >
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">Ubicación</span>
+        <input type="text" class="modal__input" formControlName="location" autocomplete="off" />
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">ID módulo (PR500)</span>
+        <input type="text" class="modal__input" formControlName="moduleId" autocomplete="off" />
+        <span class="modal__hint">Opcional al crear. Vacío = se genera automático para el firmware.</span>
+      </label>
+      <div class="modal__field" *ngIf="pr500ModalMode === 'edit' && editingPr500?.deviceToken">
+        <span class="modal__label">Código API (6 dígitos)</span>
+        <input type="text" class="modal__input" readonly [value]="editingPr500?.deviceToken" />
+        <span class="modal__hint">Token conocido solo en este navegador; si no lo ves, regenerá desde soporte o recreá el equipo.</span>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" (click)="closePr500Modal()">Cancelar</button>
+        <button type="submit" class="btn btn--primary" [disabled]="addPr500Submitting">
+          {{ addPr500Submitting ? 'Guardando…' : 'Guardar' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="pr500ProvisioningOpen && pr500ProvisioningCredentials as pr5cred"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="pr500-provision-title"
+  (click)="closeProvisioningModal()"
+>
+  <div class="modal modal--wide" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="pr500-provision-title" class="modal__title">Configurar el PR500</h2>
+      <button type="button" class="modal__close" (click)="closeProvisioningModal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro">
+      Copiá estos valores en el firmware (POST JSON a la función de ingesta). No hace falta enviar temperatura: basta con
+      <code>pressure_bar</code> numérico y los booleanos de estado.
+    </p>
+    <div class="provision-rows">
+      <div class="provision-row">
+        <span class="provision-row__label">api_url</span>
+        <code class="provision-row__val">{{ pr5cred.ingestUrl }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(pr5cred.ingestUrl)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">module_id</span>
+        <code class="provision-row__val">{{ pr5cred.moduleId }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(pr5cred.moduleId)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">api_key</span>
+        <code class="provision-row__val">{{ pr5cred.deviceToken }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(pr5cred.deviceToken)">Copiar</button>
       </div>
     </div>
     <p class="modal__hint">Guardá el código de 6 dígitos: no se puede recuperar desde otro navegador.</p>

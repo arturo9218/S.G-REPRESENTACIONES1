@@ -5,6 +5,7 @@ import { combineLatest, fromEvent, Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { AuthService } from '../core/auth.service';
 import { CombistatoStoreService } from '../core/combistato-store.service';
+import { Pr500StoreService } from '../core/pr500-store.service';
 import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
 import {
   ActivityItem,
@@ -14,6 +15,7 @@ import {
   DashboardAlertKind,
   DashboardCombistato,
   DashboardDevice,
+  DashboardPr500,
   DeviceAlarmEvent,
   HistoryListItem,
   TemperatureReading,
@@ -122,6 +124,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private subRead: Subscription | null = null;
   private subAdmin: Subscription | null = null;
   private subCombistatos: Subscription | null = null;
+  private subPr500: Subscription | null = null;
   /** Vista admin: todos los equipos; permisos reales vienen de Supabase (admin_emails + is_app_admin). */
   isAdminView = false;
   /** Lista de emails admin (solo visible si isAdminView; tabla public.admin_emails). */
@@ -149,11 +152,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
   combistatos: DashboardCombistato[] = [];
   /** Combistato elegido para editar F01–F55 en Configuración. */
   selectedCombistatoId: string | null = null;
+  pr500ModalMode: 'add' | 'edit' | null = null;
+  editingPr500Id: string | null = null;
+  addPr500Submitting = false;
+  pr500s: DashboardPr500[] = [];
+  selectedPr500Id: string | null = null;
   /**
    * En `/configuracion`: primero se elige equipo en la tarjeta unificada;
    * recién después se muestran parámetros de panel o de combistato.
    */
-  settingsConfigKind: 'none' | 'device' | 'combistato' = 'none';
+  settingsConfigKind: 'none' | 'device' | 'combistato' | 'pr500' = 'none';
 
   /** Vista compacta vs ampliada del gráfico de temperaturas */
   chartExpanded = false;
@@ -344,6 +352,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   combistatoProvisioningOpen = false;
   combistatoProvisioningCredentials: { moduleId: string; deviceToken: string; ingestUrl: string } | null =
     null;
+  pr500ProvisioningOpen = false;
+  pr500ProvisioningCredentials: { moduleId: string; deviceToken: string; ingestUrl: string } | null = null;
 
   readonly deviceForm = this.fb.group({
     name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(80)]],
@@ -359,6 +369,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     moduleId: ['', [Validators.maxLength(64)]],
   });
 
+  readonly pr500Form = this.fb.group({
+    name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(80)]],
+    location: ['', [Validators.maxLength(120)]],
+    moduleId: ['', [Validators.maxLength(64)]],
+  });
+
   constructor(
     private readonly fb: FormBuilder,
     private readonly auth: AuthService,
@@ -366,6 +382,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     private readonly route: ActivatedRoute,
     readonly deviceStore: DeviceStoreService,
     readonly combistatoStore: CombistatoStoreService,
+    readonly pr500Store: Pr500StoreService,
     private readonly webPush: WebPushService,
     private readonly equipmentSheet: EquipmentSheetService
   ) {
@@ -398,14 +415,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.routeQuerySub = combineLatest([
       this.deviceStore.devices$,
       this.combistatoStore.combistatos$,
+      this.pr500Store.pr500s$,
       this.route.queryParamMap,
-    ]).subscribe(([list, combList, params]) => {
+    ]).subscribe(([list, combList, prList, params]) => {
       if (this.skipQueryParamDeviceSync) {
         return;
       }
       const path = this.router.url.split('?')[0];
       const did = params.get('deviceId');
       const cid = params.get('combistatoId');
+      const pid = params.get('pr500Id');
 
       if (path === '/configuracion') {
         if (cid && combList.some((c) => c.id === cid)) {
@@ -417,6 +436,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
           this.settingsConfigKind = 'device';
           if (this.selectedDeviceId !== did) {
             this.selectDevice(did, false);
+          }
+        } else if (pid && prList.some((p) => p.id === pid)) {
+          this.settingsConfigKind = 'pr500';
+          if (this.selectedPr500Id !== pid) {
+            this.selectPr500(pid);
           }
         } else {
           this.settingsConfigKind = 'none';
@@ -460,6 +484,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.selectedCombistatoId = null;
       }
     });
+    this.subPr500 = this.pr500Store.pr500s$.subscribe((list) => {
+      this.pr500s = list;
+      if (this.selectedPr500Id && !list.some((p) => p.id === this.selectedPr500Id)) {
+        this.selectedPr500Id = null;
+      }
+    });
   }
 
   ngOnDestroy(): void {
@@ -484,6 +514,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subRead?.unsubscribe();
     this.subAdmin?.unsubscribe();
     this.subCombistatos?.unsubscribe();
+    this.subPr500?.unsubscribe();
     this.routerSub?.unsubscribe();
     this.routeQuerySub?.unsubscribe();
     this.visibilitySub?.unsubscribe();
@@ -599,7 +630,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   get hasShellContent(): boolean {
     return (
       this.hasDevices ||
-      (this.environment.deviceCloudSync === true && this.deviceStore.isCloudSyncActive() && this.combistatos.length > 0)
+      (this.environment.deviceCloudSync === true &&
+        this.deviceStore.isCloudSyncActive() &&
+        (this.combistatos.length > 0 || this.pr500s.length > 0))
     );
   }
 
@@ -1856,7 +1889,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (section === 'settings') {
       this.settingsConfigKind = 'none';
       void this.router.navigate([path], {
-        queryParams: { deviceId: null, combistatoId: null },
+        queryParams: { deviceId: null, combistatoId: null, pr500Id: null },
         replaceUrl: true,
       });
       if (this.isAdminView) void this.loadAdminEmails();
@@ -1903,8 +1936,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         const queryParams =
           path === '/configuracion'
             ? deviceId
-              ? { deviceId, combistatoId: null }
-              : { deviceId: null, combistatoId: null }
+              ? { deviceId, combistatoId: null, pr500Id: null }
+              : { deviceId: null, combistatoId: null, pr500Id: null }
             : deviceId
               ? { deviceId }
               : { deviceId: null };
@@ -2308,6 +2341,33 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   selectCombistato(id: string | null): void {
     this.selectedCombistatoId = id;
+    if (id != null && id !== '') this.selectPr500(null);
+  }
+
+  selectPr500(id: string | null): void {
+    this.selectedPr500Id = id;
+    if (id != null && id !== '') this.selectCombistato(null);
+  }
+
+  trackByPr500Id(_index: number, p: DashboardPr500): string {
+    return p.id;
+  }
+
+  /** Subtítulo en tarjeta PR500: compresores y alarma de la última lectura. */
+  pr500CompressorLine(p: DashboardPr500): string {
+    if (p.lastPressureBar == null || !Number.isFinite(p.lastPressureBar)) return '';
+    if (p.lastComp1On === undefined) return '';
+    return [
+      `C1 ${p.lastComp1On ? 'ON' : 'OFF'}`,
+      `C2 ${p.lastComp2On ? 'ON' : 'OFF'}`,
+      `C3 ${p.lastComp3On ? 'ON' : 'OFF'}`,
+      `Alarma ${p.lastAlarmOn ? 'sí' : 'no'}`,
+    ].join(' · ');
+  }
+
+  goPr500Settings(p: DashboardPr500, ev?: Event): void {
+    ev?.stopPropagation();
+    this.openSettingsPr500Params(p.id);
   }
 
   /** Desde Inicio / Dispositivos: abre Configuración con ese combistato para editar F01–F55. */
@@ -2320,10 +2380,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.skipQueryParamDeviceSync = true;
     this.settingsConfigKind = 'device';
     this.selectCombistato(null);
+    this.selectPr500(null);
     this.selectDevice(deviceId, false);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId, combistatoId: null },
+        queryParams: { deviceId, combistatoId: null, pr500Id: null },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2336,9 +2397,26 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.skipQueryParamDeviceSync = true;
     this.settingsConfigKind = 'combistato';
     this.selectCombistato(combistatoId);
+    this.selectPr500(null);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId: null, combistatoId: combistatoId },
+        queryParams: { deviceId: null, combistatoId: combistatoId, pr500Id: null },
+        replaceUrl: true,
+      })
+      .finally(() => {
+        this.skipQueryParamDeviceSync = false;
+      });
+    this.scrollSettingsParamsIntoView();
+  }
+
+  openSettingsPr500Params(pr500Id: string): void {
+    this.skipQueryParamDeviceSync = true;
+    this.settingsConfigKind = 'pr500';
+    this.selectCombistato(null);
+    this.selectPr500(pr500Id);
+    void this.router
+      .navigate(['/configuracion'], {
+        queryParams: { deviceId: null, combistatoId: null, pr500Id },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2351,9 +2429,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.skipQueryParamDeviceSync = true;
     this.settingsConfigKind = 'none';
     this.selectCombistato(null);
+    this.selectPr500(null);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId: null, combistatoId: null },
+        queryParams: { deviceId: null, combistatoId: null, pr500Id: null },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2371,6 +2450,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   openAddCombistatoModal(): void {
+    this.pr500ProvisioningOpen = false;
+    this.pr500ProvisioningCredentials = null;
     this.combistatoProvisioningOpen = false;
     this.combistatoProvisioningCredentials = null;
     this.combistatoModalMode = 'add';
@@ -2452,9 +2533,102 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
+  openAddPr500Modal(): void {
+    this.combistatoProvisioningOpen = false;
+    this.combistatoProvisioningCredentials = null;
+    this.provisioningOpen = false;
+    this.provisioningCredentials = null;
+    this.pr500ProvisioningOpen = false;
+    this.pr500ProvisioningCredentials = null;
+    this.pr500ModalMode = 'add';
+    this.editingPr500Id = null;
+    this.pr500Form.reset({ name: '', location: '', moduleId: '' });
+  }
+
+  openEditPr500Modal(p: DashboardPr500): void {
+    this.pr500ModalMode = 'edit';
+    this.editingPr500Id = p.id;
+    this.pr500Form.patchValue({
+      name: p.name,
+      location: p.location === 'Sin ubicación' ? '' : p.location,
+      moduleId: p.moduleId ?? '',
+    });
+  }
+
+  closePr500Modal(): void {
+    this.pr500ModalMode = null;
+    this.editingPr500Id = null;
+    this.addPr500Submitting = false;
+  }
+
+  async submitPr500Form(): Promise<void> {
+    if (this.pr500Form.invalid) {
+      this.pr500Form.markAllAsTouched();
+      return;
+    }
+    const v = this.pr500Form.getRawValue();
+    if (this.pr500ModalMode === 'add') {
+      this.addPr500Submitting = true;
+      try {
+        const result = await this.pr500Store.addPr500FromFormAsync({
+          name: v.name ?? '',
+          location: v.location ?? '',
+          moduleId: v.moduleId ?? '',
+        });
+        if (!result.ok) {
+          alert(result.error);
+          return;
+        }
+        this.closePr500Modal();
+        this.selectPr500(result.id);
+        this.pr500ProvisioningCredentials = result.credentials;
+        this.pr500ProvisioningOpen = true;
+      } finally {
+        this.addPr500Submitting = false;
+      }
+      return;
+    }
+    if (this.pr500ModalMode === 'edit' && this.editingPr500Id) {
+      this.addPr500Submitting = true;
+      try {
+        const result = await this.pr500Store.updatePr500Meta(this.editingPr500Id, {
+          name: v.name ?? '',
+          location: v.location ?? '',
+          moduleId: v.moduleId ?? '',
+        });
+        if (!result.ok) {
+          alert(result.error ?? 'No se pudo guardar.');
+          return;
+        }
+      } finally {
+        this.addPr500Submitting = false;
+      }
+    }
+    this.closePr500Modal();
+  }
+
+  async confirmDeletePr500(p: DashboardPr500): Promise<void> {
+    if (!confirm(`¿Eliminar PR500 «${p.name}»? Se borrarán parámetros e historial en la nube.`)) return;
+    const r = await this.pr500Store.removePr500Async(p.id);
+    if (!r.ok) {
+      alert(r.error ?? 'No se pudo eliminar.');
+      return;
+    }
+    if (this.selectedPr500Id === p.id) {
+      this.selectedPr500Id = null;
+    }
+  }
+
+  get editingPr500(): DashboardPr500 | null {
+    if (!this.editingPr500Id) return null;
+    return this.pr500s.find((p) => p.id === this.editingPr500Id) ?? null;
+  }
+
   openAddDeviceModal(): void {
     this.combistatoProvisioningOpen = false;
     this.combistatoProvisioningCredentials = null;
+    this.pr500ProvisioningOpen = false;
+    this.pr500ProvisioningCredentials = null;
     this.provisioningOpen = false;
     this.provisioningCredentials = null;
     this.deviceModalMode = 'add';
@@ -2570,6 +2744,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.provisioningCredentials = null;
     this.combistatoProvisioningOpen = false;
     this.combistatoProvisioningCredentials = null;
+    this.pr500ProvisioningOpen = false;
+    this.pr500ProvisioningCredentials = null;
   }
 
   copyProvisioning(text: string): void {

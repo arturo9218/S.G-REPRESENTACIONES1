@@ -9,6 +9,7 @@ import { ResetPasswordComponent } from './reset-password/reset-password.componen
 import { DashboardComponent } from './dashboard/dashboard.component';
 import { ChartAnalysisComponent } from './chart-analysis/chart-analysis.component';
 import { CombistatoChartComponent } from './combistato-chart/combistato-chart.component';
+import { Pr500ChartComponent } from './pr500-chart/pr500-chart.component';
 
 const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'login' },
@@ -27,6 +28,7 @@ const routes: Routes = [
   { path: 'configuracion', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'chart', component: ChartAnalysisComponent },
   { path: 'chart-combistato', component: CombistatoChartComponent, canActivate: [authGuard] },
+  { path: 'chart-pr500', component: Pr500ChartComponent, canActivate: [authGuard] },
   { path: '**', redirectTo: 'login' },
 ];
 

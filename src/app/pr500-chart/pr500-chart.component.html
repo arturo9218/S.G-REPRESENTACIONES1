@@ -1,0 +1,79 @@
+<div class="pr5-page page--dark">
+  <header class="pr5-head">
+    <div>
+      <h1 class="pr5-title">PR500 · {{ pr500Name }}</h1>
+      <p class="pr5-sub">
+        Presión (bar) y estados de compresores / alarma / entradas digitales. El firmware debe enviar
+        <code>pressure_bar</code>, <code>r1_on</code>…<code>r4_alarm</code> y opcionalmente <code>di1_ok</code>…<code>di4_ok</code> en cada POST a
+        <code>ingest-reading</code>.
+      </p>
+    </div>
+    <div class="pr5-head-actions">
+      <button type="button" class="btn btn--ghost" (click)="backToApp()">Volver al panel</button>
+      <button type="button" class="btn btn--primary" [disabled]="loading || !pr500Id" (click)="loadAll()">
+        {{ loading ? 'Cargando…' : 'Actualizar' }}
+      </button>
+    </div>
+  </header>
+
+  <p class="pr5-err" *ngIf="error">{{ error }}</p>
+
+  <div class="pr5-layout" *ngIf="pr500Id">
+    <aside class="pr5-side card">
+      <h2 class="pr5-side__title">Rango</h2>
+      <label class="pr5-field">
+        <span>Desde</span>
+        <input type="datetime-local" [(ngModel)]="filterFrom" name="pr5f" />
+      </label>
+      <label class="pr5-field">
+        <span>Hasta</span>
+        <input type="datetime-local" [(ngModel)]="filterTo" name="pr5t" />
+      </label>
+      <button type="button" class="btn btn--primary btn--block" [disabled]="loading" (click)="applyFilters()">
+        Aplicar rango
+      </button>
+      <p class="pr5-hint">Escala Y: {{ pMin.toFixed(2) }} … {{ pMax.toFixed(2) }} bar</p>
+    </aside>
+
+    <section class="pr5-main card">
+      <h2 class="pr5-main__title">Presión</h2>
+      <p class="pr5-summary">{{ lastRowSummary() }}</p>
+      <div class="pr5-svg-wrap" *ngIf="displayPoints.length">
+        <svg class="pr5-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="pr5g" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="rgba(59,130,246,0.35)" />
+              <stop offset="100%" stop-color="rgba(59,130,246,0)" />
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="100" height="100" fill="#0b1220" />
+          <text
+            *ngFor="let lb of timeLabels"
+            [attr.x]="lb.x"
+            y="96"
+            fill="#94a3b8"
+            font-size="3"
+            text-anchor="middle"
+          >
+            {{ lb.text }}
+          </text>
+          <path
+            *ngIf="pressureAreaPath"
+            [attr.d]="pressureAreaPath"
+            fill="url(#pr5g)"
+            stroke="none"
+          />
+          <path
+            *ngIf="pressurePath"
+            [attr.d]="pressurePath"
+            fill="none"
+            stroke="#3b82f6"
+            stroke-width="0.9"
+            vector-effect="non-scaling-stroke"
+          />
+        </svg>
+      </div>
+      <p class="pr5-empty" *ngIf="!displayPoints.length && !loading">No hay lecturas en este rango.</p>
+    </section>
+  </div>
+</div>

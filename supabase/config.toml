@@ -373,6 +373,10 @@ deno_version = 2
 [functions.ai-chart-insight]
 verify_jwt = false
 
+# Misma credencial que ingest-reading (module_id + token en el cuerpo); el ESP32 tira de params desde la nube.
+[functions.fetch-pr500-params]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

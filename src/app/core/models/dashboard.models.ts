@@ -81,6 +81,26 @@ export interface DashboardCombistato {
   deviceToken?: string;
 }
 
+/** Controlador de presión PR500 (tabla `pr500_controllers`); misma idea de conexión que combistatos. */
+export interface DashboardPr500 {
+  id: string;
+  name: string;
+  location: string;
+  moduleId?: string;
+  updatedAtLabel: string;
+  lastSeenLabel: string;
+  online: boolean;
+  ownerUserId?: string;
+  deviceToken?: string;
+  /** Última fila de `pr500_readings` (bar); null si aún no hay telemetría. */
+  lastPressureBar?: number | null;
+  /** Estados de la misma última lectura (solo definidos si hubo lectura). */
+  lastComp1On?: boolean;
+  lastComp2On?: boolean;
+  lastComp3On?: boolean;
+  lastAlarmOn?: boolean;
+}
+
 /** Marca vertical en el análisis de gráfico (Supabase: device_chart_markers). */
 export interface DeviceChartMarker {
   id: string;

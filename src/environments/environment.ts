@@ -26,9 +26,10 @@ export const environment = {
   /** Clave pública VAPID (build: variable VAPID_PUBLIC_KEY o valor en vapid.inject.ts). */
   vapidPublicKey: VAPID_INJECT,
   /**
-   * Registrar Service Worker (requerido para Web Push). Debe ser true en dev si el build incluye ngsw (angular.json).
+   * En local (`ng serve`) dejar en false: el Service Worker suele dejar la pestaña colgada o sirviendo caché vieja.
+   * En producción va true (ver environment.prod.ts).
    */
-  serviceWorkerEnabled: true,
+  serviceWorkerEnabled: false,
 
   /**
    * Sentry (opcional): pegá el DSN del proyecto en sentry.io.

@@ -1,0 +1,130 @@
+<article class="card card--pr500" *ngIf="pr500Id">
+  <h2 class="card__title card__title--sm">PR500 · control por presión (F01–F21)</h2>
+
+  <div class="pr500-ble" *ngIf="bleSupported">
+    <h3 class="pr500-ble__title">Bluetooth (cerca del equipo)</h3>
+    <p class="card__hint card__hint--tight pr500-ble__hint">
+      Misma pantalla de parámetros: podés leer o guardar en el ESP32 por BLE y, si hay sesión en la nube, también en
+      Supabase. Con WiFi, el firmware puede traer solo los cambios de la nube (Edge
+      <code>fetch-pr500-params</code>, intervalo <code>params_pull_ms</code> en <code>config.json</code>). Usá
+      <strong>Chrome o Edge</strong> (Android o PC); iOS/Safari suele no permitir Web Bluetooth.
+    </p>
+    <div class="pr500-ble__actions">
+      <button
+        type="button"
+        class="btn btn--secondary"
+        [disabled]="bleBusy || !pr500Id"
+        (click)="connectBle()"
+        *ngIf="!pr500Ble.connected"
+      >
+        Conectar Bluetooth
+      </button>
+      <button type="button" class="btn btn--secondary" [disabled]="bleBusy" (click)="disconnectBle()" *ngIf="pr500Ble.connected">
+        Desconectar BLE
+      </button>
+      <button type="button" class="btn btn--secondary" [disabled]="bleBusy || !pr500Ble.connected" (click)="pullFromBle()">
+        Traer del equipo
+      </button>
+      <button type="button" class="btn btn--secondary" [disabled]="bleBusy || !pr500Ble.connected" (click)="pullLiveBle()">
+        Lectura en vivo
+      </button>
+    </div>
+    <p class="pr500-ble__status" *ngIf="pr500Ble.connected">
+      Conectado: <strong>{{ pr500Ble.deviceName }}</strong>
+    </p>
+    <div class="pr500-ble-config" *ngIf="pr500Ble.connected">
+      <h4 class="pr500-ble-config__title">Provisionamiento por BLE (WiFi + token/API)</h4>
+      <div class="notify-panel notify-panel__grid">
+        <label class="notify-panel__field">
+          <span>SSID WiFi</span>
+          <input type="text" [ngModel]="bleConfig.wifi_ssid" (ngModelChange)="onBleConfigChange('wifi_ssid', $event)" name="pr5-ble-ssid" />
+        </label>
+        <label class="notify-panel__field">
+          <span>Clave WiFi</span>
+          <input
+            type="password"
+            [ngModel]="bleConfig.wifi_password"
+            (ngModelChange)="onBleConfigChange('wifi_password', $event)"
+            name="pr5-ble-pass"
+          />
+        </label>
+        <label class="notify-panel__field">
+          <span>module_id</span>
+          <input type="text" [ngModel]="bleConfig.module_id" (ngModelChange)="onBleConfigChange('module_id', $event)" name="pr5-ble-module" />
+        </label>
+        <label class="notify-panel__field">
+          <span>api_key (token)</span>
+          <input type="text" [ngModel]="bleConfig.api_key" (ngModelChange)="onBleConfigChange('api_key', $event)" name="pr5-ble-key" />
+        </label>
+        <label class="notify-panel__field">
+          <span>api_url ingest-reading</span>
+          <input type="text" [ngModel]="bleConfig.api_url" (ngModelChange)="onBleConfigChange('api_url', $event)" name="pr5-ble-url" />
+        </label>
+        <label class="notify-panel__field">
+          <span>supabase_anon_key (opcional)</span>
+          <input type="text" [ngModel]="bleConfig.supabase_anon_key" (ngModelChange)="onBleConfigChange('supabase_anon_key', $event)" name="pr5-ble-anon" />
+        </label>
+      </div>
+      <div class="pr500-ble__actions pr500-ble-config__actions">
+        <button type="button" class="btn btn--secondary" [disabled]="bleBusy" (click)="pullConfigFromBle()">
+          Traer config equipo
+        </button>
+        <button type="button" class="btn btn--secondary" [disabled]="bleBusy" (click)="saveConfigToBle()">
+          Aplicar WiFi+token al equipo
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <p class="pr500-status" *ngIf="loading">Cargando…</p>
+
+  <fieldset class="notify-panel-fieldset" *ngIf="model as m" [disabled]="!canEdit || loading || saving">
+    <ng-container *ngFor="let sec of sections">
+      <details class="pr500-details" [open]="sec.id === 'pressure'">
+        <summary class="pr500-details__summary">{{ sec.title }}</summary>
+        <div class="notify-panel notify-panel__grid pr500-details__grid">
+          <label class="notify-panel__field" *ngFor="let f of sec.fields">
+            <span>{{ f.label }}</span>
+            <input
+              type="number"
+              [ngModel]="m[f.key]"
+              (ngModelChange)="onFieldChange(f.key, $event)"
+              [name]="'pr5-' + sec.id + '-' + (f.key + '')"
+              [step]="f.step != null ? f.step : 1"
+            />
+          </label>
+        </div>
+      </details>
+    </ng-container>
+  </fieldset>
+
+  <p
+    class="sensor-labels-feedback"
+    *ngIf="feedback"
+    [class.sensor-labels-feedback--warn]="feedback.includes('No se pudo') || feedback.includes('No se pudo cargar')"
+  >
+    {{ feedback }}
+  </p>
+
+  <p class="pr500-chart-link" *ngIf="pr500Id">
+    <a
+      class="pr500-chart-link__a"
+      [routerLink]="['/chart-pr500']"
+      [queryParams]="{ pr500Id: pr500Id }"
+      >Ver gráfico histórico (presión y estados)</a
+    >
+  </p>
+
+  <div class="pr500-actions">
+    <button type="button" class="btn btn--secondary" [disabled]="loading" (click)="reload()">Recargar</button>
+    <button type="button" class="btn btn--secondary" [disabled]="!canEdit || loading" (click)="resetDefaults()">
+      Valores por defecto
+    </button>
+    <button type="button" class="btn btn--secondary" [disabled]="!model" (click)="copyJson()">Copiar JSON</button>
+    <button type="button" class="btn btn--primary" [disabled]="!canEdit || !model || saving" (click)="save()">
+      {{ saving ? 'Guardando…' : pr500Ble.connected && cloudSaveEnabled ? 'Guardar (BLE + nube)' : pr500Ble.connected ? 'Guardar en equipo (BLE)' : 'Guardar en la nube' }}
+    </button>
+  </div>
+
+  <pre class="pr500-json" *ngIf="jsonExport">{{ jsonExport }}</pre>
+</article>

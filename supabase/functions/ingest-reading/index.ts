@@ -16,7 +16,8 @@ interface IngestPayload {
   moduleId: string;
   deviceToken: string;
   sentAt?: string;
-  temp1_c: number;
+  /** Paneles de temperatura y combistato (obligatorio salvo rama PR500 con `pressure_bar`). */
+  temp1_c?: number;
   temp2_c?: number | null;
   temp3_c?: number | null;
   /** Corriente RMS (A), ej. SCT-013 */
@@ -29,6 +30,16 @@ interface IngestPayload {
   fan_on?: unknown;
   defrost_on?: unknown;
   door_open?: unknown;
+  /** PR500: presión baja (bar), rama alternativa a temp1_c. */
+  pressure_bar?: number | null;
+  r1_on?: unknown;
+  r2_on?: unknown;
+  r3_on?: unknown;
+  r4_alarm?: unknown;
+  di1_ok?: unknown;
+  di2_ok?: unknown;
+  di3_ok?: unknown;
+  di4_ok?: unknown;
 }
 
 function ingestBool(v: unknown): boolean {
@@ -63,11 +74,20 @@ Deno.serve(async (req) => {
       deviceToken,
     };
 
-    if (!moduleId || !deviceToken || Number.isNaN(payload.temp1_c)) {
-      return new Response(JSON.stringify({ error: 'Payload inválido' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    const hasTemp =
+      typeof payload.temp1_c === 'number' && !Number.isNaN(payload.temp1_c as number);
+    const hasPressure =
+      typeof payload.pressure_bar === 'number' && !Number.isNaN(payload.pressure_bar as number);
+    if (!moduleId || !deviceToken || (!hasTemp && !hasPressure)) {
+      return new Response(
+        JSON.stringify({
+          error: 'Payload inválido: hace falta temp1_c (dispositivo/combistato) o pressure_bar (PR500).',
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     const url = Deno.env.get('SUPABASE_URL');
@@ -95,6 +115,12 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (!combiErr && combi?.id && combi.device_token_hash === deviceToken) {
+        if (!hasTemp) {
+          return new Response(JSON.stringify({ error: 'Combistato: falta temp1_c numérico' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
         const sentIso =
           typeof payload.sentAt === 'string' && payload.sentAt.trim()
             ? payload.sentAt.trim()
@@ -106,7 +132,7 @@ Deno.serve(async (req) => {
         const { error: insCombErr } = await supabase.from('combistato_readings').insert({
           combistato_id: combi.id,
           created_at: sentIso,
-          temp1_c: payload.temp1_c,
+          temp1_c: payload.temp1_c as number,
           temp2_c: t2,
           comp_on: ingestBool(payload.comp_on),
           fan_on: ingestBool(payload.fan_on),
@@ -135,8 +161,69 @@ Deno.serve(async (req) => {
         });
       }
 
+      const { data: pr5, error: pr5Err } = await supabase
+        .from('pr500_controllers')
+        .select('id, device_token_hash')
+        .eq('module_id', moduleId)
+        .maybeSingle();
+
+      if (!pr5Err && pr5?.id && pr5.device_token_hash === deviceToken) {
+        if (!hasPressure) {
+          return new Response(JSON.stringify({ error: 'PR500: falta pressure_bar numérico' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const sentIso =
+          typeof payload.sentAt === 'string' && payload.sentAt.trim()
+            ? payload.sentAt.trim()
+            : new Date().toISOString();
+        const diOpt = (v: unknown): boolean | null =>
+          v === undefined || v === null ? null : ingestBool(v);
+        const { error: insPrErr } = await supabase.from('pr500_readings').insert({
+          pr500_id: pr5.id,
+          created_at: sentIso,
+          pressure_bar: payload.pressure_bar as number,
+          comp1_on: ingestBool(payload.r1_on),
+          comp2_on: ingestBool(payload.r2_on),
+          comp3_on: ingestBool(payload.r3_on),
+          alarm_on: ingestBool(payload.r4_alarm),
+          di1_ok: diOpt(payload.di1_ok),
+          di2_ok: diOpt(payload.di2_ok),
+          di3_ok: diOpt(payload.di3_ok),
+          di4_ok: diOpt(payload.di4_ok),
+        });
+        if (insPrErr) {
+          return new Response(JSON.stringify({ error: insPrErr.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const { error: upPr } = await supabase
+          .from('pr500_controllers')
+          .update({ last_seen_at: sentIso })
+          .eq('id', pr5.id);
+        if (upPr) {
+          return new Response(JSON.stringify({ error: upPr.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true, kind: 'pr500' }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       return new Response(JSON.stringify({ error: 'Dispositivo no encontrado' }), {
         status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (!hasTemp) {
+      return new Response(JSON.stringify({ error: 'Dispositivo: falta temp1_c numérico' }), {
+        status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -174,7 +261,7 @@ Deno.serve(async (req) => {
     const oA = num(th?.current_offset_a);
     const oP = num(th?.power_offset_w);
 
-    const temp1Corrected = payload.temp1_c + o1;
+    const temp1Corrected = (payload.temp1_c as number) + o1;
     const temp2Corrected =
       payload.temp2_c == null || Number.isNaN(payload.temp2_c as number)
         ? null
@@ -198,7 +285,7 @@ Deno.serve(async (req) => {
     const { error: insErr } = await supabase.from('device_readings').insert({
       device_id: device.id,
       created_at: payload.sentAt ?? new Date().toISOString(),
-      temp1_raw_c: payload.temp1_c,
+      temp1_raw_c: payload.temp1_c as number,
       temp2_raw_c:
         payload.temp2_c == null || Number.isNaN(payload.temp2_c as number)
           ? null
