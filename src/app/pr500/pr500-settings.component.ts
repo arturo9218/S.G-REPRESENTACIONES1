@@ -34,6 +34,15 @@ export class Pr500SettingsComponent implements OnChanges {
     wifi_password: '',
   };
 
+  private seedBleConfigFromController(): void {
+    const id = this.pr500Id;
+    if (!id) return;
+    const p = this.pr500Store.snapshot.find((x) => x.id === id);
+    this.bleConfig.api_url = this.pr500Store.getIngestUrl();
+    if (p?.moduleId) this.bleConfig.module_id = p.moduleId;
+    if (p?.deviceToken) this.bleConfig.api_key = p.deviceToken;
+  }
+
   constructor(
     public pr500Store: Pr500StoreService,
     readonly pr500Ble: Pr500BleService
@@ -49,6 +58,7 @@ export class Pr500SettingsComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['pr500Id']) {
+      this.seedBleConfigFromController();
       void this.reload();
     }
   }
@@ -64,6 +74,7 @@ export class Pr500SettingsComponent implements OnChanges {
     this.jsonExport = '';
     const r = await this.pr500Store.fetchPr500Params(id);
     this.model = r.params;
+    this.seedBleConfigFromController();
     this.loading = false;
     if (r.error) {
       this.feedback = `No se pudo cargar: ${r.error}. Se muestran valores por defecto.`;
@@ -88,6 +99,7 @@ export class Pr500SettingsComponent implements OnChanges {
     this.feedback = '';
     try {
       await this.pr500Ble.connect();
+      this.seedBleConfigFromController();
       this.feedback = `Bluetooth: conectado a «${this.pr500Ble.deviceName}». Podés leer/guardar parámetros y también provisionar WiFi+token del equipo.`;
     } catch (e) {
       this.feedback =

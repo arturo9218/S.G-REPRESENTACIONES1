@@ -34,6 +34,10 @@
     </p>
     <div class="pr500-ble-config" *ngIf="pr500Ble.connected">
       <h4 class="pr500-ble-config__title">Provisionamiento por BLE (WiFi + token/API)</h4>
+      <p class="card__hint card__hint--tight">
+        El equipo toma <code>module_id</code>, <code>api_key</code> y <code>api_url</code> desde este PR500.
+        El usuario final normalmente solo carga SSID y clave WiFi.
+      </p>
       <div class="notify-panel notify-panel__grid">
         <label class="notify-panel__field">
           <span>SSID WiFi</span>
@@ -50,15 +54,33 @@
         </label>
         <label class="notify-panel__field">
           <span>module_id</span>
-          <input type="text" [ngModel]="bleConfig.module_id" (ngModelChange)="onBleConfigChange('module_id', $event)" name="pr5-ble-module" />
+          <input
+            type="text"
+            [ngModel]="bleConfig.module_id"
+            (ngModelChange)="onBleConfigChange('module_id', $event)"
+            name="pr5-ble-module"
+            readonly
+          />
         </label>
         <label class="notify-panel__field">
           <span>api_key (token)</span>
-          <input type="text" [ngModel]="bleConfig.api_key" (ngModelChange)="onBleConfigChange('api_key', $event)" name="pr5-ble-key" />
+          <input
+            type="text"
+            [ngModel]="bleConfig.api_key"
+            (ngModelChange)="onBleConfigChange('api_key', $event)"
+            name="pr5-ble-key"
+            readonly
+          />
         </label>
         <label class="notify-panel__field">
           <span>api_url ingest-reading</span>
-          <input type="text" [ngModel]="bleConfig.api_url" (ngModelChange)="onBleConfigChange('api_url', $event)" name="pr5-ble-url" />
+          <input
+            type="text"
+            [ngModel]="bleConfig.api_url"
+            (ngModelChange)="onBleConfigChange('api_url', $event)"
+            name="pr5-ble-url"
+            readonly
+          />
         </label>
         <label class="notify-panel__field">
           <span>supabase_anon_key (opcional)</span>
