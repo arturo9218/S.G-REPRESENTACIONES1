@@ -58,6 +58,7 @@
  * PR500_SMALL_FLASH_BUILD=1: sin BLE en el binario (solo emergencia si no hay partición grande).
  *
  * Regulación (alineada a pr500-sections.ts en Angular):
+ *   F01 actúa como "armado" de control: 0 = no arranca compresores (todo OFF), >=1 = habilita salidas.
  *   F02 setpoint, F03 diferencial general, F04 entre etapas, F09 1–3 compresores.
  *   Histéresis por etapa: ON si P < F02 - F03/2 - i*F04; OFF si P > F02 + F03/2 - i*F04 (P en bar o psi según F15).
  *   F05 retardo entre arranques, F06 mín. apagado, F07 mín. encendido (s). F08 rotación de lead cada N h (entre etapas).
@@ -87,6 +88,11 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <time.h>
+
+extern "C" {
+#include "lwip/ip_addr.h"
+#include "lwip/dns.h"
+}
 #if PR500_FEATURE_OTA_HTTP
 #include <HTTPUpdate.h>
 #endif
@@ -116,6 +122,9 @@ static String gBleRxAccum;
 
 static const char *CFG_PATH = "/config.json";
 static const char *AP_NAME = "PR500-Config";
+/** Igual que otros dispositivos: endpoint fijo en firmware. */
+static const char *DEFAULT_INGEST_URL =
+    "https://fohbhymulrmdsgrubtlo.supabase.co/functions/v1/ingest-reading";
 
 // ---------- Pines hardware (cambiar según esquema) ----------
 static const uint8_t PIN_PRESSURE_ADC = 36;  // ADC1
@@ -159,6 +168,7 @@ static WiFiManagerParameter p_ota("otaurl", "URL firmware .bin OTA (opcional)", 
 static unsigned long g_lastSend = 0;
 static unsigned long g_lastOtaCheck = 0;
 static unsigned long g_lastParamsCloudPullMs = 0;
+static unsigned long g_lastWifiRetryMs = 0;
 #if PR500_FEATURE_BLE
 static unsigned long g_lastBleAdvKickMs = 0;
 #endif
@@ -181,8 +191,24 @@ static unsigned long g_relayOffSinceMs[3] = {0, 0, 0};
 static unsigned long g_lastAnyCompStartMs = 0;
 
 static const int REL_PINS[3] = {PIN_RELAY_C1, PIN_RELAY_C2, PIN_RELAY_C3};
+/** Ajustá según tu placa de relés:
+ *  true  => relé ON con HIGH (salida activa alta)
+ *  false => relé ON con LOW  (activo-bajo, común en módulos de 5V con opto).
+ */
+static constexpr bool RELAY_ACTIVE_HIGH = false;
+
+static inline int relayOnLevel() { return RELAY_ACTIVE_HIGH ? HIGH : LOW; }
+static inline int relayOffLevel() { return RELAY_ACTIVE_HIGH ? LOW : HIGH; }
+static inline bool relayIsOnPin(int pin) { return digitalRead(pin) == relayOnLevel(); }
+static inline void relayWritePin(int pin, bool on) { digitalWrite(pin, on ? relayOnLevel() : relayOffLevel()); }
+static void relayAllOff() {
+  for (int k = 0; k < 3; k++) relayWritePin(REL_PINS[k], false);
+}
 
 static constexpr float PSI_PER_BAR = 14.5037738f;
+
+/** Seguridad: sólo permite arranques si F01 != 0 (armado explícito desde la app). */
+static bool controlArmed() { return g_pr.F01 >= 1.0f; }
 
 static void pr500ParamsFromDefaults(Pr500Params *p) {
   StaticJsonDocument<896> doc;
@@ -314,13 +340,17 @@ static void applyRelayOutputs(unsigned long nowMs) {
 
   bool physAuto[3];
   mapLogicalToPhysical(physAuto, compressorCount(), leadIndex(compressorCount()));
+  const bool armed = controlArmed();
 
   bool target[3];
   for (int k = 0; k < 3; k++) {
-    target[k] = physAuto[k];
-    if (g_pr.F17 >= 0.5f) target[k] = (k == 0) ? true : target[k];
-    if (g_pr.F18 >= 0.5f) target[k] = (k == 1) ? true : target[k];
-    if (g_pr.F19 >= 0.5f) target[k] = (k == 2) ? true : target[k];
+    target[k] = false;
+    if (armed) {
+      target[k] = physAuto[k];
+      if (g_pr.F17 >= 0.5f) target[k] = (k == 0) ? true : target[k];
+      if (g_pr.F18 >= 0.5f) target[k] = (k == 1) ? true : target[k];
+      if (g_pr.F19 >= 0.5f) target[k] = (k == 2) ? true : target[k];
+    }
   }
 
   if (g_r4Alarm) {
@@ -328,21 +358,23 @@ static void applyRelayOutputs(unsigned long nowMs) {
   }
 
   for (int k = 0; k < 3; k++) {
-    const bool cur = digitalRead(REL_PINS[k]) == HIGH;
+    const bool cur = relayIsOnPin(REL_PINS[k]);
     const int pin = REL_PINS[k];
     if (target[k] == cur) continue;
 
     if (target[k]) {
-      const bool offOk = (g_relayOffSinceMs[k] == 0) || (nowMs - g_relayOffSinceMs[k] >= minOffMs);
-      const bool gapOk = (g_lastAnyCompStartMs == 0) || (nowMs - g_lastAnyCompStartMs >= startGapMs);
+      const bool manualOn =
+          (k == 0 && g_pr.F17 >= 0.5f) || (k == 1 && g_pr.F18 >= 0.5f) || (k == 2 && g_pr.F19 >= 0.5f);
+      const bool offOk = manualOn || (g_relayOffSinceMs[k] == 0) || (nowMs - g_relayOffSinceMs[k] >= minOffMs);
+      const bool gapOk = manualOn || (g_lastAnyCompStartMs == 0) || (nowMs - g_lastAnyCompStartMs >= startGapMs);
       if (!offOk || !gapOk) continue;
-      digitalWrite(pin, HIGH);
+      relayWritePin(pin, true);
       g_relayOnSinceMs[k] = nowMs;
       g_lastAnyCompStartMs = nowMs;
     } else {
       const bool onOk = (g_relayOnSinceMs[k] == 0) || (nowMs - g_relayOnSinceMs[k] >= minOnMs);
       if (!onOk) continue;
-      digitalWrite(pin, LOW);
+      relayWritePin(pin, false);
       g_relayOffSinceMs[k] = nowMs;
       g_relayOnSinceMs[k] = 0;
     }
@@ -351,6 +383,19 @@ static void applyRelayOutputs(unsigned long nowMs) {
 
 static void pr500ControlTick(unsigned long nowMs) {
   reloadPr500ParamsIfDue(nowMs);
+
+  /* Modo seguro: si F01==0 no permite encender compresores (evita arranque inesperado). */
+  if (!controlArmed()) {
+    for (int i = 0; i < 3; i++) g_stageWant[i] = false;
+    for (int k = 0; k < 3; k++) {
+      if (relayIsOnPin(REL_PINS[k])) {
+        relayWritePin(REL_PINS[k], false);
+        g_relayOffSinceMs[k] = nowMs;
+        g_relayOnSinceMs[k] = 0;
+      }
+    }
+    return;
+  }
 
   if (g_pr.F16 >= 0.5f) {
     g_r4Alarm = false;
@@ -417,7 +462,26 @@ static bool ensureLittleFS() {
   return true;
 }
 
+static void trimAsciiInPlace(char *s) {
+  if (!s) return;
+  size_t n = strlen(s);
+  size_t i = 0;
+  while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')) i++;
+  size_t j = n;
+  while (j > i && (s[j - 1] == ' ' || s[j - 1] == '\t' || s[j - 1] == '\r' || s[j - 1] == '\n')) j--;
+  if (i > 0 || j < n) {
+    size_t k = 0;
+    for (size_t p = i; p < j; p++) s[k++] = s[p];
+    s[k] = 0;
+  }
+}
+
+static void applyFixedIngestUrl() {
+  strlcpy(g_cfg.apiUrl, DEFAULT_INGEST_URL, sizeof(g_cfg.apiUrl));
+}
+
 static bool loadConfig() {
+  applyFixedIngestUrl();
   if (!ensureLittleFS()) return false;
   if (!LittleFS.exists(CFG_PATH)) {
     Serial.println(F("[CFG] No config.json — portal WiFi la primera vez"));
@@ -432,10 +496,13 @@ static bool loadConfig() {
     Serial.printf("[CFG] JSON error: %s\n", e.c_str());
     return false;
   }
-  strlcpy(g_cfg.apiUrl, doc["api_url"] | "", sizeof(g_cfg.apiUrl));
+  (void)doc["api_url"];  // URL fija en firmware (compatibilidad con otros dispositivos)
   strlcpy(g_cfg.moduleId, doc["module_id"] | "", sizeof(g_cfg.moduleId));
   strlcpy(g_cfg.apiKey, doc["api_key"] | "", sizeof(g_cfg.apiKey));
   strlcpy(g_cfg.supabaseAnonKey, doc["supabase_anon_key"] | "", sizeof(g_cfg.supabaseAnonKey));
+  trimAsciiInPlace(g_cfg.moduleId);
+  trimAsciiInPlace(g_cfg.apiKey);
+  trimAsciiInPlace(g_cfg.supabaseAnonKey);
   g_cfg.intervalMs = (uint32_t)(doc["interval_ms"] | 20000);
   if (g_cfg.intervalMs < 5000) g_cfg.intervalMs = 5000;
   g_cfg.adcPin = (uint8_t)(doc["adc_pin"] | (int)PIN_PRESSURE_ADC);
@@ -446,7 +513,52 @@ static bool loadConfig() {
   strlcpy(g_cfg.otaFirmwareUrl, doc["ota_firmware_url"] | "", sizeof(g_cfg.otaFirmwareUrl));
   g_cfg.otaCheckHours = (uint32_t)(doc["ota_check_hours"] | 0);
   g_cfg.paramsPullMs = (uint32_t)(doc["params_pull_ms"] | 120000);
-  return strlen(g_cfg.apiUrl) > 10 && strlen(g_cfg.moduleId) > 2 && strlen(g_cfg.apiKey) >= 4;
+  applyFixedIngestUrl();
+  return strlen(g_cfg.moduleId) > 2 && strlen(g_cfg.apiKey) >= 4;
+}
+
+static bool parseHttpsHost(const char *url, char *hostOut, size_t hostOutSz) {
+  if (!url || !hostOut || hostOutSz < 4) return false;
+  const char *p = strstr(url, "https://");
+  if (p != url) return false;
+  p += 8;  // skip https://
+  size_t i = 0;
+  while (p[i] && p[i] != '/' && p[i] != ':' && i + 1 < hostOutSz) {
+    hostOut[i] = p[i];
+    i++;
+  }
+  hostOut[i] = 0;
+  return i > 2;
+}
+
+static void printNetDiag() {
+  Serial.println(F("[NET] ---- diagnóstico ----"));
+  Serial.printf("[NET] WiFi.status=%d SSID=%s IP=%s RSSI=%d\n", (int)WiFi.status(), WiFi.SSID().c_str(),
+                WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+  Serial.printf("[NET] api_url=%s\n", g_cfg.apiUrl);
+  Serial.printf("[NET] module_id=%s api_key_len=%u\n", g_cfg.moduleId, (unsigned)strlen(g_cfg.apiKey));
+
+  char host[96]{};
+  if (!parseHttpsHost(g_cfg.apiUrl, host, sizeof(host))) {
+    Serial.println(F("[NET] URL inválida o no HTTPS."));
+    return;
+  }
+  IPAddress ip;
+  if (!WiFi.hostByName(host, ip)) {
+    Serial.printf("[NET] DNS falló para host=%s\n", host);
+    return;
+  }
+  Serial.printf("[NET] DNS %s -> %s\n", host, ip.toString().c_str());
+
+  WiFiClientSecure c;
+  c.setInsecure();
+  c.setTimeout(6000);
+  if (!c.connect(host, 443)) {
+    Serial.printf("[NET] TCP 443 falló host=%s\n", host);
+    return;
+  }
+  Serial.printf("[NET] TCP 443 OK host=%s\n", host);
+  c.stop();
 }
 
 static bool saveConfigFromParams() {
@@ -459,17 +571,17 @@ static bool saveConfigFromParams() {
       fr.close();
     }
   }
-  doc["api_url"] = p_api.getValue();
-  doc["module_id"] = p_mod.getValue();
-  doc["api_key"] = p_key.getValue();
-  doc["supabase_anon_key"] = p_anon.getValue();
+  doc["api_url"] = DEFAULT_INGEST_URL;
+  doc["module_id"] = g_cfg.moduleId;
+  doc["api_key"] = g_cfg.apiKey;
+  doc["supabase_anon_key"] = g_cfg.supabaseAnonKey;
   if (!doc.containsKey("interval_ms")) doc["interval_ms"] = 20000;
   if (!doc.containsKey("adc_pin")) doc["adc_pin"] = PIN_PRESSURE_ADC;
   if (!doc.containsKey("pressure_v_min")) doc["pressure_v_min"] = 0.5;
   if (!doc.containsKey("pressure_v_max")) doc["pressure_v_max"] = 3.0;
   if (!doc.containsKey("pressure_bar_min")) doc["pressure_bar_min"] = 0.0;
   if (!doc.containsKey("pressure_bar_max")) doc["pressure_bar_max"] = 8.0;
-  doc["ota_firmware_url"] = p_ota.getValue();
+  doc["ota_firmware_url"] = g_cfg.otaFirmwareUrl;
   if (!doc.containsKey("ota_check_hours")) doc["ota_check_hours"] = 0;
   if (!doc.containsKey("params_pull_ms")) doc["params_pull_ms"] = 120000;
 
@@ -482,12 +594,14 @@ static bool saveConfigFromParams() {
 }
 
 static void setupPins() {
+  /* Arranque seguro: fijamos estado OFF en el latch antes de pasar a OUTPUT (evita pulsos). */
+  digitalWrite(PIN_RELAY_C1, relayOffLevel());
+  digitalWrite(PIN_RELAY_C2, relayOffLevel());
+  digitalWrite(PIN_RELAY_C3, relayOffLevel());
   pinMode(PIN_RELAY_C1, OUTPUT);
   pinMode(PIN_RELAY_C2, OUTPUT);
   pinMode(PIN_RELAY_C3, OUTPUT);
-  digitalWrite(PIN_RELAY_C1, LOW);
-  digitalWrite(PIN_RELAY_C2, LOW);
-  digitalWrite(PIN_RELAY_C3, LOW);
+  relayAllOff();
 
   pinMode(PIN_DI1, INPUT_PULLUP);
   /* 34, 35, 39: pads solo entrada — el ESP32 no tiene pull-up interno; INPUT_PULLUP dispara error del driver. */
@@ -619,7 +733,7 @@ static void handleBleLine(const String &line) {
         fr.close();
       }
     }
-    if (co.containsKey("api_url")) doc["api_url"] = co["api_url"].as<const char *>();
+    doc["api_url"] = DEFAULT_INGEST_URL;
     if (co.containsKey("module_id")) doc["module_id"] = co["module_id"].as<const char *>();
     if (co.containsKey("api_key")) doc["api_key"] = co["api_key"].as<const char *>();
     if (co.containsKey("supabase_anon_key")) doc["supabase_anon_key"] = co["supabase_anon_key"].as<const char *>();
@@ -648,7 +762,13 @@ static void handleBleLine(const String &line) {
     const char *ssid = in["wifi_ssid"] | "";
     const char *pass = in["wifi_password"] | "";
     if (ssid && strlen(ssid) > 0) {
+      /* Evita "sta is connecting, cannot set config":
+         si el portal está activo o STA ya está conectando, primero frenamos y reconectamos limpio. */
+      wm.stopConfigPortal();
+      WiFi.disconnect(false, true);
+      delay(200);
       WiFi.mode(WIFI_STA);
+      delay(120);
       WiFi.begin(ssid, pass);
       unsigned long t0 = millis();
       while (WiFi.status() != WL_CONNECTED && (millis() - t0 < 12000UL)) delay(200);
@@ -666,9 +786,9 @@ static void handleBleLine(const String &line) {
     StaticJsonDocument<384> out;
     out["ok"] = true;
     out["pressure_bar"] = pressureBarAdjusted();
-    out["r1_on"] = digitalRead(PIN_RELAY_C1) == HIGH;
-    out["r2_on"] = digitalRead(PIN_RELAY_C2) == HIGH;
-    out["r3_on"] = digitalRead(PIN_RELAY_C3) == HIGH;
+    out["r1_on"] = relayIsOnPin(PIN_RELAY_C1);
+    out["r2_on"] = relayIsOnPin(PIN_RELAY_C2);
+    out["r3_on"] = relayIsOnPin(PIN_RELAY_C3);
     out["r4_alarm"] = g_r4Alarm;
     out["di1_ok"] = diOk(PIN_DI1);
     out["di2_ok"] = diOk(PIN_DI2);
@@ -736,18 +856,30 @@ static void bleSetup() {
 }
 #endif
 
+static void applyPublicDnsIfStaUp() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  ip_addr_t d1, d2;
+  IP_ADDR4(&d1, 1, 1, 1, 1);
+  IP_ADDR4(&d2, 8, 8, 8, 8);
+  dns_setserver(0, &d1);
+  dns_setserver(1, &d2);
+  Serial.println(F("[NET] DNS lwIP → 1.1.1.1 / 8.8.8.8"));
+}
+
 static void sendIngest() {
   if (WiFi.status() != WL_CONNECTED) return;
 
   float pbar = pressureBarAdjusted();
-  bool r1 = digitalRead(PIN_RELAY_C1) == HIGH;
-  bool r2 = digitalRead(PIN_RELAY_C2) == HIGH;
-  bool r3 = digitalRead(PIN_RELAY_C3) == HIGH;
+  bool r1 = relayIsOnPin(PIN_RELAY_C1);
+  bool r2 = relayIsOnPin(PIN_RELAY_C2);
+  bool r3 = relayIsOnPin(PIN_RELAY_C3);
   bool r4alarm = g_r4Alarm;
 
   WiFiClientSecure client;
   client.setInsecure();
+  client.setTimeout(25000);
   HTTPClient http;
+  http.setTimeout(25000);
   if (!http.begin(client, g_cfg.apiUrl)) {
     Serial.println(F("[TX] http.begin falló"));
     return;
@@ -787,9 +919,40 @@ static void sendIngest() {
   String body;
   serializeJson(doc, body);
   int code = http.POST(body);
+  if (code < 0 && WiFi.status() == WL_CONNECTED) {
+    delay(120);
+    code = http.POST(body);
+  }
+  if (code < 0 && WiFi.status() == WL_CONNECTED) {
+    applyPublicDnsIfStaUp();
+    delay(400);
+    http.end();
+    if (http.begin(client, g_cfg.apiUrl)) {
+      http.addHeader("Content-Type", "application/json");
+      if (strlen(g_cfg.supabaseAnonKey) > 10) {
+        http.addHeader("apikey", g_cfg.supabaseAnonKey);
+        http.addHeader("Authorization", String("Bearer ") + g_cfg.supabaseAnonKey);
+      }
+      code = http.POST(body);
+    }
+  }
   Serial.printf("[TX] HTTP %d  P=%.2f bar\n", code, pbar);
-  if (code < 0) Serial.println(http.errorToString(code));
+  if (code < 0) {
+    Serial.printf("[TX] err=%s url=%s\n", http.errorToString(code).c_str(), g_cfg.apiUrl);
+    Serial.printf("[TX] WiFi.status=%d RSSI=%d (comando diagnostico: escribi net en monitor)\n", (int)WiFi.status(),
+                  (int)WiFi.RSSI());
+  }
   http.end();
+}
+
+static void maintainWifi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  unsigned long now = millis();
+  if (g_lastWifiRetryMs != 0 && (now - g_lastWifiRetryMs < 10000UL)) return;
+  g_lastWifiRetryMs = now;
+  if (!WiFi.SSID().length()) return;
+  Serial.printf("[WiFi] Reintentando conexión a %s...\n", WiFi.SSID().c_str());
+  WiFi.reconnect();
 }
 
 /** URL de la Edge Function que devuelve params (misma base que ingest-reading). */
@@ -926,30 +1089,52 @@ static void tryOtaFromUrl(const char *url) {
 static void setupWifiPortal() {
   /* Menos cortes al conectar al AP del ESP durante el portal (coexistencia / ahorro de energía). */
   WiFi.setSleep(false);
+  WiFi.persistent(false);
+  /* No esperar ~60s en cada arranque si la red guardada no responde. */
+  wm.setConnectTimeout(15);
   /* 0 = el portal no se cierra solo por tiempo (instalación sin display; configurás con calma). */
   wm.setConfigPortalTimeout(0);
-  wm.addParameter(&p_api);
-  wm.addParameter(&p_mod);
-  wm.addParameter(&p_key);
-  wm.addParameter(&p_anon);
-  wm.addParameter(&p_ota);
-  wm.setSaveParamsCallback([]() { saveConfigFromParams(); });
+  /* Igual que otros dispositivos: portal sólo para SSID/clave WiFi. */
 
   const bool forcePortal = digitalRead(PIN_FORCE_PORTAL) == LOW;
   if (forcePortal) {
     Serial.println(F("[WiFi] Portal forzado (GPIO14 a GND). Conectate a la WiFi del ESP: PR500-Config (no hace falta internet del modem)."));
+    /* Limpiar modo STA antes de abrir AP portal (evita carreras AP+STA). */
+    WiFi.disconnect(true, true);
+    delay(250);
+#if PR500_FEATURE_BLE
+    BLEDevice::stopAdvertising();
+    Serial.println(F("[BLE] Pausado durante portal WiFi (estabilidad de AP en celulares)."));
+#endif
     wm.startConfigPortal(AP_NAME);
   } else if (!wm.autoConnect(AP_NAME)) {
     Serial.println(F("[WiFi] Sin credenciales — abriendo portal. WiFi del ESP: PR500-Config (red local; sin internet obligatorio)."));
+    /* Limpiar modo STA antes de abrir AP portal (evita carreras AP+STA). */
+    WiFi.disconnect(true, true);
+    delay(250);
+#if PR500_FEATURE_BLE
+    BLEDevice::stopAdvertising();
+    Serial.println(F("[BLE] Pausado durante portal WiFi (estabilidad de AP en celulares)."));
+#endif
     wm.startConfigPortal(AP_NAME);
   }
 
+#if PR500_FEATURE_BLE
+  BLEDevice::startAdvertising();
+  Serial.println(F("[BLE] Reanudado tras portal WiFi."));
+#endif
+
   Serial.print(F("[WiFi] IP "));
   Serial.println(WiFi.localIP());
+  applyPublicDnsIfStaUp();
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 }
 
 void setup() {
+  /* Crítico: asegurar relés OFF apenas inicia el MCU (antes de demoras/serial/portal). */
+  setupPins();
+  applyFixedIngestUrl();
+
   Serial.begin(115200);
   /* USB-UART en Windows a veces pierde los primeros bytes; esperá un poco y forzá salida. */
   delay(800);
@@ -965,7 +1150,6 @@ void setup() {
   Serial.println(F("[BOOT] Serial 115200 baud"));
   Serial.flush();
 
-  setupPins();
   ensureLittleFS();
 
   /* BLE antes del portal: si el portal bloquea, igual el chip ya anuncia PR500-xxxx (escaneá con nRF Connect o la app). */
@@ -977,13 +1161,10 @@ void setup() {
 
   setupWifiPortal();
 
-  if (!loadConfig()) {
-    Serial.println(F("[CFG] Falta /config.json — conectate a PR500-Config (red local del ESP; sin limite de tiempo)."));
-    wm.startConfigPortal(AP_NAME);
-    loadConfig();
-  }
-  if (!loadConfig()) {
-    Serial.println(F("[CFG] Aún sin API: revisá URL, module_id y api_key en el portal"));
+  /* No reabrir portal por falta de module_id/api_key: esos se cargan por BLE/app. */
+  bool cfgOk = loadConfig();
+  if (!cfgOk) {
+    Serial.println(F("[CFG] Falta module_id/api_key. Cargalos por BLE desde la app (WiFi ya quedó configurado)."));
   }
 
   pr500ParamsFromDefaults(&g_pr);
@@ -1006,6 +1187,7 @@ void loop() {
 #endif
 
   pr500ControlTick(now);
+  maintainWifi();
 
   if (WiFi.status() == WL_CONNECTED) {
     tryFetchPr500ParamsFromCloud(now);
@@ -1044,13 +1226,15 @@ void loop() {
       Serial.printf("OTA url len=%u auto_h=%lu\n", (unsigned)strlen(g_cfg.otaFirmwareUrl),
                     (unsigned long)g_cfg.otaCheckHours);
       Serial.printf("params_pull_ms=%lu\n", (unsigned long)g_cfg.paramsPullMs);
+    } else if (line == "net") {
+      printNetDiag();
     } else if (line == "reboot") {
       ESP.restart();
     } else if (line.length() > 0) {
 #if PR500_FEATURE_OTA_HTTP
-      Serial.println(F("Comandos: status | ota | reboot"));
+      Serial.println(F("Comandos: status | net | ota | reboot"));
 #else
-      Serial.println(F("Comandos: status | reboot"));
+      Serial.println(F("Comandos: status | net | reboot"));
 #endif
     }
   }

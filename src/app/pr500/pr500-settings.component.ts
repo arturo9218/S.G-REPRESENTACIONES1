@@ -1,5 +1,9 @@
 import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
-import { mergePr500Params, type Pr500FormModel } from './pr500-params.defaults';
+import {
+  convertPr500PressureParamsForF15,
+  mergePr500Params,
+  type Pr500FormModel,
+} from './pr500-params.defaults';
 import { PR500_SECTIONS } from './pr500-sections';
 import { Pr500StoreService } from '../core/pr500-store.service';
 import { Pr500BleService, type Pr500BleConfig } from '../core/pr500-ble.service';
@@ -84,9 +88,21 @@ export class Pr500SettingsComponent implements OnChanges {
   onFieldChange(key: keyof Pr500FormModel, v: string | number): void {
     if (!this.model) return;
     const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
-    if (Number.isFinite(n)) {
-      this.model[key] = n;
+    if (!Number.isFinite(n)) return;
+    if (key === 'F15') {
+      const next = n >= 0.5 ? 1 : 0;
+      const prev = this.model.F15 >= 0.5 ? 1 : 0;
+      if (prev !== next) {
+        convertPr500PressureParamsForF15(this.model, prev, next);
+        this.feedback =
+          next === 1
+            ? 'Unidad: psi. Se convirtieron F02, F03, F04, F10, F11 y F14 desde bar (guardá para aplicar al equipo).'
+            : 'Unidad: bar. Se convirtieron F02, F03, F04, F10, F11 y F14 desde psi (guardá para aplicar al equipo).';
+      }
+      this.model.F15 = next;
+      return;
     }
+    this.model[key] = n;
   }
 
   resetDefaults(): void {

@@ -49,3 +49,30 @@ export function pr500ToJsonBlob(m: Pr500FormModel): Record<string, number> {
   for (const k of KEYS) out[k as string] = m[k];
   return out;
 }
+
+/** 1 bar = 14,5037738 psi (exacto ISO 80000-3). */
+export const PR500_PSI_PER_BAR = 14.5037738;
+
+/** Presión: F02,F03,F04,F10,F11,F14 están en la misma unidad que indica F15 (0=bar, 1=psi). */
+const PRESSURE_KEYS_FOR_F15: (keyof Pr500FormModel)[] = ['F02', 'F03', 'F04', 'F10', 'F11', 'F14'];
+
+/**
+ * Al cambiar F15, convierte umbrales para conservar la misma presión física.
+ * `previousF15` / `nextF15`: 0 = bar, 1 = psi (cualquier ≥0.5 se trata como psi).
+ */
+export function convertPr500PressureParamsForF15(
+  model: Pr500FormModel,
+  previousF15: number,
+  nextF15: number
+): void {
+  const fromPsi = previousF15 >= 0.5;
+  const toPsi = nextF15 >= 0.5;
+  if (fromPsi === toPsi) return;
+  const factor = toPsi ? PR500_PSI_PER_BAR : 1 / PR500_PSI_PER_BAR;
+  for (const k of PRESSURE_KEYS_FOR_F15) {
+    const cur = model[k];
+    if (typeof cur === 'number' && Number.isFinite(cur)) {
+      model[k] = Math.round(cur * factor * 10000) / 10000;
+    }
+  }
+}
