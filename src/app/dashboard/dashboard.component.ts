@@ -22,6 +22,7 @@ import {
 } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
 import { ingestFunctionUrl } from '../core/supabase-config';
+import { pr500BarToPsi } from '../pr500/pr500-params.defaults';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
 import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 import {
@@ -2351,6 +2352,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   trackByPr500Id(_index: number, p: DashboardPr500): string {
     return p.id;
+  }
+
+  /** Valor mostrado según `params.F15` (bar en telemetría; psi si el controlador usa psi). */
+  pr500PressureDisplayValue(p: DashboardPr500): number | null {
+    const b = p.lastPressureBar;
+    if (b == null || !Number.isFinite(b)) return null;
+    return p.pressureDisplayPsi ? pr500BarToPsi(b) : b;
+  }
+
+  pr500PressureDisplayUnit(p: DashboardPr500): string {
+    return p.pressureDisplayPsi ? 'psi' : 'bar';
   }
 
   /** Subtítulo en tarjeta PR500: compresores y alarma de la última lectura. */

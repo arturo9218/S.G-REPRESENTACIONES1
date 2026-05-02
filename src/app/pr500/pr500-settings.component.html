@@ -1,13 +1,17 @@
 <article class="card card--pr500" *ngIf="pr500Id">
-  <h2 class="card__title card__title--sm">PR500 · control por presión (F01–F21)</h2>
+  <h2 class="card__title card__title--sm">PR500 · parámetros de la central frigorífica</h2>
+  <p class="card__hint card__hint--tight">
+    Ajustes en orden numérico: tres bloques (F1–F8, F9–F16, F17–F22). En pantalla se muestran como F1, F2… F9 y
+    después F10, F11… (coinciden con los mismos parámetros que el equipo guarda como F01, F02…). Si elegís
+    <strong>psi</strong> como unidad, el panel y el gráfico muestran esa escala; en la nube la medición sigue en bar.
+  </p>
 
   <div class="pr500-ble" *ngIf="bleSupported">
     <h3 class="pr500-ble__title">Bluetooth (cerca del equipo)</h3>
     <p class="card__hint card__hint--tight pr500-ble__hint">
-      Misma pantalla de parámetros: podés leer o guardar en el ESP32 por BLE y, si hay sesión en la nube, también en
-      Supabase. Con WiFi, el firmware puede traer solo los cambios de la nube (Edge
-      <code>fetch-pr500-params</code>, intervalo <code>params_pull_ms</code> en <code>config.json</code>). Usá
-      <strong>Chrome o Edge</strong> (Android o PC); iOS/Safari suele no permitir Web Bluetooth.
+      Podés leer o guardar los mismos valores en el equipo por Bluetooth y, si tenés sesión, también en la nube. Con
+      WiFi, el equipo puede traer solo los cambios que guardaste desde acá. Usá <strong>Chrome o Edge</strong> (Android
+      o PC); en iPhone el Bluetooth web suele no estar disponible.
     </p>
     <div class="pr500-ble__actions">
       <button
@@ -102,17 +106,21 @@
 
   <fieldset class="notify-panel-fieldset" *ngIf="model as m" [disabled]="!canEdit || loading || saving">
     <ng-container *ngFor="let sec of sections">
-      <details class="pr500-details" [open]="sec.id === 'pressure'">
+      <details class="pr500-details" [open]="sec.id === 'f01-f08'">
         <summary class="pr500-details__summary">{{ sec.title }}</summary>
+        <p class="pr500-section-intro" *ngIf="sec.intro">{{ sec.intro }}</p>
         <div class="notify-panel notify-panel__grid pr500-details__grid">
-          <label class="notify-panel__field" *ngFor="let f of sec.fields">
-            <span>{{ f.label }}</span>
+          <label class="notify-panel__field notify-panel__field--pr500" *ngFor="let f of sec.fields">
+            <span class="notify-panel__field-label">{{ f.label }}</span>
+            <span class="pr500-field-help" *ngIf="f.help">{{ f.help }}</span>
             <input
               type="number"
               [ngModel]="m[f.key]"
               (ngModelChange)="onFieldChange(f.key, $event)"
               [name]="'pr5-' + sec.id + '-' + (f.key + '')"
               [step]="f.step != null ? f.step : 1"
+              [attr.min]="f.key === 'F01' || f.key === 'F22' ? 0 : f.key === 'F02' ? f02InputMin(m) : f.key === 'F03' ? f03InputMin(m) : null"
+              [attr.max]="f.key === 'F01' || f.key === 'F22' ? 1 : f.key === 'F02' ? f02InputMax(m) : f.key === 'F03' ? f03InputMax(m) : null"
             />
           </label>
         </div>
@@ -133,7 +141,7 @@
       class="pr500-chart-link__a"
       [routerLink]="['/chart-pr500']"
       [queryParams]="{ pr500Id: pr500Id }"
-      >Ver gráfico histórico (presión y estados)</a
+      >Ver gráfico histórico (presión de proceso y estados)</a
     >
   </p>
 

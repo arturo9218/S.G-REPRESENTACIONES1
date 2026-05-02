@@ -1,127 +1,392 @@
+$bg: #0b1220;
+$card: #111a2e;
+$card-border: rgba(148, 163, 184, 0.14);
+$text: #f1f5f9;
+$muted: #94a3b8;
+$accent: #38bdf8;
+$line: #3b82f6;
+$grid: rgba(148, 163, 184, 0.12);
+
 .page--dark.pr5-page {
   min-height: 100vh;
-  background: #0b1220;
-  color: #e8eef7;
-  padding: 1rem 1.25rem 2rem;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  background: radial-gradient(1200px 600px at 10% -10%, rgba(56, 189, 248, 0.08), transparent 55%), $bg;
+  color: $text;
+  padding: 0.85rem 1.25rem 1rem;
 }
 
 .pr5-head {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 1rem;
+  align-items: flex-start;
+  gap: 1.25rem;
   margin-bottom: 1rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid $card-border;
+  flex-shrink: 0;
+}
+
+.pr5-head__text {
+  min-width: min(100%, 36rem);
+}
+
+.pr5-kicker {
+  margin: 0 0 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7dd3fc;
 }
 
 .pr5-title {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.5rem;
   font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
 }
 
 .pr5-sub {
-  margin: 0.35rem 0 0;
-  color: #94a3b8;
+  margin: 0.5rem 0 0;
+  color: $muted;
   font-size: 0.9rem;
-  max-width: 52rem;
-  line-height: 1.45;
+  max-width: 44rem;
+  line-height: 1.55;
 }
 
 .pr5-head-actions {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .pr5-err {
-  color: #f87171;
+  flex-shrink: 0;
+  color: #fca5a5;
   margin: 0 0 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.25);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  font-size: 0.9rem;
 }
 
 .pr5-layout {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(220px, 280px) 1fr;
+  grid-template-rows: 1fr;
   gap: 1rem;
+  align-items: stretch;
 }
 
 @media (max-width: 900px) {
   .pr5-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
   }
 }
 
+.card {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
 .pr5-side {
-  padding: 1rem;
-  background: #131c2e;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 12px;
+  padding: 1.15rem 1.2rem;
+  background: $card;
+  border: 1px solid $card-border;
+  border-radius: 14px;
 }
 
 .pr5-side__title {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.pr5-side__lead {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  color: $muted;
+  line-height: 1.45;
 }
 
 .pr5-field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  margin-bottom: 0.65rem;
-  font-size: 0.88rem;
+  gap: 0.3rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.86rem;
+
+  span {
+    color: #cbd5e1;
+    font-weight: 600;
+    font-size: 0.78rem;
+  }
 }
 
 .pr5-field input {
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  background: #1a2740;
-  color: #e8eef7;
-  padding: 0.45rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: #0f172a;
+  color: $text;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.88rem;
 }
 
 .btn--block {
   width: 100%;
-  margin-top: 0.5rem;
+  margin-top: 0.35rem;
 }
 
-.pr5-hint {
-  margin: 0.75rem 0 0;
-  font-size: 0.82rem;
-  color: #94a3b8;
+.pr5-side__meta {
+  margin: 1rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.2);
+  font-size: 0.8rem;
+}
+
+.pr5-side__meta-row {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.45rem;
+
+  dt {
+    margin: 0;
+    color: $muted;
+    font-weight: 600;
+  }
+
+  dd {
+    margin: 0;
+    color: #e2e8f0;
+    text-align: right;
+  }
 }
 
 .pr5-main {
-  padding: 1rem;
-  background: #131c2e;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 1rem 1.15rem 1.1rem;
+  background: linear-gradient(165deg, rgba(30, 41, 59, 0.95) 0%, $card 45%);
+  border: 1px solid $card-border;
+  border-radius: 14px;
+}
+
+.pr5-main__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.55rem;
+  flex-shrink: 0;
+}
+
+.pr5-main__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem 0.65rem;
+}
+
+.pr5-fs-btn {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .pr5-main__title {
-  margin: 0 0 0.5rem;
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
 }
 
-.pr5-summary {
-  margin: 0 0 0.75rem;
-  font-size: 0.86rem;
-  color: #cbd5e1;
-  line-height: 1.4;
+.pr5-main__unit {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7dd3fc;
 }
 
+.pr5-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.55rem;
+  margin-bottom: 0.55rem;
+  flex-shrink: 0;
+}
+
+.pr5-legend__item {
+  font-size: 0.82rem;
+  color: $muted;
+}
+
+.pr5-legend__item--pres {
+  margin-right: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #e0f2fe;
+  font-weight: 700;
+}
+
+.pr5-legend__pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: $muted;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.pr5-legend__pill--active {
+  color: #0f172a;
+  background: linear-gradient(135deg, #4ade80, #22c55e);
+  border-color: rgba(74, 222, 128, 0.5);
+}
+
+.pr5-legend__pill--alarm {
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+.pr5-legend__pill--alarm-on {
+  color: #fff;
+  background: linear-gradient(135deg, #f87171, #dc2626);
+  border-color: rgba(248, 113, 113, 0.6);
+}
+
+.pr5-chart {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.1rem;
+}
+
+/* Ocupa el alto disponible del panel; sin aspect-ratio fijo (evita bandas vacías con viewBox cuadrado + meet). */
 .pr5-svg-wrap {
+  flex: 1 1 auto;
+  display: flex;
   width: 100%;
-  aspect-ratio: 16 / 7;
-  border-radius: 10px;
+  min-height: max(280px, calc(100svh - 15.5rem));
+  border-radius: 12px;
   overflow: hidden;
-  border: 1px solid rgba(148, 163, 184, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.12);
+  background: #070d18;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.pr5-svg-wrap:fullscreen {
+  min-height: 100%;
+  height: 100%;
+  width: 100%;
+  max-height: none;
+  border-radius: 0;
+  border-width: 0;
 }
 
 .pr5-svg {
+  flex: 1 1 auto;
   width: 100%;
+  min-height: 0;
   height: 100%;
   display: block;
 }
 
+.pr5-plot-bg {
+  fill: rgba(7, 13, 24, 0.92);
+}
+
+.pr5-plot-frame {
+  fill: none;
+  stroke: rgba(56, 189, 248, 0.28);
+  stroke-width: 0.38;
+  vector-effect: non-scaling-stroke;
+}
+
+.pr5-grid-line {
+  fill: none;
+  stroke: $grid;
+  stroke-width: 0.28;
+}
+
+.pr5-grid-line--vert {
+  stroke: rgba(148, 163, 184, 0.09);
+  stroke-width: 0.22;
+}
+
+.pr5-axis-mark {
+  stroke: rgba(148, 163, 184, 0.55);
+  stroke-width: 0.32;
+}
+
+.pr5-axis-mark--y {
+  stroke: rgba(186, 230, 253, 0.45);
+}
+
+.pr5-axis-mark--x {
+  stroke: rgba(148, 163, 184, 0.65);
+}
+
+.pr5-axis-title {
+  fill: $muted;
+  font-size: 2.15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pr5-y-tick {
+  fill: #cbd5e1;
+  font-size: 2.15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pr5-x-tick {
+  fill: #94a3b8;
+  font-size: 2.15px;
+  font-weight: 500;
+}
+
+.pr5-line {
+  fill: none;
+}
+
+.pr5-footnote {
+  margin: 0.55rem 0 0;
+  font-size: 0.78rem;
+  color: $muted;
+  line-height: 1.45;
+  flex-shrink: 0;
+}
+
 .pr5-empty {
-  color: #94a3b8;
-  margin: 0;
+  color: $muted;
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 2rem 1rem;
 }

@@ -248,7 +248,7 @@ export class Pr500StoreService {
     const isAdmin = await this.auth.fetchIsAppAdmin();
     this.userScopeKey = session.user.id;
     const base =
-      'id, owner_user_id, module_id, name, location, device_token_hash, updated_at, last_seen_at';
+      'id, owner_user_id, module_id, name, location, device_token_hash, updated_at, last_seen_at, params';
 
     type Row = {
       id: string;
@@ -259,6 +259,7 @@ export class Pr500StoreService {
       device_token_hash: string | null;
       updated_at: string;
       last_seen_at?: string | null;
+      params?: unknown;
     };
 
     let rows: Row[] = [];
@@ -302,6 +303,8 @@ export class Pr500StoreService {
       const lastSeenStr =
         lastSeenRaw && typeof lastSeenRaw === 'string' && lastSeenRaw.trim() ? lastSeenRaw.trim() : null;
       const snap = lastById.get(r.id);
+      const merged = mergePr500Params(r.params ?? null);
+      const pressureDisplayPsi = merged.F15 >= 0.5;
       return {
         id: r.id,
         name: r.name,
@@ -312,6 +315,7 @@ export class Pr500StoreService {
         online: this.pr500OnlineFromLastSeen(lastSeenStr),
         ownerUserId: r.owner_user_id,
         deviceToken: tokens[r.id] ?? ((r.device_token_hash ?? '').trim() || undefined),
+        pressureDisplayPsi,
         lastPressureBar: snap?.pressure_bar ?? null,
         lastComp1On: snap?.comp1_on,
         lastComp2On: snap?.comp2_on,

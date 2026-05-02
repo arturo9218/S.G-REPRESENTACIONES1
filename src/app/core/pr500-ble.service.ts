@@ -1,7 +1,7 @@
 import { Injectable, NgZone } from '@angular/core';
 import type { Pr500FormModel } from '../pr500/pr500-params.defaults';
 
-/** Debe coincidir con el firmware `esp32_pr500_supabase.ino`. */
+/** Debe coincidir con el firmware PR500 Stage3 (`esp32_pr500_stage3_app.ino`) si el build incluye BLE. */
 export const PR500_BLE_SERVICE_UUID = '12345678-1234-1234-1234-123456789001';
 export const PR500_BLE_CHAR_RX_UUID = '12345678-1234-1234-1234-123456789002';
 export const PR500_BLE_CHAR_TX_UUID = '12345678-1234-1234-1234-123456789003';

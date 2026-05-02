@@ -81,7 +81,7 @@ export interface DashboardCombistato {
   deviceToken?: string;
 }
 
-/** Controlador de presión PR500 (tabla `pr500_controllers`); misma idea de conexión que combistatos. */
+/** PR500 — central frigorífica por presión de proceso (`pr500_controllers`); misma idea de conexión que combistatos. */
 export interface DashboardPr500 {
   id: string;
   name: string;
@@ -92,6 +92,8 @@ export interface DashboardPr500 {
   online: boolean;
   ownerUserId?: string;
   deviceToken?: string;
+  /** Si true, la UI muestra la presión en psi (según `params.F15` del controlador). */
+  pressureDisplayPsi?: boolean;
   /** Última fila de `pr500_readings` (bar); null si aún no hay telemetría. */
   lastPressureBar?: number | null;
   /** Estados de la misma última lectura (solo definidos si hubo lectura). */

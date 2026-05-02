@@ -1,9 +1,10 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
 import { environment } from '../../environments/environment';
 import { isSupabaseConfigured } from '../core/supabase-config';
+import { mergePr500Params, PR500_PSI_PER_BAR, pr500BarToPsi } from '../pr500/pr500-params.defaults';
 
 export interface Pr500ReadingRow {
   id: number;
@@ -47,7 +48,21 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   pressureAreaPath = '';
   pMin = 0;
   pMax = 6;
-  timeLabels: { x: number; text: string }[] = [];
+  /** Escala Y según `params.F15` del controlador (telemetría siempre en bar). */
+  pressureDisplayPsi = false;
+  pressureYUnit: 'bar' | 'psi' = 'bar';
+  /** Área útil del SVG (viewBox 0–100). Más margen izquierdo para escala de presión. */
+  readonly plot = { x0: 19, x1: 99, y0: 7, y1: 83 };
+  /** Marcas del eje X: posición, texto y segmento de marca bajo el gráfico. */
+  timeLabels: { x: number; y: number; text: string; tickY0: number; tickY1: number }[] = [];
+  yAxisTicks: { y: number; label: string; markX0: number; markX1: number }[] = [];
+  yGridLines: string[] = [];
+  /** Rejilla vertical en marcas de tiempo (trazos suaves). */
+  xGridLines: string[] = [];
+
+  /** Contenedor del SVG para API de pantalla completa. */
+  @ViewChild('chartStage') private chartStage?: ElementRef<HTMLElement>;
+  chartFullscreen = false;
 
   private sub?: Subscription;
 
@@ -72,6 +87,30 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.sub?.unsubscribe();
+  }
+
+  @HostListener('document:fullscreenchange')
+  @HostListener('document:webkitfullscreenchange')
+  onChartFullscreenChange(): void {
+    const el = this.chartStage?.nativeElement;
+    const doc = document as Document & { webkitFullscreenElement?: Element | null };
+    const fs = document.fullscreenElement ?? doc.webkitFullscreenElement;
+    this.chartFullscreen = !!el && fs === el;
+  }
+
+  toggleChartFullscreen(): void {
+    const el = this.chartStage?.nativeElement;
+    if (!el) return;
+    const doc = document as Document & { webkitFullscreenElement?: Element | null };
+    const active = document.fullscreenElement ?? doc.webkitFullscreenElement;
+    const anyEl = el as HTMLElement & { webkitRequestFullscreen?: () => void };
+    if (!active) {
+      const req = el.requestFullscreen?.bind(el) ?? anyEl.webkitRequestFullscreen?.bind(el);
+      void req?.();
+    } else {
+      const d = document as Document & { webkitExitFullscreen?: () => Promise<void> };
+      void (document.exitFullscreen?.() ?? d.webkitExitFullscreen?.());
+    }
   }
 
   backToApp(): void {
@@ -112,14 +151,18 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       }
       const { data: meta, error: eMeta } = await this.auth.client
         .from('pr500_controllers')
-        .select('name')
+        .select('name, params')
         .eq('id', this.pr500Id)
         .maybeSingle();
       if (eMeta) {
         this.error = eMeta.message;
         return;
       }
-      this.pr500Name = (meta as { name?: string } | null)?.name?.trim() || 'PR500';
+      const metaRow = meta as { name?: string; params?: unknown } | null;
+      this.pr500Name = metaRow?.name?.trim() || 'PR500';
+      const m = mergePr500Params(metaRow?.params ?? null);
+      this.pressureDisplayPsi = m.F15 >= 0.5;
+      this.pressureYUnit = this.pressureDisplayPsi ? 'psi' : 'bar';
 
       const fromD = this.parseLocalInput(this.filterFrom);
       const toD = this.parseLocalInput(this.filterTo);
@@ -181,39 +224,133 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     void this.loadAll();
   }
 
+  /** Última lectura del rango cargado (para cabecera del gráfico). */
+  get latestReading(): Pr500ReadingRow | null {
+    return this.readings.length ? this.readings[this.readings.length - 1] : null;
+  }
+
+  formatYAxisValue(v: number): string {
+    if (this.pressureDisplayPsi) return v.toFixed(1);
+    return v.toFixed(2);
+  }
+
+  private static niceStep(range: number, targetTicks: number): number {
+    const rough = range / Math.max(targetTicks - 1, 1);
+    const pow10 = Math.pow(10, Math.floor(Math.log10(Math.max(rough, 1e-9))));
+    const err = rough / pow10;
+    let n = 10;
+    if (err <= 1) n = 1;
+    else if (err <= 2) n = 2;
+    else if (err <= 5) n = 5;
+    return n * pow10;
+  }
+
+  private static readonly MS = 1000;
+  private static readonly DAY = 24 * 3600 * Pr500ChartComponent.MS;
+  /** Pasos de tiempo “redondos”; el primero ≥ span/maxTicks define la escala del eje X. */
+  private static readonly TIME_STEP_CANDIDATES_MS = [
+    10 * Pr500ChartComponent.MS,
+    15 * Pr500ChartComponent.MS,
+    30 * Pr500ChartComponent.MS,
+    60 * Pr500ChartComponent.MS,
+    2 * 60 * Pr500ChartComponent.MS,
+    5 * 60 * Pr500ChartComponent.MS,
+    10 * 60 * Pr500ChartComponent.MS,
+    15 * 60 * Pr500ChartComponent.MS,
+    30 * 60 * Pr500ChartComponent.MS,
+    3600 * Pr500ChartComponent.MS,
+    2 * 3600 * Pr500ChartComponent.MS,
+    3 * 3600 * Pr500ChartComponent.MS,
+    4 * 3600 * Pr500ChartComponent.MS,
+    6 * 3600 * Pr500ChartComponent.MS,
+    12 * 3600 * Pr500ChartComponent.MS,
+    Pr500ChartComponent.DAY,
+    2 * Pr500ChartComponent.DAY,
+    7 * Pr500ChartComponent.DAY,
+    14 * Pr500ChartComponent.DAY,
+    30 * Pr500ChartComponent.DAY,
+    90 * Pr500ChartComponent.DAY,
+    180 * Pr500ChartComponent.DAY,
+    365 * Pr500ChartComponent.DAY,
+  ];
+
+  /** El menor paso “redondo” que deja a lo sumo `maxTicks` intervalos en el rango. */
+  private static pickTimeStepMs(spanMs: number, maxTicks: number): number {
+    const minStep = spanMs / Math.max(maxTicks, 2);
+    for (const s of Pr500ChartComponent.TIME_STEP_CANDIDATES_MS) {
+      if (s >= minStep * 0.98) return s;
+    }
+    return Math.ceil(minStep / Pr500ChartComponent.DAY) * Pr500ChartComponent.DAY;
+  }
+
+  private formatTimeAxisLabel(tMs: number, spanMs: number): string {
+    const d = new Date(tMs);
+    if (spanMs <= 10 * 60 * Pr500ChartComponent.MS) {
+      return d.toLocaleString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    if (spanMs <= 6 * 3600 * Pr500ChartComponent.MS) {
+      return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+    if (spanMs <= 72 * 3600 * Pr500ChartComponent.MS) {
+      return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+    if (spanMs <= 21 * Pr500ChartComponent.DAY) {
+      return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+    return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  }
+
+  private mergeTimeEndpoints(epochs: number[], t0: number, t1: number, spanMs: number): number[] {
+    const merged = [...epochs];
+    const gap = Math.max(spanMs * 0.025, 45_000);
+    merged.sort((a, b) => a - b);
+    if (merged.length === 0) return [t0, t1];
+    if (merged[0] - t0 > gap) merged.unshift(t0);
+    if (t1 - merged[merged.length - 1] > gap) merged.push(t1);
+    return [...new Set(merged)].sort((a, b) => a - b);
+  }
+
   private rebuildChartGeometry(): void {
     const pts = this.displayPoints;
+    const { x0, x1, y0, y1 } = this.plot;
     if (pts.length === 0) {
       this.pressurePath = '';
       this.pressureAreaPath = '';
       this.timeLabels = [];
+      this.yAxisTicks = [];
+      this.yGridLines = [];
+      this.xGridLines = [];
       return;
     }
     const t0 = new Date(pts[0].created_at).getTime();
     const t1 = new Date(pts[pts.length - 1].created_at).getTime();
     const span = Math.max(t1 - t0, 60_000);
+    const plotW = x1 - x0;
+    const plotH = y1 - y0;
     const xAt = (iso: string) => {
       const tx = new Date(iso).getTime();
-      return ((tx - t0) / span) * 100;
+      return x0 + ((tx - t0) / span) * plotW;
     };
     let minP = Infinity;
     let maxP = -Infinity;
+    const toY = (bar: number) => (this.pressureDisplayPsi ? bar * PR500_PSI_PER_BAR : bar);
     for (const p of pts) {
       if (Number.isFinite(p.pressure_bar)) {
-        minP = Math.min(minP, p.pressure_bar);
-        maxP = Math.max(maxP, p.pressure_bar);
+        const yv = toY(p.pressure_bar);
+        minP = Math.min(minP, yv);
+        maxP = Math.max(maxP, yv);
       }
     }
     if (!Number.isFinite(minP) || !Number.isFinite(maxP)) {
       minP = 0;
       maxP = 4;
     }
-    const pad = Math.max((maxP - minP) * 0.08, 0.05);
+    const pad = Math.max((maxP - minP) * 0.08, this.pressureDisplayPsi ? 0.5 : 0.02);
     this.pMin = minP - pad;
     this.pMax = maxP + pad;
-    const yAt = (bar: number) => {
-      const r = this.pMax - this.pMin || 1;
-      return 100 - ((bar - this.pMin) / r) * 100;
+    const pSpan = this.pMax - this.pMin || 1;
+    const yAtVal = (val: number) => {
+      return y0 + (1 - (val - this.pMin) / pSpan) * plotH;
     };
     const parts: string[] = [];
     let firstX = 0;
@@ -221,36 +358,117 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i];
       const x = xAt(p.created_at);
-      const y = yAt(p.pressure_bar);
+      const y = yAtVal(toY(p.pressure_bar));
       if (i === 0) firstX = x;
       lastX = x;
       parts.push(`${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`);
     }
     this.pressurePath = parts.join(' ');
-    this.pressureAreaPath = `${this.pressurePath} L${lastX.toFixed(2)},100 L${firstX.toFixed(2)},100 Z`;
-    this.timeLabels = [
-      { x: 0, text: new Date(pts[0].created_at).toLocaleString('es-AR', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }) },
-      {
-        x: 100,
-        text: new Date(pts[pts.length - 1].created_at).toLocaleString('es-AR', {
-          month: 'short',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      },
-    ];
+    this.pressureAreaPath = `${this.pressurePath} L${lastX.toFixed(2)},${y1} L${firstX.toFixed(2)},${y1} Z`;
+
+    const step = Pr500ChartComponent.niceStep(pSpan, 6);
+    const firstTick = Math.ceil(this.pMin / step) * step;
+    const ticks: { y: number; label: string; markX0: number; markX1: number }[] = [];
+    const grids: string[] = [];
+    for (let v = firstTick; v <= this.pMax + step * 0.001; v += step) {
+      if (v < this.pMin - step * 0.001) continue;
+      const yp = yAtVal(v);
+      if (yp < y0 - 0.5 || yp > y1 + 0.5) continue;
+      const markX0 = x0 - 1.35;
+      const markX1 = x0;
+      ticks.push({
+        y: yp,
+        label: `${this.formatYAxisValue(v)} ${this.pressureYUnit}`,
+        markX0,
+        markX1,
+      });
+      grids.push(`M${x0.toFixed(2)},${yp.toFixed(2)}L${x1.toFixed(2)},${yp.toFixed(2)}`);
+      if (ticks.length >= 9) break;
+    }
+    if (ticks.length === 0) {
+      const markX0 = x0 - 1.35;
+      const markX1 = x0;
+      ticks.push({
+        y: yAtVal(this.pMax),
+        label: `${this.formatYAxisValue(this.pMax)} ${this.pressureYUnit}`,
+        markX0,
+        markX1,
+      });
+      ticks.push({
+        y: yAtVal(this.pMin),
+        label: `${this.formatYAxisValue(this.pMin)} ${this.pressureYUnit}`,
+        markX0,
+        markX1,
+      });
+      grids.push(`M${x0.toFixed(2)},${yAtVal(this.pMax).toFixed(2)}L${x1.toFixed(2)},${yAtVal(this.pMax).toFixed(2)}`);
+      grids.push(`M${x0.toFixed(2)},${yAtVal(this.pMin).toFixed(2)}L${x1.toFixed(2)},${yAtVal(this.pMin).toFixed(2)}`);
+    }
+    this.yAxisTicks = ticks;
+    this.yGridLines = grids;
+
+    const stepMs = Pr500ChartComponent.pickTimeStepMs(span, 6);
+    let curT = Math.floor(t0 / stepMs) * stepMs;
+    while (curT < t0 - 0.5) curT += stepMs;
+    const epochList: number[] = [];
+    while (curT <= t1 + stepMs * 0.01) {
+      if (curT >= t0 && curT <= t1) epochList.push(curT);
+      curT += stepMs;
+      if (epochList.length > 18) break;
+    }
+    const mergedEpochs = this.mergeTimeEndpoints(epochList, t0, t1, span);
+    const tLabs: { x: number; y: number; text: string; tickY0: number; tickY1: number }[] = [];
+    const xGrids: string[] = [];
+    let prevX = -Infinity;
+    /** Espacio mínimo en unidades del viewBox entre centros de etiquetas (evita solapamiento al estirar el SVG). */
+    const minLabelDx = Math.max(11, plotW / 6.5);
+    for (const tm of mergedEpochs) {
+      const x = xAt(new Date(tm).toISOString());
+      if (x < x0 - 0.02 || x > x1 + 0.02) continue;
+      if (x - prevX < minLabelDx) continue;
+      prevX = x;
+      const labelY = y1 + 5.8;
+      tLabs.push({
+        x,
+        y: labelY,
+        text: this.formatTimeAxisLabel(tm, span),
+        tickY0: y1,
+        tickY1: y1 + 2.6,
+      });
+      if (tLabs.length <= 12) {
+        xGrids.push(`M${x.toFixed(2)},${y0.toFixed(2)}L${x.toFixed(2)},${y1.toFixed(2)}`);
+      }
+    }
+    this.timeLabels = tLabs;
+    this.xGridLines = xGrids;
   }
 
   lastRowSummary(): string {
-    const r = this.readings.length ? this.readings[this.readings.length - 1] : null;
+    const r = this.latestReading;
     if (!r) return 'Sin datos en el rango.';
     const di = (v: boolean | null | undefined) =>
       v === null || v === undefined ? '—' : v ? 'OK' : 'FALLO';
+    const pStr = this.pressureDisplayPsi
+      ? `${pr500BarToPsi(r.pressure_bar).toFixed(1)} psi (${r.pressure_bar.toFixed(2)} bar)`
+      : `${r.pressure_bar.toFixed(2)} bar`;
     return (
-      `Presión: ${r.pressure_bar.toFixed(2)} bar · C1 ${r.comp1_on ? 'ON' : 'OFF'} · C2 ${r.comp2_on ? 'ON' : 'OFF'} · C3 ${
-        r.comp3_on ? 'ON' : 'OFF'
-      } · Alarma ${r.alarm_on ? 'SÍ' : 'no'} · DI ${di(r.di1_ok)}/${di(r.di2_ok)}/${di(r.di3_ok)}/${di(r.di4_ok)}`
+      `Última lectura: ${pStr} · Compresores C1–C3 y alarma según leyenda · DI ${di(r.di1_ok)}/${di(r.di2_ok)}/${di(r.di3_ok)}/${di(r.di4_ok)}`
     );
+  }
+
+  readingCountLabel(): string {
+    const n = this.readings.length;
+    if (n === 0) return 'Sin puntos en el rango';
+    const shown = this.displayPoints.length;
+    if (shown < n) return `${n.toLocaleString('es-AR')} lecturas (${shown.toLocaleString('es-AR')} en el gráfico)`;
+    return `${n.toLocaleString('es-AR')} lecturas`;
+  }
+
+  latestPressureText(): string {
+    const L = this.latestReading;
+    if (!L || !Number.isFinite(L.pressure_bar)) return '—';
+    if (this.pressureDisplayPsi) {
+      return `${pr500BarToPsi(L.pressure_bar).toFixed(1)} ${this.pressureYUnit}`;
+    }
+    return `${L.pressure_bar.toFixed(2)} ${this.pressureYUnit}`;
   }
 }

@@ -834,9 +834,9 @@
               <div class="device-section__titles">
                 <h2 class="device-section__title">PR500</h2>
                 <p class="device-section__hint">
-                  Control de presión (baja / setpoints / etapas). Los parámetros <strong>F01–F21</strong> se editan en
-                  <strong>Configuración</strong> (botón en cada tarjeta). La telemetría llega por la misma función de ingesta
-                  que paneles y combistatos, con <code>pressure_bar</code> en el POST.
+                  <strong>Central frigorífica</strong>: presión de proceso, setpoints y etapas. Los parámetros
+                  <strong>F01–F22</strong> se editan en <strong>Configuración</strong> (botón en cada tarjeta). La telemetría
+                  llega por la misma función de ingesta que paneles y combistatos, con <code>pressure_bar</code> en el POST.
                 </p>
               </div>
             </div>
@@ -865,10 +865,23 @@
                 <div class="device-card__temps">
                   <ng-container *ngIf="p.lastPressureBar != null; else pr500NoPressure">
                     <div class="device-card__temps-inner device-card__temps-inner--single">
-                      <span class="device-card__sensor-label">Presión (línea)</span>
-                      <span class="device-card__sensor-value" [attr.aria-label]="p.lastPressureBar + ' bar'">
-                        <span class="device-card__sensor-value-num">{{ p.lastPressureBar | number : '1.2-2' }}</span>
-                        <span class="device-card__sensor-value-unit" aria-hidden="true">bar</span>
+                      <span class="device-card__sensor-label"
+                        >Presión de proceso ({{ pr500PressureDisplayUnit(p) }})</span
+                      >
+                      <span
+                        class="device-card__sensor-value"
+                        [attr.aria-label]="
+                          (pr500PressureDisplayValue(p) | number : (p.pressureDisplayPsi ? '1.1-2' : '1.2-2')) +
+                          ' ' +
+                          pr500PressureDisplayUnit(p)
+                        "
+                      >
+                        <span class="device-card__sensor-value-num">{{
+                          pr500PressureDisplayValue(p) | number : (p.pressureDisplayPsi ? '1.1-2' : '1.2-2')
+                        }}</span>
+                        <span class="device-card__sensor-value-unit" aria-hidden="true">{{
+                          pr500PressureDisplayUnit(p)
+                        }}</span>
                       </span>
                       <span class="device-card__sensor-subline" *ngIf="pr500CompressorLine(p) as compLine">{{
                         compLine
@@ -881,7 +894,7 @@
                           [queryParams]="{ pr500Id: p.id }"
                           (click)="$event.stopPropagation()"
                           title="Gráfico histórico"
-                          aria-label="Gráfico de presión PR500"
+                          aria-label="Gráfico histórico PR500 (presión de proceso)"
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
                             <path d="M3 3v18h18" />
@@ -913,10 +926,10 @@
                   <button
                     type="button"
                     class="device-card__btn"
-                    [attr.aria-label]="'Parámetros F01–F21 de ' + p.name"
+                    [attr.aria-label]="'Parámetros F01–F22 de ' + p.name"
                     (click)="goPr500Settings(p, $event)"
                   >
-                    F01–F21
+                    F01–F22
                   </button>
                   <a
                     class="device-card__btn device-card__btn--link"
@@ -1236,7 +1249,7 @@
             <p class="card__hint card__hint--tight">
               Tocá un <strong>panel de medición</strong> para umbrales, nombres de sensores, corrección, compartir, etc.
               Tocá un <strong>combistato</strong> para los parámetros <strong>F01–F55</strong> en la nube, o un
-              <strong>PR500</strong> para <strong>F01–F21</strong> (presión / etapas). No hace falta que esté online para
+              <strong>PR500</strong> para <strong>F01–F22</strong> (presión de proceso / etapas). No hace falta que esté online para
               guardar.
             </p>
             <p class="card__empty" *ngIf="!devices.length && !combistatos.length && !pr500s.length">
@@ -2900,7 +2913,7 @@
               *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
             >
               <div class="card__title-row">
-                <h2 class="card__title card__title--sm">PR500 — parámetros F01–F21</h2>
+                <h2 class="card__title card__title--sm">PR500 — central frigorífica (F01–F22)</h2>
                 <button type="button" class="btn btn--ghost btn--sm" (click)="openAddPr500Modal()">+ PR500</button>
               </div>
               <p class="card__hint card__hint--tight">
@@ -2923,7 +2936,7 @@
           <h1 class="empty__title">Sin contenido aún</h1>
           <p class="empty__text">
             Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, <strong>combistatos</strong> para la
-            configuración F01–F55 en la nube, o <strong>PR500</strong> para presión y F01–F21. Son independientes: podés
+            configuración F01–F55 en la nube, o <strong>PR500</strong> para presión de proceso y F01–F22. Son independientes: podés
             tener todos los que necesites de cada tipo. Si ya cargaste datos en otro momento, revisá la conexión o
             cerrá sesión y volvé a entrar.
           </p>
@@ -3179,7 +3192,7 @@
       <button type="button" class="modal__close" (click)="closePr500Modal()" aria-label="Cerrar">×</button>
     </div>
     <p class="modal__intro" *ngIf="pr500ModalMode === 'add'">
-      Nuevo controlador PR500. Conectá el firmware con la misma URL de ingesta que los paneles:
+      Nuevo controlador PR500 (central frigorífica). Conectá el firmware con la misma URL de ingesta que los paneles:
       <code>moduleId</code>, <code>deviceToken</code> y en cada envío <code>pressure_bar</code> (y estados
       <code>r1_on</code>…<code>r4_alarm</code>).
     </p>

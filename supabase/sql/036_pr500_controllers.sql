@@ -1,5 +1,5 @@
 -- Controladores de presión PR500 (3 etapas de compresores + alarmas).
--- Misma idea que `combistatos`: `module_id` + `device_token_hash`, `params` JSONB (F01–F21).
+-- Misma idea que `combistatos`: `module_id` + `device_token_hash`, `params` JSONB (F01–F22, extensible).
 -- Ejecutar en Supabase SQL Editor después de 033 y 031.
 
 create table if not exists public.pr500_controllers (

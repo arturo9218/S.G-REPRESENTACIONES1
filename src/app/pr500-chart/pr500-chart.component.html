@@ -1,11 +1,12 @@
 <div class="pr5-page page--dark">
   <header class="pr5-head">
-    <div>
-      <h1 class="pr5-title">PR500 · {{ pr500Name }}</h1>
+    <div class="pr5-head__text">
+      <p class="pr5-kicker">Historial · central frigorífica</p>
+      <h1 class="pr5-title">{{ pr500Name }}</h1>
       <p class="pr5-sub">
-        Presión (bar) y estados de compresores / alarma / entradas digitales. El firmware debe enviar
-        <code>pressure_bar</code>, <code>r1_on</code>…<code>r4_alarm</code> y opcionalmente <code>di1_ok</code>…<code>di4_ok</code> en cada POST a
-        <code>ingest-reading</code>.
+        Curva de presión de proceso en el rango elegido. La nube guarda siempre bar; si el control está en
+        <strong>psi</strong>, el eje vertical se muestra en esa unidad. Debajo: estado reciente de compresores y
+        alarma.
       </p>
     </div>
     <div class="pr5-head-actions">
@@ -20,7 +21,8 @@
 
   <div class="pr5-layout" *ngIf="pr500Id">
     <aside class="pr5-side card">
-      <h2 class="pr5-side__title">Rango</h2>
+      <h2 class="pr5-side__title">Rango de fechas</h2>
+      <p class="pr5-side__lead">Elegí el intervalo y aplicá para redibujar la curva.</p>
       <label class="pr5-field">
         <span>Desde</span>
         <input type="datetime-local" [(ngModel)]="filterFrom" name="pr5f" />
@@ -32,47 +34,174 @@
       <button type="button" class="btn btn--primary btn--block" [disabled]="loading" (click)="applyFilters()">
         Aplicar rango
       </button>
-      <p class="pr5-hint">Escala Y: {{ pMin.toFixed(2) }} … {{ pMax.toFixed(2) }} bar</p>
+      <dl class="pr5-side__meta" *ngIf="displayPoints.length">
+        <div class="pr5-side__meta-row">
+          <dt>Eje vertical</dt>
+          <dd>{{ pressureYUnit === 'psi' ? 'psi (convertido desde bar)' : 'bar' }}</dd>
+        </div>
+        <div class="pr5-side__meta-row">
+          <dt>Escala actual</dt>
+          <dd>{{ pMin.toFixed(pressureDisplayPsi ? 1 : 2) }} — {{ pMax.toFixed(pressureDisplayPsi ? 1 : 2) }}</dd>
+        </div>
+        <div class="pr5-side__meta-row">
+          <dt>Datos</dt>
+          <dd>{{ readingCountLabel() }}</dd>
+        </div>
+      </dl>
     </aside>
 
     <section class="pr5-main card">
-      <h2 class="pr5-main__title">Presión</h2>
-      <p class="pr5-summary">{{ lastRowSummary() }}</p>
-      <div class="pr5-svg-wrap" *ngIf="displayPoints.length">
-        <svg class="pr5-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="pr5g" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="rgba(59,130,246,0.35)" />
-              <stop offset="100%" stop-color="rgba(59,130,246,0)" />
-            </linearGradient>
-          </defs>
-          <rect x="0" y="0" width="100" height="100" fill="#0b1220" />
-          <text
-            *ngFor="let lb of timeLabels"
-            [attr.x]="lb.x"
-            y="96"
-            fill="#94a3b8"
-            font-size="3"
-            text-anchor="middle"
+      <div class="pr5-main__head">
+        <h2 class="pr5-main__title">Presión de proceso</h2>
+        <div class="pr5-main__actions">
+          <p class="pr5-main__unit">Eje Y: {{ pressureYUnit }}</p>
+          <button
+            type="button"
+            class="btn btn--ghost pr5-fs-btn"
+            [disabled]="!displayPoints.length"
+            (click)="toggleChartFullscreen()"
           >
-            {{ lb.text }}
-          </text>
-          <path
-            *ngIf="pressureAreaPath"
-            [attr.d]="pressureAreaPath"
-            fill="url(#pr5g)"
-            stroke="none"
-          />
-          <path
-            *ngIf="pressurePath"
-            [attr.d]="pressurePath"
-            fill="none"
-            stroke="#3b82f6"
-            stroke-width="0.9"
-            vector-effect="non-scaling-stroke"
-          />
-        </svg>
+            {{ chartFullscreen ? 'Salir pantalla completa' : 'Pantalla completa' }}
+          </button>
+        </div>
       </div>
+
+      <div class="pr5-legend" *ngIf="latestReading as L">
+        <span class="pr5-legend__item pr5-legend__item--pres">Última: {{ latestPressureText() }}</span>
+        <span class="pr5-legend__pill" [class.pr5-legend__pill--active]="L.comp1_on">C1</span>
+        <span class="pr5-legend__pill" [class.pr5-legend__pill--active]="L.comp2_on">C2</span>
+        <span class="pr5-legend__pill" [class.pr5-legend__pill--active]="L.comp3_on">C3</span>
+        <span class="pr5-legend__pill pr5-legend__pill--alarm" [class.pr5-legend__pill--alarm-on]="L.alarm_on">
+          Alarma
+        </span>
+      </div>
+
+      <div class="pr5-chart" *ngIf="displayPoints.length">
+        <div #chartStage class="pr5-svg-wrap">
+          <svg class="pr5-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="pr5AreaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="rgba(56, 189, 248, 0.22)" />
+                <stop offset="55%" stop-color="rgba(59, 130, 246, 0.08)" />
+                <stop offset="100%" stop-color="rgba(15, 23, 42, 0)" />
+              </linearGradient>
+              <linearGradient id="pr5LineGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#38bdf8" />
+                <stop offset="100%" stop-color="#3b82f6" />
+              </linearGradient>
+              <filter id="pr5LineGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="0.35" result="b" />
+                <feMerge>
+                  <feMergeNode in="b" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <clipPath id="pr5PlotClip">
+                <rect [attr.x]="plot.x0" [attr.y]="plot.y0" [attr.width]="plot.x1 - plot.x0" [attr.height]="plot.y1 - plot.y0" rx="0.3" />
+              </clipPath>
+            </defs>
+
+            <!-- Fondo del área de trazado -->
+            <rect
+              class="pr5-plot-bg"
+              [attr.x]="plot.x0"
+              [attr.y]="plot.y0"
+              [attr.width]="plot.x1 - plot.x0"
+              [attr.height]="plot.y1 - plot.y0"
+              rx="0.4"
+            />
+
+            <!-- Título eje Y -->
+            <text class="pr5-axis-title pr5-axis-title--y" [attr.x]="plot.x0 - 2.4" [attr.y]="plot.y0 - 1.2" text-anchor="end">
+              Presión ({{ pressureYUnit }})
+            </text>
+
+            <!-- Rejilla vertical (tiempo) -->
+            <path
+              *ngFor="let d of xGridLines"
+              class="pr5-grid-line pr5-grid-line--vert"
+              [attr.d]="d"
+              vector-effect="non-scaling-stroke"
+            />
+
+            <!-- Rejilla horizontal (presión) -->
+            <path *ngFor="let d of yGridLines" class="pr5-grid-line" [attr.d]="d" vector-effect="non-scaling-stroke" />
+
+            <!-- Marco del área -->
+            <rect
+              class="pr5-plot-frame"
+              [attr.x]="plot.x0"
+              [attr.y]="plot.y0"
+              [attr.width]="plot.x1 - plot.x0"
+              [attr.height]="plot.y1 - plot.y0"
+              rx="0.4"
+            />
+
+            <!-- Marcas del eje Y (presión) -->
+            <line
+              *ngFor="let t of yAxisTicks"
+              class="pr5-axis-mark pr5-axis-mark--y"
+              [attr.x1]="t.markX0"
+              [attr.y1]="t.y"
+              [attr.x2]="t.markX1"
+              [attr.y2]="t.y"
+              vector-effect="non-scaling-stroke"
+            />
+
+            <!-- Etiquetas eje Y -->
+            <text
+              *ngFor="let t of yAxisTicks"
+              class="pr5-y-tick"
+              [attr.x]="plot.x0 - 1.15"
+              [attr.y]="t.y + 0.9"
+              text-anchor="end"
+            >
+              {{ t.label }}
+            </text>
+
+            <g clip-path="url(#pr5PlotClip)">
+              <path *ngIf="pressureAreaPath" [attr.d]="pressureAreaPath" fill="url(#pr5AreaGrad)" stroke="none" />
+              <path
+                *ngIf="pressurePath"
+                class="pr5-line"
+                [attr.d]="pressurePath"
+                fill="none"
+                stroke="url(#pr5LineGrad)"
+                stroke-width="1.15"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                vector-effect="non-scaling-stroke"
+                filter="url(#pr5LineGlow)"
+              />
+            </g>
+
+            <!-- Eje X: tiempo -->
+            <text class="pr5-axis-title pr5-axis-title--x" [attr.x]="(plot.x0 + plot.x1) / 2" [attr.y]="97.2" text-anchor="middle">
+              Tiempo (local)
+            </text>
+            <line
+              *ngFor="let lb of timeLabels"
+              class="pr5-axis-mark pr5-axis-mark--x"
+              [attr.x1]="lb.x"
+              [attr.x2]="lb.x"
+              [attr.y1]="lb.tickY0"
+              [attr.y2]="lb.tickY1"
+              vector-effect="non-scaling-stroke"
+            />
+            <text
+              *ngFor="let lb of timeLabels"
+              class="pr5-x-tick"
+              [attr.x]="lb.x"
+              [attr.y]="lb.y"
+              text-anchor="middle"
+            >
+              {{ lb.text }}
+            </text>
+          </svg>
+        </div>
+      </div>
+
+      <p class="pr5-footnote" *ngIf="displayPoints.length">{{ lastRowSummary() }}</p>
       <p class="pr5-empty" *ngIf="!displayPoints.length && !loading">No hay lecturas en este rango.</p>
     </section>
   </div>

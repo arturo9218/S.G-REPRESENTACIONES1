@@ -1,6 +1,22 @@
 /**
- * Parámetros F01–F21 alineados al control por presión PR500 (setpoint, diferenciales, etapas, alarmas).
- * Valores por defecto orientativos; el firmware ESP32 puede sincronizar el mismo JSON.
+ * Parámetros F01–F27 — PR500 para **central frigorífica**: control por presión de proceso (setpoint, diferenciales,
+ * etapas de máquinas, alarmas). El punto físico del sensor (succión, descarga, etc.) lo define la instalación.
+ * Valores por defecto orientativos; el firmware ESP32 sincroniza el mismo JSON.
+ *
+ * F01: armado general — 0 = máquinas OFF (relés), 1 = habilitado.
+ *
+ * F02: setpoint de presión en la unidad de F15 (bar o psi). Rango acotado a la escala del ADC del Stage3 (0…8 bar).
+ *
+ * F03: diferencial general (misma unidad que F15). Con F22=0: banda simétrica clásica alrededor de F02. Con F22=1:
+ * banda “alta presión” (ver F22).
+ *
+ * F22: histéresis — 0 = etapa ON si P cae por debajo de la banda (típ. succión / más carga térmica). 1 = etapa ON si
+ * P ≥ F02+F03−i·F04 y OFF si P ≤ F02−i·F04 (p. ej. regulación por presión alta en el punto medido).
+ *
+ * F23: falla de sensor (tensión ADC fuera de rango, p. ej. cable cortado): segundos continuos antes de disparar
+ * alarma y modo ciclo de compresores; 0 = desactiva esta protección.
+ * F24 / F25: en modo falla de sensor, segundos que los compresores (1..F09) quedan encendidos juntos / apagados (ciclo).
+ * F26 / F27: tensión mínima y máxima válida en el pin ADC (voltios). Fuera de [F26, F27] se considera falla si F23≠0.
  */
 export const PR500_DEFAULTS = {
   F01: 0,
@@ -24,12 +40,81 @@ export const PR500_DEFAULTS = {
   F19: 0,
   F20: 1,
   F21: 0,
+  F22: 0,
+  F23: 10,
+  F24: 300,
+  F25: 300,
+  F26: 0.08,
+  F27: 3.22,
 };
 
 /** Modelo editable en formularios (sin `as const` en los defaults, para permitir asignaciones). */
 export type Pr500FormModel = typeof PR500_DEFAULTS;
 
+const PR500_ADC_GAP_V = 0.05;
+
+/** Ajusta F26/F27 (V) al rango del ESP32 y deja al menos 50 mV de ventana. */
+export function clampPr500F26F27(model: Pr500FormModel): void {
+  let lo = Number.isFinite(model.F26) ? model.F26 : PR500_DEFAULTS.F26;
+  let hi = Number.isFinite(model.F27) ? model.F27 : PR500_DEFAULTS.F27;
+  lo = Math.round(Math.min(3.25, Math.max(0, lo)) * 1000) / 1000;
+  hi = Math.round(Math.min(3.3, Math.max(0.05, hi)) * 1000) / 1000;
+  if (hi < lo + PR500_ADC_GAP_V) hi = Math.min(3.3, lo + PR500_ADC_GAP_V);
+  if (lo > hi - PR500_ADC_GAP_V) lo = Math.max(0, hi - PR500_ADC_GAP_V);
+  model.F26 = lo;
+  model.F27 = hi;
+}
+
 const KEYS = Object.keys(PR500_DEFAULTS) as (keyof Pr500FormModel)[];
+
+/** Igual que el firmware Stage3: F01 solo 0 o 1 (umbrales ≥0.5 → 1). */
+export function normalizePr500F01(n: number): 0 | 1 {
+  return n >= 0.5 ? 1 : 0;
+}
+
+/** 1 bar = 14,5037738 psi (exacto ISO 80000-3). */
+export const PR500_PSI_PER_BAR = 14.5037738;
+
+/** Telemetría siempre en bar; convierte a psi para mostrar cuando F15 indica psi. */
+export function pr500BarToPsi(bar: number): number {
+  if (!Number.isFinite(bar)) return 0;
+  return Math.round(bar * PR500_PSI_PER_BAR * 100) / 100;
+}
+
+/** Mínimo/máximo F02 en bar (coherente con `pressureBarSensorOnly` 0…8 bar en Stage3). */
+export const PR500_F02_BAR_MIN = 0.05;
+export const PR500_F02_BAR_MAX = 8;
+
+/** F03 en bar: mínimo el piso del firmware (`updateHyst`); máximo razonable para no saturar la escala 0…8 bar. */
+export const PR500_F03_BAR_MIN = 0.05;
+export const PR500_F03_BAR_MAX = 6;
+
+/** F15: 0 = bar, 1 = psi (misma regla que el firmware). */
+export function normalizePr500F15(n: number): 0 | 1 {
+  return n >= 0.5 ? 1 : 0;
+}
+
+/** Acota y redondea F02 a 2 decimales según unidad (F15). */
+export function clampPr500F02(value: number, f15: number): number {
+  const psi = f15 >= 0.5;
+  const lo = psi ? PR500_F02_BAR_MIN * PR500_PSI_PER_BAR : PR500_F02_BAR_MIN;
+  const hi = psi ? PR500_F02_BAR_MAX * PR500_PSI_PER_BAR : PR500_F02_BAR_MAX;
+  let v = Number.isFinite(value) ? value : psi ? 2 * PR500_PSI_PER_BAR : 2;
+  if (v < lo) v = lo;
+  if (v > hi) v = hi;
+  return Math.round(v * 100) / 100;
+}
+
+/** Acota y redondea F03 (diferencial general) a 2 decimales según F15. */
+export function clampPr500F03(value: number, f15: number): number {
+  const psi = f15 >= 0.5;
+  const lo = psi ? PR500_F03_BAR_MIN * PR500_PSI_PER_BAR : PR500_F03_BAR_MIN;
+  const hi = psi ? PR500_F03_BAR_MAX * PR500_PSI_PER_BAR : PR500_F03_BAR_MAX;
+  let v = Number.isFinite(value) ? value : psi ? 0.5 * PR500_PSI_PER_BAR : 0.5;
+  if (v < lo) v = lo;
+  if (v > hi) v = hi;
+  return Math.round(v * 100) / 100;
+}
 
 export function mergePr500Params(db: unknown): Pr500FormModel {
   const base: Pr500FormModel = { ...PR500_DEFAULTS };
@@ -39,19 +124,49 @@ export function mergePr500Params(db: unknown): Pr500FormModel {
     if (!(k in o)) continue;
     const v = o[k as string];
     const n = typeof v === 'number' ? v : Number(v);
-    if (Number.isFinite(n)) base[k] = n;
+    if (!Number.isFinite(n)) continue;
+    base[k] =
+      k === 'F01' || k === 'F22'
+        ? normalizePr500F01(n)
+        : k === 'F15'
+          ? normalizePr500F15(n)
+          : n;
   }
+  base.F01 = normalizePr500F01(base.F01);
+  base.F15 = normalizePr500F15(base.F15);
+  base.F22 = normalizePr500F01(base.F22);
+  base.F02 = clampPr500F02(base.F02, base.F15);
+  base.F03 = clampPr500F03(base.F03, base.F15);
+  let f23 = Math.round(Number(base.F23));
+  if (!Number.isFinite(f23)) f23 = PR500_DEFAULTS.F23;
+  if (f23 < 0) f23 = 0;
+  else if (f23 > 0 && f23 < 5) f23 = 5;
+  else if (f23 > 600) f23 = 600;
+  base.F23 = f23;
+  const clampSeg = (v: number, lo: number, hi: number, d: number) => {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n)) return d;
+    return Math.min(hi, Math.max(lo, n));
+  };
+  base.F24 = clampSeg(base.F24, 10, 7200, PR500_DEFAULTS.F24);
+  base.F25 = clampSeg(base.F25, 10, 7200, PR500_DEFAULTS.F25);
+  clampPr500F26F27(base);
   return base;
 }
 
 export function pr500ToJsonBlob(m: Pr500FormModel): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const k of KEYS) out[k as string] = m[k];
+  const f15 = normalizePr500F15(m.F15);
+  for (const k of KEYS) {
+    const v = m[k];
+    if ((k === 'F01' || k === 'F22') && typeof v === 'number') out[k as string] = normalizePr500F01(v);
+    else if (k === 'F15' && typeof v === 'number') out[k as string] = f15;
+    else if (k === 'F02' && typeof v === 'number') out[k as string] = clampPr500F02(v, f15);
+    else if (k === 'F03' && typeof v === 'number') out[k as string] = clampPr500F03(v, f15);
+    else out[k as string] = v as number;
+  }
   return out;
 }
-
-/** 1 bar = 14,5037738 psi (exacto ISO 80000-3). */
-export const PR500_PSI_PER_BAR = 14.5037738;
 
 /** Presión: F02,F03,F04,F10,F11,F14 están en la misma unidad que indica F15 (0=bar, 1=psi). */
 const PRESSURE_KEYS_FOR_F15: (keyof Pr500FormModel)[] = ['F02', 'F03', 'F04', 'F10', 'F11', 'F14'];
@@ -75,4 +190,6 @@ export function convertPr500PressureParamsForF15(
       model[k] = Math.round(cur * factor * 10000) / 10000;
     }
   }
+  model.F02 = clampPr500F02(model.F02, nextF15);
+  model.F03 = clampPr500F03(model.F03, nextF15);
 }

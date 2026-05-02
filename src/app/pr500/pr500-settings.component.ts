@@ -1,7 +1,17 @@
 import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
 import {
+  clampPr500F02,
+  clampPr500F03,
+  clampPr500F26F27,
   convertPr500PressureParamsForF15,
   mergePr500Params,
+  normalizePr500F01,
+  pr500BarToPsi,
+  PR500_F02_BAR_MAX,
+  PR500_F02_BAR_MIN,
+  PR500_F03_BAR_MAX,
+  PR500_F03_BAR_MIN,
+  PR500_PSI_PER_BAR,
   type Pr500FormModel,
 } from './pr500-params.defaults';
 import { PR500_SECTIONS } from './pr500-sections';
@@ -89,6 +99,36 @@ export class Pr500SettingsComponent implements OnChanges {
     if (!this.model) return;
     const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
     if (!Number.isFinite(n)) return;
+    if (key === 'F01' || key === 'F22') {
+      this.model[key] = normalizePr500F01(n);
+      return;
+    }
+    if (key === 'F02') {
+      this.model.F02 = clampPr500F02(n, this.model.F15);
+      return;
+    }
+    if (key === 'F03') {
+      this.model.F03 = clampPr500F03(n, this.model.F15);
+      return;
+    }
+    if (key === 'F23') {
+      let v = Math.round(n);
+      if (v < 0) v = 0;
+      else if (v > 0 && v < 5) v = 5;
+      else if (v > 600) v = 600;
+      this.model.F23 = v;
+      return;
+    }
+    if (key === 'F24' || key === 'F25') {
+      const v = Math.min(7200, Math.max(10, Math.round(n)));
+      this.model[key] = v;
+      return;
+    }
+    if (key === 'F26' || key === 'F27') {
+      this.model[key] = n;
+      clampPr500F26F27(this.model);
+      return;
+    }
     if (key === 'F15') {
       const next = n >= 0.5 ? 1 : 0;
       const prev = this.model.F15 >= 0.5 ? 1 : 0;
@@ -100,9 +140,28 @@ export class Pr500SettingsComponent implements OnChanges {
             : 'Unidad: bar. Se convirtieron F02, F03, F04, F10, F11 y F14 desde psi (guardá para aplicar al equipo).';
       }
       this.model.F15 = next;
+      this.model.F02 = clampPr500F02(this.model.F02, this.model.F15);
+      this.model.F03 = clampPr500F03(this.model.F03, this.model.F15);
       return;
     }
     this.model[key] = n;
+  }
+
+  /** Límites del input F02 según F15 (bar vs psi), alineados al firmware Stage3. */
+  f02InputMin(m: Pr500FormModel): number {
+    return m.F15 >= 0.5 ? PR500_F02_BAR_MIN * PR500_PSI_PER_BAR : PR500_F02_BAR_MIN;
+  }
+
+  f02InputMax(m: Pr500FormModel): number {
+    return m.F15 >= 0.5 ? PR500_F02_BAR_MAX * PR500_PSI_PER_BAR : PR500_F02_BAR_MAX;
+  }
+
+  f03InputMin(m: Pr500FormModel): number {
+    return m.F15 >= 0.5 ? PR500_F03_BAR_MIN * PR500_PSI_PER_BAR : PR500_F03_BAR_MIN;
+  }
+
+  f03InputMax(m: Pr500FormModel): number {
+    return m.F15 >= 0.5 ? PR500_F03_BAR_MAX * PR500_PSI_PER_BAR : PR500_F03_BAR_MAX;
   }
 
   resetDefaults(): void {
@@ -156,8 +215,13 @@ export class Pr500SettingsComponent implements OnChanges {
     try {
       const r = await this.pr500Ble.getLive();
       const p = r.pressure_bar;
+      const usePsi = this.model != null && this.model.F15 >= 0.5;
       const bits = [
-        p != null && Number.isFinite(p) ? `P=${p.toFixed(2)} bar` : null,
+        p != null && Number.isFinite(p)
+          ? usePsi
+            ? `P=${pr500BarToPsi(p).toFixed(1)} psi (${p.toFixed(2)} bar telem.)`
+            : `P=${p.toFixed(2)} bar`
+          : null,
         `C1 ${r.r1_on ? 'ON' : 'OFF'}`,
         `C2 ${r.r2_on ? 'ON' : 'OFF'}`,
         `C3 ${r.r3_on ? 'ON' : 'OFF'}`,
