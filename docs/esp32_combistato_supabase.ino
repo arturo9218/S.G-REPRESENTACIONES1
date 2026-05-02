@@ -46,6 +46,62 @@
 #include <math.h>
 #include <time.h>
 
+// ========================= Combistato F01–F55 (tipos aquí: Arduino 1.x inserta prototipos justo después de los #include) =========================
+struct CombistatoParams {
+  float F01_sp;
+  float F02_diff;
+  float F03_corr_s1;
+  float F04_corr_s2;
+  uint8_t F05_defrost_type;
+  uint16_t F06_defrost_interval_min;
+  uint16_t F07_defrost_max_min;
+  float F08_defrost_end_evap_c;
+  uint8_t F09_defrost_on_boot;
+  uint8_t F10_fan_in_defrost;
+  uint16_t F11_fan_post_defrost_min;
+  float F12_fan_evap_on_below_c;
+  float F13_alarm_high;
+  float F14_alarm_low;
+  uint16_t F15_alarm_delay_min;
+  uint8_t F16_probe_alarm;
+  float F47_alarm_hyst;
+  uint16_t F48_alarm_boot_delay_min;
+  uint16_t F17_comp_min_off_s;
+  uint16_t F18_comp_min_on_s;
+  uint16_t F19_emerg_on_s;
+  uint16_t F20_emerg_off_s;
+  uint8_t F25_door_enable;
+  uint8_t F26_door_nc;
+  uint16_t F27_door_alarm_delay_s;
+  uint8_t F28_fan_off_door;
+  uint8_t F29_block_alarm_door;
+  uint8_t F30_log_door;
+  uint8_t F40_comp_off_door;
+  uint8_t F31_manual_comp;
+  uint16_t F32_manual_comp_max_min;
+  uint8_t F33_manual_fan;
+  uint16_t F34_manual_fan_max_min;
+  uint8_t F35_manual_defrost;
+  uint16_t F36_manual_defrost_gap_min;
+  uint8_t F37_immediate_defrost;
+  uint16_t F38_boot_delay_s;
+  uint16_t F39_drip_min;
+  uint16_t F45_block_defrost_boot_min;
+  uint16_t F46_max_no_defrost_min;
+  uint8_t F49_heat_mode;
+  uint8_t F50_invert_comp_relay;
+  uint8_t F51_fan_continuous;
+  uint8_t F53_control_probe_s2;
+  uint8_t F54_filter_samples;
+  uint8_t F55_probe_fault_emergency;
+  uint8_t F52_defrost_on_temp_enable;
+  float F52_evap_ice_below_c;
+};
+
+CombistatoParams P;
+
+enum CombiPhase : uint8_t { C_BOOT = 0, C_NORMAL, C_DEFROST, C_DRIP };
+
 // ---------- WiFi / Supabase (igual concepto que esp8266 / esp32 monitor) ----------
 static const char *CFG_FILE = "/config.json";
 static const char *COMBI_FILE = "/combistato.json";
@@ -460,60 +516,6 @@ void setupWiFiAndPortal(bool forceConfigPortal) {
 }
 
 bool configCredentialsOk() { return cfg.moduleId[0] != '\0' && cfg.apiKey[0] != '\0'; }
-
-// ========================= Combistato F01–F55 =========================
-struct CombistatoParams {
-  float F01_sp;
-  float F02_diff;
-  float F03_corr_s1;
-  float F04_corr_s2;
-  uint8_t F05_defrost_type;
-  uint16_t F06_defrost_interval_min;
-  uint16_t F07_defrost_max_min;
-  float F08_defrost_end_evap_c;
-  uint8_t F09_defrost_on_boot;
-  uint8_t F10_fan_in_defrost;
-  uint16_t F11_fan_post_defrost_min;
-  float F12_fan_evap_on_below_c;
-  float F13_alarm_high;
-  float F14_alarm_low;
-  uint16_t F15_alarm_delay_min;
-  uint8_t F16_probe_alarm;
-  float F47_alarm_hyst;
-  uint16_t F48_alarm_boot_delay_min;
-  uint16_t F17_comp_min_off_s;
-  uint16_t F18_comp_min_on_s;
-  uint16_t F19_emerg_on_s;
-  uint16_t F20_emerg_off_s;
-  uint8_t F25_door_enable;
-  uint8_t F26_door_nc;
-  uint16_t F27_door_alarm_delay_s;
-  uint8_t F28_fan_off_door;
-  uint8_t F29_block_alarm_door;
-  uint8_t F30_log_door;
-  uint8_t F40_comp_off_door;
-  uint8_t F31_manual_comp;
-  uint16_t F32_manual_comp_max_min;
-  uint8_t F33_manual_fan;
-  uint16_t F34_manual_fan_max_min;
-  uint8_t F35_manual_defrost;
-  uint16_t F36_manual_defrost_gap_min;
-  uint8_t F37_immediate_defrost;
-  uint16_t F38_boot_delay_s;
-  uint16_t F39_drip_min;
-  uint16_t F45_block_defrost_boot_min;
-  uint16_t F46_max_no_defrost_min;
-  uint8_t F49_heat_mode;
-  uint8_t F50_invert_comp_relay;
-  uint8_t F51_fan_continuous;
-  uint8_t F53_control_probe_s2;
-  uint8_t F54_filter_samples;
-  uint8_t F55_probe_fault_emergency;
-  uint8_t F52_defrost_on_temp_enable;
-  float F52_evap_ice_below_c;
-} P;
-
-enum CombiPhase : uint8_t { C_BOOT = 0, C_NORMAL, C_DEFROST, C_DRIP };
 
 static CombistatoParams combiDefaults() {
   CombistatoParams d{};

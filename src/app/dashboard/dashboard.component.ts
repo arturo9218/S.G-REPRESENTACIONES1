@@ -151,7 +151,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   editingCombistatoId: string | null = null;
   addCombistatoSubmitting = false;
   combistatos: DashboardCombistato[] = [];
-  /** Combistato elegido para editar F01–F55 en Configuración. */
+  /** Combistato elegido para editar parámetros (app AR01–AR48; JSON F…) en Configuración. */
   selectedCombistatoId: string | null = null;
   pr500ModalMode: 'add' | 'edit' | null = null;
   editingPr500Id: string | null = null;
@@ -2382,7 +2382,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.openSettingsPr500Params(p.id);
   }
 
-  /** Desde Inicio / Dispositivos: abre Configuración con ese combistato para editar F01–F55. */
+  /** Desde Inicio / Dispositivos: abre Configuración con ese combistato para editar AR01–AR48. */
   goCombistatoSettings(c: DashboardCombistato, ev?: Event): void {
     ev?.stopPropagation();
     this.openSettingsCombistatoParams(c.id);

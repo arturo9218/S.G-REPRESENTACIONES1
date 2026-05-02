@@ -736,8 +736,9 @@
               <div class="device-section__titles">
                 <h2 class="device-section__title">Combistatos</h2>
                 <p class="device-section__hint">
-                  Tarjetas independientes de los paneles de temperatura. Los parámetros <strong>F01–F55</strong> se
-                  editan en <strong>Configuración</strong> (botón en cada tarjeta).
+                  Tarjetas independientes de los paneles de temperatura. En la app se editan como
+                  <strong>AR01–AR48</strong> (equipo y nube guardan <strong>F01…</strong> en JSON). Botón en cada tarjeta →
+                  <strong>Configuración</strong>.
                 </p>
               </div>
             </div>
@@ -784,10 +785,10 @@
                   <button
                     type="button"
                     class="device-card__btn"
-                    [attr.aria-label]="'Parámetros F01–F55 de ' + c.name"
+                    [attr.aria-label]="'Parámetros AR01 a AR48 (JSON F01 y demás) de ' + c.name"
                     (click)="goCombistatoSettings(c, $event)"
                   >
-                    F01–F55
+                    AR01–AR48
                   </button>
                   <a
                     class="device-card__btn device-card__btn--link"
@@ -834,8 +835,9 @@
               <div class="device-section__titles">
                 <h2 class="device-section__title">PR500</h2>
                 <p class="device-section__hint">
-                  <strong>Central frigorífica</strong>: presión de proceso, setpoints y etapas. Los parámetros
-                  <strong>F01–F22</strong> se editan en <strong>Configuración</strong> (botón en cada tarjeta). La telemetría
+                  <strong>Central frigorífica</strong>: presión de proceso, setpoints y etapas. En la app
+                  <strong>AR01–AR27</strong> (JSON del equipo <strong>F01–F27</strong>); botón en cada tarjeta →
+                  <strong>Configuración</strong>. La telemetría
                   llega por la misma función de ingesta que paneles y combistatos, con <code>pressure_bar</code> en el POST.
                 </p>
               </div>
@@ -926,10 +928,10 @@
                   <button
                     type="button"
                     class="device-card__btn"
-                    [attr.aria-label]="'Parámetros F01–F22 de ' + p.name"
+                    [attr.aria-label]="'Parámetros AR01 a AR27 (JSON F01 a F27) de ' + p.name"
                     (click)="goPr500Settings(p, $event)"
                   >
-                    F01–F22
+                    AR01–AR27
                   </button>
                   <a
                     class="device-card__btn device-card__btn--link"
@@ -1248,8 +1250,9 @@
             <h2 class="card__title card__title--sm">Elegí qué configurar</h2>
             <p class="card__hint card__hint--tight">
               Tocá un <strong>panel de medición</strong> para umbrales, nombres de sensores, corrección, compartir, etc.
-              Tocá un <strong>combistato</strong> para los parámetros <strong>F01–F55</strong> en la nube, o un
-              <strong>PR500</strong> para <strong>F01–F22</strong> (presión de proceso / etapas). No hace falta que esté online para
+              Tocá un <strong>combistato</strong> para editar <strong>AR01–AR48</strong> en la app (nube: mismos valores como
+              <strong>F01…</strong>), o un <strong>PR500</strong> para <strong>AR01–AR27</strong> (presión / etapas; JSON
+              <strong>F01–F27</strong>). No hace falta que esté online para
               guardar.
             </p>
             <p class="card__empty" *ngIf="!devices.length && !combistatos.length && !pr500s.length">
@@ -2892,7 +2895,7 @@
               *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
             >
               <div class="card__title-row">
-                <h2 class="card__title card__title--sm">Combistato — parámetros F01–F55</h2>
+                <h2 class="card__title card__title--sm">Combistato — parámetros AR01–AR48</h2>
                 <button type="button" class="btn btn--ghost btn--sm" (click)="openAddCombistatoModal()">+ Combistato</button>
               </div>
               <p class="card__hint card__hint--tight">
@@ -2913,7 +2916,7 @@
               *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
             >
               <div class="card__title-row">
-                <h2 class="card__title card__title--sm">PR500 — central frigorífica (F01–F22)</h2>
+                <h2 class="card__title card__title--sm">PR500 — central frigorífica (AR01–AR27)</h2>
                 <button type="button" class="btn btn--ghost btn--sm" (click)="openAddPr500Modal()">+ PR500</button>
               </div>
               <p class="card__hint card__hint--tight">
@@ -2936,7 +2939,8 @@
           <h1 class="empty__title">Sin contenido aún</h1>
           <p class="empty__text">
             Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, <strong>combistatos</strong> para la
-            configuración F01–F55 en la nube, o <strong>PR500</strong> para presión de proceso y F01–F22. Son independientes: podés
+            configuración (<strong>AR01–AR48</strong> en app; JSON <strong>F01…</strong> en la nube), o <strong>PR500</strong> para
+            presión de proceso (<strong>AR01–AR27</strong>; JSON <strong>F01–F27</strong>). Son independientes: podés
             tener todos los que necesites de cada tipo. Si ya cargaste datos en otro momento, revisá la conexión o
             cerrá sesión y volvé a entrar.
           </p>

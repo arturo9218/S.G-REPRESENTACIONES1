@@ -1,9 +1,10 @@
 <article class="card card--pr500" *ngIf="pr500Id">
   <h2 class="card__title card__title--sm">PR500 · parámetros de la central frigorífica</h2>
   <p class="card__hint card__hint--tight">
-    Ajustes en orden numérico: tres bloques (F1–F8, F9–F16, F17–F22). En pantalla se muestran como F1, F2… F9 y
-    después F10, F11… (coinciden con los mismos parámetros que el equipo guarda como F01, F02…). Si elegís
-    <strong>psi</strong> como unidad, el panel y el gráfico muestran esa escala; en la nube la medición sigue en bar.
+    En pantalla cada parámetro tiene un código <strong>AR01…AR27</strong> y un texto explicativo. El equipo y la nube
+    guardan los mismos valores con las claves <strong>F01…F27</strong> (se muestra la clave entre paréntesis). Cuatro
+    bloques plegables siguen el orden de uso. Si elegís <strong>psi</strong> como unidad, el panel y el gráfico muestran
+    esa escala; en la nube la medición sigue en bar.
   </p>
 
   <div class="pr500-ble" *ngIf="bleSupported">
@@ -111,7 +112,11 @@
         <p class="pr500-section-intro" *ngIf="sec.intro">{{ sec.intro }}</p>
         <div class="notify-panel notify-panel__grid pr500-details__grid">
           <label class="notify-panel__field notify-panel__field--pr500" *ngFor="let f of sec.fields">
-            <span class="notify-panel__field-label">{{ f.label }}</span>
+            <span class="notify-panel__field-label">
+              <span class="param-code">{{ f.code }}</span>
+              <span class="param-label-text">{{ f.label }}</span>
+              <span class="param-firmware-ref">({{ f.key }})</span>
+            </span>
             <span class="pr500-field-help" *ngIf="f.help">{{ f.help }}</span>
             <input
               type="number"

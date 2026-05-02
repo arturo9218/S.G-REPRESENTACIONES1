@@ -103,9 +103,37 @@ $border: rgba(148, 163, 184, 0.18);
     gap: 0.35rem;
 
     .notify-panel__field-label {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.25rem 0.35rem;
+      line-height: 1.35;
       color: $text;
       font-size: 0.8rem;
       font-weight: 700;
+    }
+
+    .param-code {
+      display: inline-block;
+      padding: 0.1rem 0.38rem;
+      border-radius: 6px;
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      color: #0f172a;
+      background: linear-gradient(180deg, #93c5fd 0%, #60a5fa 100%);
+    }
+
+    .param-label-text {
+      font-weight: 700;
+      color: $text;
+    }
+
+    .param-firmware-ref {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: $muted;
+      font-variant-numeric: tabular-nums;
     }
 
     .pr500-field-help {
