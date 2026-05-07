@@ -8,6 +8,10 @@
  * - Portal WiFiManager estable (probado en esp32_wifi_manager_test.ino).
  * - Control local de relés (activo-bajo), con F01 armado (solo 0=desarmado o 1=habilitado).
  *
+ * F28 (0/1): si 1, entre compresores equivalentes elige cuáles encender por **menor tiempo acumulado ON**
+ * (horómetro por relé físico en `/comp_runtime.json`). La presión sigue definiendo cuántas etapas hacen falta;
+ * solo cambia la asignación lógica→físico. Con F28=1 la rotación por **F08** no se usa para esa asignación.
+ *
  * Agrega:
  * - Envío periódico a Supabase ingest-reading.
  * - Portal con campos para module_id / api_key / anon_key / api_url persistidos en LittleFS.
@@ -20,6 +24,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <math.h>
+#include <stdint.h>
 
 extern "C" {
 #include "lwip/ip_addr.h"
@@ -31,6 +36,8 @@ static const char *AP_NAME = "PR500-Setup";
 static const int PIN_FORCE_PORTAL = 14;
 static const char *CFG_PATH = "/config.json";
 static const char *PARAMS_PATH = "/pr500_params.json";
+/** Horómetro por compresor (ms ON); no va en params para que el pull desde la app no lo borre. */
+static const char *RUNTIME_PATH = "/comp_runtime.json";
 static const char *DEFAULT_INGEST_URL =
     "https://fohbhymulrmdsgrubtlo.supabase.co/functions/v1/ingest-reading";
 
@@ -129,6 +136,8 @@ struct Params {
   float F26 = 0.08f;
   /** Tensión máxima válida (V, 0,05…3,3). Por encima → falla. Debe ser ≥ F26 + 0,05 V. */
   float F27 = 3.22f;
+  /** 0 = rotación por F08 (`g_stageRot`). 1 = balancear por menor tiempo ON acumulado (ver `/comp_runtime.json`). */
+  int F28 = 0;
 };
 
 static Cfg g_cfg;
@@ -160,6 +169,11 @@ static unsigned long g_emergPhaseStartMs = 0;
 /** Desfase lógico→físico para rotación (0..2). */
 static int g_stageRot = 0;
 static unsigned long g_nextRotAtMs = 0;
+/** Ms totales ON por relé físico C1..C3 (índice 0=R1). */
+static uint64_t g_runMsTotal[3] = {0, 0, 0};
+static unsigned long g_runtimeTickMs = 0;
+static unsigned long g_lastRuntimeSaveMs = 0;
+static bool g_runtimeDirty = false;
 static bool g_portalSaveRequested = false;
 static WiFiManagerParameter p_module("module_id", "Module ID", "", 47);
 static WiFiManagerParameter p_token("api_key", "Device Token", "", 23);
@@ -169,7 +183,7 @@ static WiFiManagerParameter p_url("api_url", "Ingest URL", "", 199);
 static const char *DEFAULT_PARAMS_JSON =
     "{\"F01\":0,\"F02\":2.0,\"F03\":0.5,\"F04\":0.4,\"F05\":30,\"F06\":120,\"F07\":180,\"F08\":0,\"F09\":3,"
     "\"F10\":0,\"F11\":0,\"F12\":60,\"F13\":60,\"F14\":0,\"F15\":0,\"F16\":0,\"F17\":0,\"F18\":0,\"F19\":0,\"F20\":3,"
-    "\"F21\":0,\"F22\":0,\"F23\":10,\"F24\":300,\"F25\":300,\"F26\":0.08,\"F27\":3.22}";
+    "\"F21\":0,\"F22\":0,\"F23\":10,\"F24\":300,\"F25\":300,\"F26\":0.08,\"F27\":3.22,\"F28\":0}";
 
 static constexpr uint32_t CLOUD_CLIENT_TIMEOUT_MS = 6000;
 static constexpr uint32_t CLOUD_COOLDOWN_MS = 15000;
@@ -252,6 +266,7 @@ static void loadDefaults() {
   P.F25 = d.containsKey("F25") ? (int)d["F25"].as<float>() : 300;
   P.F26 = d.containsKey("F26") ? d["F26"].as<float>() : 0.08f;
   P.F27 = d.containsKey("F27") ? d["F27"].as<float>() : 3.22f;
+  P.F28 = d.containsKey("F28") ? normalizeF01FromFloat(d["F28"].as<float>()) : 0;
   if (P.F23 < 0) P.F23 = 0;
   else if (P.F23 > 0 && P.F23 < 5) P.F23 = 5;
   else if (P.F23 > 600) P.F23 = 600;
@@ -346,6 +361,7 @@ static bool loadParams() {
   if (d.containsKey("F25")) P.F25 = (int)d["F25"].as<float>();
   if (d.containsKey("F26")) P.F26 = d["F26"].as<float>();
   if (d.containsKey("F27")) P.F27 = d["F27"].as<float>();
+  if (d.containsKey("F28")) P.F28 = normalizeF01FromFloat(d["F28"].as<float>());
   P.F01 = normalizeF01FromFloat((float)P.F01);
   P.F02 = clampF02(P.F02, P.F15);
   P.F03 = clampF03(P.F03, P.F15);
@@ -362,6 +378,7 @@ static bool loadParams() {
   P.F16 = normalizeF01FromFloat((float)P.F16);
   P.F21 = normalizeF01FromFloat((float)P.F21);
   P.F22 = normalizeF01FromFloat((float)P.F22);
+  P.F28 = normalizeF01FromFloat((float)P.F28);
   if (P.F23 < 0) P.F23 = 0;
   else if (P.F23 > 0 && P.F23 < 5) P.F23 = 5;
   else if (P.F23 > 600) P.F23 = 600;
@@ -403,6 +420,7 @@ static bool saveParams() {
   d["F25"] = P.F25;
   d["F26"] = P.F26;
   d["F27"] = P.F27;
+  d["F28"] = P.F28;
   File f = LittleFS.open(PARAMS_PATH, "w");
   if (!f) return false;
   serializeJson(d, f);
@@ -636,8 +654,125 @@ static void updateSafety(float p, unsigned long nowMs) {
   }
 }
 
+static bool loadCompressorRuntime() {
+  if (!ensureFs()) return false;
+  if (!LittleFS.exists(RUNTIME_PATH)) return false;
+  File f = LittleFS.open(RUNTIME_PATH, "r");
+  if (!f) return false;
+  StaticJsonDocument<384> d;
+  if (deserializeJson(d, f)) {
+    f.close();
+    return false;
+  }
+  f.close();
+  for (int i = 0; i < 3; i++) {
+    char key[6];
+    snprintf(key, sizeof(key), "t%u", i);
+    if (!d.containsKey(key)) continue;
+    const double dv = d[key].as<double>();
+    if (dv >= 0 && dv < 1e18) g_runMsTotal[i] = (uint64_t)dv;
+  }
+  return true;
+}
+
+static bool saveCompressorRuntime(unsigned long nowMs) {
+  if (!ensureFs()) return false;
+  StaticJsonDocument<384> d;
+  for (int i = 0; i < 3; i++) {
+    char key[6];
+    snprintf(key, sizeof(key), "t%u", i);
+    d[key] = (double)g_runMsTotal[i];
+  }
+  File f = LittleFS.open(RUNTIME_PATH, "w");
+  if (!f) return false;
+  serializeJson(d, f);
+  f.close();
+  g_runtimeDirty = false;
+  g_lastRuntimeSaveMs = nowMs;
+  return true;
+}
+
+static void maybeSaveCompressorRuntime(unsigned long nowMs) {
+  if (!g_runtimeDirty) return;
+  if (g_lastRuntimeSaveMs != 0 && (nowMs - g_lastRuntimeSaveMs) < 60000UL) return;
+  saveCompressorRuntime(nowMs);
+}
+
+/** Solo cuenta marcha real en automático normal (no emergencia / alarmas / desarmado). */
+static void tickCompressorRuntime(unsigned long nowMs) {
+  if (g_runtimeTickMs == 0) {
+    g_runtimeTickMs = nowMs;
+    return;
+  }
+  unsigned long dt = nowMs - g_runtimeTickMs;
+  g_runtimeTickMs = nowMs;
+  if (dt > 60000UL) dt = 60000UL;
+
+  if (P.F01 == 0 || g_alarmSensor || g_alarmLow || g_alarmHigh) return;
+
+  bool any = false;
+  for (int phy = 0; phy < 3; phy++) {
+    if (relayIsOn(REL_PINS[phy])) {
+      g_runMsTotal[phy] += (uint64_t)dt;
+      any = true;
+    }
+  }
+  if (any) g_runtimeDirty = true;
+}
+
+/** Etapas lógicas pedidas → relés físicos (rotación F08 o balance F28). */
+static void fillWantAutoPhys(bool wantAutoPhys[3]) {
+  constexpr int N = 3;
+  for (int i = 0; i < N; i++) wantAutoPhys[i] = false;
+
+  int k = 0;
+  for (int log = 0; log < N; log++) {
+    if (log < P.F09 && g_stageWant[log]) k++;
+  }
+  if (k <= 0) return;
+
+  int nPool = P.F09;
+  if (nPool < 1) nPool = 1;
+  if (nPool > N) nPool = N;
+
+  if (normalizeF01FromFloat((float)P.F28) == 0) {
+    for (int log = 0; log < N; log++) {
+      if (log < P.F09 && g_stageWant[log]) {
+        const int phy = (log + g_stageRot) % N;
+        wantAutoPhys[phy] = true;
+      }
+    }
+    return;
+  }
+
+  int pool[N];
+  for (int i = 0; i < nPool; i++) pool[i] = i;
+
+  for (int i = 1; i < nPool; i++) {
+    int idx = pool[i];
+    int j = i;
+    while (j > 0) {
+      const uint64_t a = g_runMsTotal[idx];
+      const uint64_t b = g_runMsTotal[pool[j - 1]];
+      if (b < a || (b == a && pool[j - 1] < idx)) break;
+      pool[j] = pool[j - 1];
+      j--;
+    }
+    pool[j] = idx;
+  }
+
+  const int pick = (k < nPool) ? k : nPool;
+  for (int i = 0; i < pick; i++) wantAutoPhys[pool[i]] = true;
+}
+
+static void printCompressorRuntime() {
+  Serial.printf("[RUN] ms C1=%llu C2=%llu C3=%llu (F28=%d balanceo por horómetro)\n", (unsigned long long)g_runMsTotal[0],
+                (unsigned long long)g_runMsTotal[1], (unsigned long long)g_runMsTotal[2], P.F28);
+}
+
 /** Rotación de “lead”: etapa lógica 0→relé físico distinto cada F08 h (sin compresores en marcha). */
 static void maybeRotateCompressors(unsigned long nowMs) {
+  if (normalizeF01FromFloat((float)P.F28) != 0) return;
   if (P.F08 <= 0) {
     g_nextRotAtMs = 0;
     return;
@@ -685,12 +820,7 @@ static void applyRelays(unsigned long nowMs) {
     return;
   }
   bool wantAutoPhys[N] = {false, false, false};
-  for (int log = 0; log < N; log++) {
-    if (log < P.F09 && g_stageWant[log]) {
-      const int phy = (log + g_stageRot) % N;
-      wantAutoPhys[phy] = true;
-    }
-  }
+  fillWantAutoPhys(wantAutoPhys);
   bool targetPhys[N];
   for (int phy = 0; phy < N; phy++) {
     targetPhys[phy] = wantAutoPhys[phy];
@@ -878,7 +1008,7 @@ static void sendIngest() {
     http.addHeader("apikey", g_cfg.anonKey);
     http.addHeader("Authorization", String("Bearer ") + g_cfg.anonKey);
   }
-  StaticJsonDocument<512> d;
+  StaticJsonDocument<768> d;
   d["moduleId"] = g_cfg.moduleId;
   d["deviceToken"] = g_cfg.apiKey;
   d["pressure_bar"] = pressureBarTelemetry();
@@ -886,6 +1016,9 @@ static void sendIngest() {
   d["r2_on"] = relayIsOn(PIN_R2);
   d["r3_on"] = relayIsOn(PIN_R3);
   d["r4_alarm"] = (g_alarmLow || g_alarmHigh || g_alarmSensor);
+  d["comp1_run_ms"] = (double)g_runMsTotal[0];
+  d["comp2_run_ms"] = (double)g_runMsTotal[1];
+  d["comp3_run_ms"] = (double)g_runMsTotal[2];
   String body;
   serializeJson(d, body);
   int code = http.POST(body);
@@ -1016,6 +1149,13 @@ static bool applyCloudParams(JsonObject src) {
   applyInt("F25", P.F25);
   applyFloat("F26", P.F26);
   applyFloat("F27", P.F27);
+  if (src.containsKey("F28")) {
+    const int nv = normalizeF01FromFloat(src["F28"].as<float>());
+    if (nv != P.F28) {
+      P.F28 = nv;
+      ch = true;
+    }
+  }
   if (P.F09 < 1) P.F09 = 1;
   if (P.F09 > 3) P.F09 = 3;
   {
@@ -1123,6 +1263,11 @@ static bool applyCloudParams(JsonObject src) {
     clearSensorEmergencyAndRelays(millis());
     ch = true;
   }
+  {
+    const int n28 = normalizeF01FromFloat((float)P.F28);
+    if (n28 != P.F28) ch = true;
+    P.F28 = n28;
+  }
   clampAdcThresholds();
   return ch;
 }
@@ -1174,13 +1319,14 @@ static void tryPullParamsFromCloud() {
 }
 
 static void printParams() {
-  Serial.printf("[PRM] F01=%d F15=%d F22=%d F02=%.2f F03=%.2f F04=%.2f F05=%d F06=%d F07=%d F08=%d F09=%d\n", P.F01,
-                P.F15, P.F22, P.F02, P.F03, P.F04, P.F05, P.F06, P.F07, P.F08, P.F09);
+  Serial.printf("[PRM] F01=%d F15=%d F22=%d F02=%.2f F03=%.2f F04=%.2f F05=%d F06=%d F07=%d F08=%d F09=%d F28=%d\n", P.F01,
+                P.F15, P.F22, P.F02, P.F03, P.F04, P.F05, P.F06, P.F07, P.F08, P.F09, P.F28);
   Serial.printf("[PRM] F10=%.2f F11=%.2f F12=%d F13=%d F14=%.3f F16=%d F20=%d F21=%d rot=%d almL=%d almH=%d almS=%d\n",
                 P.F10, P.F11, P.F12, P.F13, P.F14, P.F16, P.F20, P.F21, g_stageRot, (int)g_alarmLow, (int)g_alarmHigh,
                 (int)g_alarmSensor);
   Serial.printf("[PRM] F23=%d (s conf. falla ADC; 0=off) F24=%d F25=%d (ciclo ON/OFF emerg.)\n", P.F23, P.F24, P.F25);
   Serial.printf("[PRM] F26=%.3fV F27=%.3fV (ventana ADC válida)\n", P.F26, P.F27);
+  printCompressorRuntime();
   Serial.printf("[PRM] manual F17=%.2f F18=%.2f F19=%.2f (>=0.5=ON relé C1/C2/C3; en app o serie: set f17 1)\n", P.F17, P.F18, P.F19);
   if (P.F01 < 1 && (P.F17 >= 0.5f || P.F18 >= 0.5f || P.F19 >= 0.5f)) {
     Serial.println(F("[PRM] !! F01=0 (desarmado): F17/F18/F19 no pueden prender relés. En app o serie: set f01 1"));
@@ -1197,7 +1343,7 @@ static void tryHandleSetLine(const String &raw) {
   rest.trim();
   int sp = rest.indexOf(' ');
   if (sp <= 0) {
-    Serial.println(F("Uso: set f01 0|1 | set f17 1 | set f02 2.5 | ..."));
+    Serial.println(F("Uso: set f01 0|1 | set f28 0|1 | set f17 1 | set f02 2.5 | ..."));
     return;
   }
   String key = rest.substring(0, sp);
@@ -1234,9 +1380,10 @@ static void tryHandleSetLine(const String &raw) {
   else if (key == "f25") P.F25 = (int)v;
   else if (key == "f26") P.F26 = v;
   else if (key == "f27") P.F27 = v;
+  else if (key == "f28") P.F28 = normalizeF01FromFloat(v);
   else {
     Serial.println(
-        F("Claves: f01…f27 (f26/f27=V min/max ADC válido; f23=0 off falla sensor; f24/f25 ciclo emerg. s)"));
+        F("Claves: f01…f28 (f28=1 balanceo horómetro; f26/f27=V ADC; f23 falla sensor; f24/f25 emerg.)"));
     return;
   }
   if (P.F09 < 1) P.F09 = 1;
@@ -1253,6 +1400,7 @@ static void tryHandleSetLine(const String &raw) {
   P.F11 = clampF02AllowZero(P.F11, P.F15);
   P.F16 = normalizeF01FromFloat((float)P.F16);
   P.F21 = normalizeF01FromFloat((float)P.F21);
+  P.F28 = normalizeF01FromFloat((float)P.F28);
   if (P.F23 < 0) P.F23 = 0;
   else if (P.F23 > 0 && P.F23 < 5) P.F23 = 5;
   else if (P.F23 > 600) P.F23 = 600;
@@ -1292,6 +1440,8 @@ void setup() {
   ensureFs();
   loadConfig();
   loadParams();
+  loadCompressorRuntime();
+  g_runtimeTickMs = 0;
   if (P.F08 > 0) g_nextRotAtMs = millis() + (unsigned long)P.F08 * 3600000UL;
   else {
     g_nextRotAtMs = 0;
@@ -1302,7 +1452,7 @@ void setup() {
   g_lastParamsPullMs = millis() - g_cfg.paramsPullMs + 5000UL;
   printStatus();
   Serial.println(
-      F("[INIT] App: editá parámetros en Angular → se bajan solos. Serie: p | set f01 1 | pull | pullms 60000"));
+      F("[INIT] App: editá parámetros en Angular → se bajan solos. Serie: p | runtime | set f28 1 | pull | pullms 60000"));
   Serial.println(F("[INIT] status | net | url ... | portal | reboot"));
 }
 
@@ -1323,6 +1473,8 @@ void loop() {
   if (!g_alarmSensor) maybeRotateCompressors(nowMs);
   if (!g_alarmSensor) updateHyst(p);
   applyRelays(nowMs);
+  tickCompressorRuntime(nowMs);
+  maybeSaveCompressorRuntime(nowMs);
 
   if (nowMs - g_lastSendMs >= g_cfg.intervalMs) {
     g_lastSendMs = nowMs;
@@ -1358,6 +1510,8 @@ void loop() {
         tryHandleSetLine(raw);
       } else if (cmd == "p") {
         printParams();
+      } else if (cmd == "runtime" || cmd == "run") {
+        printCompressorRuntime();
       } else if (cmd == "pull") {
         tryPullParamsFromCloud();
       } else if (cmd.startsWith("pullms ")) {
@@ -1379,9 +1533,10 @@ void loop() {
         Serial.printf("[WiFi] Portal cerrado. SSID=%s IP=%s\n", WiFi.SSID().c_str(),
                       WiFi.localIP().toString().c_str());
       } else if (cmd == "reboot") {
+        if (g_runtimeDirty) saveCompressorRuntime(millis());
         ESP.restart();
       } else {
-        Serial.println(F("p | set f01 1 | pull | pullms 60000 | status | net | url ... | portal | reboot"));
+        Serial.println(F("p | runtime | set f28 1 | pull | pullms 60000 | status | net | url ... | portal | reboot"));
       }
     }
   }

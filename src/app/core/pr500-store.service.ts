@@ -187,6 +187,9 @@ export class Pr500StoreService {
         comp2_on: boolean;
         comp3_on: boolean;
         alarm_on: boolean;
+        comp1_run_ms: number | null;
+        comp2_run_ms: number | null;
+        comp3_run_ms: number | null;
       }
     >
   > {
@@ -198,6 +201,9 @@ export class Pr500StoreService {
         comp2_on: boolean;
         comp3_on: boolean;
         alarm_on: boolean;
+        comp1_run_ms: number | null;
+        comp2_run_ms: number | null;
+        comp3_run_ms: number | null;
       }
     >();
     if (!this.cloudEnabled() || ids.length === 0) {
@@ -207,7 +213,7 @@ export class Pr500StoreService {
       ids.map(async (id) => {
         const { data, error } = await this.auth.client
           .from('pr500_readings')
-          .select('pressure_bar, comp1_on, comp2_on, comp3_on, alarm_on')
+          .select('*')
           .eq('pr500_id', id)
           .order('created_at', { ascending: false })
           .limit(1)
@@ -219,14 +225,22 @@ export class Pr500StoreService {
           comp2_on: boolean;
           comp3_on: boolean;
           alarm_on: boolean;
+          comp1_run_ms?: number | null;
+          comp2_run_ms?: number | null;
+          comp3_run_ms?: number | null;
         };
         if (typeof row.pressure_bar !== 'number' || Number.isNaN(row.pressure_bar)) return;
+        const numOrNull = (v: unknown): number | null =>
+          v != null && typeof v === 'number' && Number.isFinite(v) ? v : null;
         out.set(id, {
           pressure_bar: row.pressure_bar,
           comp1_on: !!row.comp1_on,
           comp2_on: !!row.comp2_on,
           comp3_on: !!row.comp3_on,
           alarm_on: !!row.alarm_on,
+          comp1_run_ms: numOrNull(row.comp1_run_ms),
+          comp2_run_ms: numOrNull(row.comp2_run_ms),
+          comp3_run_ms: numOrNull(row.comp3_run_ms),
         });
       })
     );
@@ -321,6 +335,9 @@ export class Pr500StoreService {
         lastComp2On: snap?.comp2_on,
         lastComp3On: snap?.comp3_on,
         lastAlarmOn: snap?.alarm_on,
+        lastComp1RunMs: snap?.comp1_run_ms ?? null,
+        lastComp2RunMs: snap?.comp2_run_ms ?? null,
+        lastComp3RunMs: snap?.comp3_run_ms ?? null,
       };
     });
     for (const c of mapped) {

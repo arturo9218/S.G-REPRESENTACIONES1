@@ -1787,6 +1787,13 @@ $border: rgba(148, 163, 184, 0.18);
   }
 }
 
+.device-card__sensor-subline--muted {
+  font-weight: 500;
+  font-size: 0.65rem;
+  color: rgba(148, 163, 184, 0.95);
+  margin-top: 0.15rem;
+}
+
 .device-card__temps-inner--clamp {
   min-height: 118px;
 }

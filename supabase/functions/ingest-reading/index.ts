@@ -40,6 +40,19 @@ interface IngestPayload {
   di2_ok?: unknown;
   di3_ok?: unknown;
   di4_ok?: unknown;
+  /** PR500: ms ON acumulados por compresor (horómetro en flash); opcional. */
+  comp1_run_ms?: unknown;
+  comp2_run_ms?: unknown;
+  comp3_run_ms?: unknown;
+}
+
+/** Ms totales ON (0…MAX_SAFE_INTEGER); null si ausente o inválido. */
+function ingestOptionalRunMs(v: unknown): number | null {
+  if (v === undefined || v === null) return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (n > Number.MAX_SAFE_INTEGER) return null;
+  return Math.round(n);
 }
 
 function ingestBool(v: unknown): boolean {
@@ -180,7 +193,10 @@ Deno.serve(async (req) => {
             : new Date().toISOString();
         const diOpt = (v: unknown): boolean | null =>
           v === undefined || v === null ? null : ingestBool(v);
-        const { error: insPrErr } = await supabase.from('pr500_readings').insert({
+        const r1 = ingestOptionalRunMs(payload.comp1_run_ms);
+        const r2 = ingestOptionalRunMs(payload.comp2_run_ms);
+        const r3 = ingestOptionalRunMs(payload.comp3_run_ms);
+        const insertRow: Record<string, unknown> = {
           pr500_id: pr5.id,
           created_at: sentIso,
           pressure_bar: payload.pressure_bar as number,
@@ -192,7 +208,11 @@ Deno.serve(async (req) => {
           di2_ok: diOpt(payload.di2_ok),
           di3_ok: diOpt(payload.di3_ok),
           di4_ok: diOpt(payload.di4_ok),
-        });
+        };
+        if (r1 != null) insertRow.comp1_run_ms = r1;
+        if (r2 != null) insertRow.comp2_run_ms = r2;
+        if (r3 != null) insertRow.comp3_run_ms = r3;
+        const { error: insPrErr } = await supabase.from('pr500_readings').insert(insertRow);
         if (insPrErr) {
           return new Response(JSON.stringify({ error: insPrErr.message }), {
             status: 500,

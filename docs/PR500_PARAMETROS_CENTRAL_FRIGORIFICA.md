@@ -52,6 +52,10 @@ En el ESP32 Stage3 la presión se lee por **ADC** (0…3,3 V). La señal se cons
 
 Mientras dura la alarma de sensor, `r4_alarm` en la nube va en **1** (igual que alarma baja/alta). Tras **F16** o cuando la tensión vuelve a ser válida el mismo tiempo que indica **F23**, se borra el latch y se sale del ciclo de emergencia.
 
+### Horas de marcha (telemetría)
+
+El firmware Stage3 envía en cada POST a `ingest-reading` los campos opcionales **`comp1_run_ms`**, **`comp2_run_ms`**, **`comp3_run_ms`**: milisegundos ON acumulados por relé (mismo contador que en `/comp_runtime.json` en el ESP32). La tabla `pr500_readings` debe tener esas columnas: ejecutá **`038_pr500_readings_comp_run_ms.sql`** en Supabase y redeployá **`ingest-reading`**. La app muestra horas en la tarjeta del panel y en el gráfico histórico (última muestra del rango).
+
 ### App web: ver presion en psi
 
 Si en `pr500_controllers.params` el control tiene **`F15 = 1`**, el panel y el grafico convierten `pressure_bar` (bar) a **psi** para mostrar. La base de datos no cambia: sigue en bar.

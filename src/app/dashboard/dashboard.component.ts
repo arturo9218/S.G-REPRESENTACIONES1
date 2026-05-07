@@ -151,7 +151,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   editingCombistatoId: string | null = null;
   addCombistatoSubmitting = false;
   combistatos: DashboardCombistato[] = [];
-  /** Combistato elegido para editar parámetros (app AR01–AR48; JSON F…) en Configuración. */
+  /** Combistato elegido para editar parámetros en Configuración. */
   selectedCombistatoId: string | null = null;
   pr500ModalMode: 'add' | 'edit' | null = null;
   editingPr500Id: string | null = null;
@@ -2375,6 +2375,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
       `C3 ${p.lastComp3On ? 'ON' : 'OFF'}`,
       `Alarma ${p.lastAlarmOn ? 'sí' : 'no'}`,
     ].join(' · ');
+  }
+
+  /** Horas de marcha acumuladas (última ingesta con columnas comp*_run_ms). */
+  pr500RuntimeHoursLine(p: DashboardPr500): string {
+    const a = p.lastComp1RunMs;
+    const b = p.lastComp2RunMs;
+    const c = p.lastComp3RunMs;
+    if (a == null && b == null && c == null) return '';
+    const h = (ms: number | null | undefined) =>
+      ms != null && Number.isFinite(ms) && ms >= 0 ? (ms / 3_600_000).toFixed(1) : '—';
+    return `Horas marcha: C1 ${h(a)} · C2 ${h(b)} · C3 ${h(c)}`;
   }
 
   goPr500Settings(p: DashboardPr500, ev?: Event): void {

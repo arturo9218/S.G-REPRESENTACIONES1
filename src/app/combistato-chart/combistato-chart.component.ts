@@ -104,6 +104,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
 
   /** Refleja si esta vista está en pantalla completa del navegador. */
   isFullscreenUi = false;
+  chartZoomLo = 0;
+  chartZoomHi = 1;
 
   @ViewChild('fullscreenRoot', { static: true })
   fullscreenRoot!: ElementRef<HTMLElement>;
@@ -280,6 +282,10 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       }
       this.readings = (rows ?? []) as CombistatoReadingRow[];
       this.downsample();
+      if (this.chartZoomHi <= this.chartZoomLo || this.displayPoints.length < 3) {
+        this.chartZoomLo = 0;
+        this.chartZoomHi = 1;
+      }
       this.rebuildChartGeometry();
     } finally {
       this.loading = false;
@@ -304,11 +310,62 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   }
 
   applyFilters(): void {
+    this.resetChartZoom();
     void this.loadAll();
   }
 
+  get chartZoomIsActive(): boolean {
+    return this.chartZoomLo > 0.0001 || this.chartZoomHi < 0.9999;
+  }
+
+  chartZoomIn(): void {
+    this.adjustZoom(0.72);
+  }
+
+  chartZoomOut(): void {
+    this.adjustZoom(1 / 0.72);
+  }
+
+  resetChartZoom(): void {
+    this.chartZoomLo = 0;
+    this.chartZoomHi = 1;
+    this.rebuildChartGeometry();
+  }
+
+  private adjustZoom(factor: number): void {
+    const span = this.chartZoomHi - this.chartZoomLo;
+    const center = this.chartZoomLo + span / 2;
+    let next = span * factor;
+    next = Math.max(0.06, Math.min(1, next));
+    let lo = center - next / 2;
+    let hi = center + next / 2;
+    if (lo < 0) {
+      hi -= lo;
+      lo = 0;
+    }
+    if (hi > 1) {
+      lo -= hi - 1;
+      hi = 1;
+    }
+    this.chartZoomLo = Math.max(0, lo);
+    this.chartZoomHi = Math.min(1, hi);
+    if (this.chartZoomHi - this.chartZoomLo < 0.06) {
+      this.chartZoomHi = Math.min(1, this.chartZoomLo + 0.06);
+    }
+    this.rebuildChartGeometry();
+  }
+
+  private getZoomedPoints(src: CombistatoReadingRow[]): CombistatoReadingRow[] {
+    if (!src.length || !this.chartZoomIsActive) return src;
+    const n = src.length;
+    const i0 = Math.max(0, Math.min(n - 1, Math.floor(this.chartZoomLo * (n - 1))));
+    const i1 = Math.max(i0 + 1, Math.min(n, Math.ceil(this.chartZoomHi * (n - 1)) + 1));
+    const out = src.slice(i0, i1);
+    return out.length >= 2 ? out : src.slice(Math.max(0, i0 - 1), Math.min(n, i1 + 1));
+  }
+
   private rebuildChartGeometry(): void {
-    const pts = this.displayPoints;
+    const pts = this.getZoomedPoints(this.displayPoints);
     if (pts.length === 0) {
       this.tempPath1 = '';
       this.tempPath2 = '';

@@ -55,6 +55,19 @@
         <h2 class="pr5-main__title">Presión de proceso</h2>
         <div class="pr5-main__actions">
           <p class="pr5-main__unit">Eje Y: {{ pressureYUnit }}</p>
+          <span class="pr5-main__zoom-hint" *ngIf="displayPoints.length">Agrandar: + / − · Reset: Ver todo</span>
+          <div class="pr5-main__zoom-btns" *ngIf="displayPoints.length">
+            <button type="button" class="btn btn--ghost pr5-zoom-btn" (click)="chartZoomIn()">+</button>
+            <button type="button" class="btn btn--ghost pr5-zoom-btn" (click)="chartZoomOut()">−</button>
+          </div>
+          <button
+            type="button"
+            class="btn btn--ghost pr5-zoom-reset"
+            *ngIf="displayPoints.length && chartZoomIsActive"
+            (click)="resetChartZoom()"
+          >
+            Ver todo
+          </button>
           <button
             type="button"
             class="btn btn--ghost pr5-fs-btn"
@@ -74,6 +87,7 @@
         <span class="pr5-legend__pill pr5-legend__pill--alarm" [class.pr5-legend__pill--alarm-on]="L.alarm_on">
           Alarma
         </span>
+        <span class="pr5-legend__runhours" *ngIf="runHoursSummaryLine(L) as rs">{{ rs }}</span>
       </div>
 
       <div class="pr5-chart" *ngIf="displayPoints.length">

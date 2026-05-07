@@ -19,6 +19,10 @@ export interface Pr500ReadingRow {
   di2_ok: boolean | null;
   di3_ok: boolean | null;
   di4_ok: boolean | null;
+  /** Ms ON acumulados (telemetría Stage3); opcional hasta migración 038. */
+  comp1_run_ms?: number | null;
+  comp2_run_ms?: number | null;
+  comp3_run_ms?: number | null;
 }
 
 const MAX_FETCH = 8000;
@@ -63,6 +67,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   /** Contenedor del SVG para API de pantalla completa. */
   @ViewChild('chartStage') private chartStage?: ElementRef<HTMLElement>;
   chartFullscreen = false;
+  /** Zoom horizontal fraccional sobre el rango cargado (0..1). */
+  chartZoomLo = 0;
+  chartZoomHi = 1;
 
   private sub?: Subscription;
 
@@ -175,9 +182,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
       const { data: rows, error: eRows } = await this.auth.client
         .from('pr500_readings')
-        .select(
-          'id, pr500_id, created_at, pressure_bar, comp1_on, comp2_on, comp3_on, alarm_on, di1_ok, di2_ok, di3_ok, di4_ok'
-        )
+        .select('*')
         .eq('pr500_id', this.pr500Id)
         .gte('created_at', fromIso)
         .lte('created_at', toIso)
@@ -197,6 +202,10 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       }
       this.readings = (rows ?? []) as Pr500ReadingRow[];
       this.downsample();
+      if (this.chartZoomHi <= this.chartZoomLo || this.displayPoints.length < 3) {
+        this.chartZoomLo = 0;
+        this.chartZoomHi = 1;
+      }
       this.rebuildChartGeometry();
     } finally {
       this.loading = false;
@@ -221,7 +230,58 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   }
 
   applyFilters(): void {
+    this.resetChartZoom();
     void this.loadAll();
+  }
+
+  get chartZoomIsActive(): boolean {
+    return this.chartZoomLo > 0.0001 || this.chartZoomHi < 0.9999;
+  }
+
+  chartZoomIn(): void {
+    this.adjustZoom(0.72);
+  }
+
+  chartZoomOut(): void {
+    this.adjustZoom(1 / 0.72);
+  }
+
+  resetChartZoom(): void {
+    this.chartZoomLo = 0;
+    this.chartZoomHi = 1;
+    this.rebuildChartGeometry();
+  }
+
+  private adjustZoom(factor: number): void {
+    const span = this.chartZoomHi - this.chartZoomLo;
+    const center = this.chartZoomLo + span / 2;
+    let next = span * factor;
+    next = Math.max(0.05, Math.min(1, next));
+    let lo = center - next / 2;
+    let hi = center + next / 2;
+    if (lo < 0) {
+      hi -= lo;
+      lo = 0;
+    }
+    if (hi > 1) {
+      lo -= hi - 1;
+      hi = 1;
+    }
+    this.chartZoomLo = Math.max(0, lo);
+    this.chartZoomHi = Math.min(1, hi);
+    if (this.chartZoomHi - this.chartZoomLo < 0.05) {
+      this.chartZoomHi = Math.min(1, this.chartZoomLo + 0.05);
+    }
+    this.rebuildChartGeometry();
+  }
+
+  private getZoomedPoints(src: Pr500ReadingRow[]): Pr500ReadingRow[] {
+    if (!src.length || !this.chartZoomIsActive) return src;
+    const n = src.length;
+    const i0 = Math.max(0, Math.min(n - 1, Math.floor(this.chartZoomLo * (n - 1))));
+    const i1 = Math.max(i0 + 1, Math.min(n, Math.ceil(this.chartZoomHi * (n - 1)) + 1));
+    const out = src.slice(i0, i1);
+    return out.length >= 2 ? out : src.slice(Math.max(0, i0 - 1), Math.min(n, i1 + 1));
   }
 
   /** Última lectura del rango cargado (para cabecera del gráfico). */
@@ -311,7 +371,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   }
 
   private rebuildChartGeometry(): void {
-    const pts = this.displayPoints;
+    const pts = this.getZoomedPoints(this.displayPoints);
     const { x0, x1, y0, y1 } = this.plot;
     if (pts.length === 0) {
       this.pressurePath = '';
@@ -450,9 +510,20 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     const pStr = this.pressureDisplayPsi
       ? `${pr500BarToPsi(r.pressure_bar).toFixed(1)} psi (${r.pressure_bar.toFixed(2)} bar)`
       : `${r.pressure_bar.toFixed(2)} bar`;
-    return (
-      `Última lectura: ${pStr} · Compresores C1–C3 y alarma según leyenda · DI ${di(r.di1_ok)}/${di(r.di2_ok)}/${di(r.di3_ok)}/${di(r.di4_ok)}`
-    );
+    const rh = this.runHoursSummaryLine(r);
+    const base = `Última lectura: ${pStr} · Compresores C1–C3 y alarma según leyenda · DI ${di(r.di1_ok)}/${di(r.di2_ok)}/${di(r.di3_ok)}/${di(r.di4_ok)}`;
+    return rh ? `${base} · ${rh}` : base;
+  }
+
+  /** Texto compacto de horas marcha desde ms acumulados (última muestra del rango). */
+  runHoursSummaryLine(r: Pr500ReadingRow): string {
+    const h = (ms: number | null | undefined) =>
+      ms != null && Number.isFinite(ms) && ms >= 0 ? (ms / 3_600_000).toFixed(1) : null;
+    const a = h(r.comp1_run_ms);
+    const b = h(r.comp2_run_ms);
+    const c = h(r.comp3_run_ms);
+    if (a == null && b == null && c == null) return '';
+    return `Horas marcha acum.: C1 ${a ?? '—'} · C2 ${b ?? '—'} · C3 ${c ?? '—'}`;
   }
 
   readingCountLabel(): string {

@@ -1,10 +1,9 @@
 <article class="card card--pr500" *ngIf="pr500Id">
   <h2 class="card__title card__title--sm">PR500 · parámetros de la central frigorífica</h2>
   <p class="card__hint card__hint--tight">
-    En pantalla cada parámetro tiene un código <strong>AR01…AR27</strong> y un texto explicativo. El equipo y la nube
-    guardan los mismos valores con las claves <strong>F01…F27</strong> (se muestra la clave entre paréntesis). Cuatro
-    bloques plegables siguen el orden de uso. Si elegís <strong>psi</strong> como unidad, el panel y el gráfico muestran
-    esa escala; en la nube la medición sigue en bar.
+    En pantalla cada parámetro tiene un código <strong>AR01…AR28</strong> y un texto explicativo. Cuatro bloques
+    plegables siguen el orden de uso. Si elegís <strong>psi</strong> como unidad, el panel y el gráfico muestran esa
+    escala; en la nube la medición sigue en bar.
   </p>
 
   <div class="pr500-ble" *ngIf="bleSupported">
@@ -115,7 +114,6 @@
             <span class="notify-panel__field-label">
               <span class="param-code">{{ f.code }}</span>
               <span class="param-label-text">{{ f.label }}</span>
-              <span class="param-firmware-ref">({{ f.key }})</span>
             </span>
             <span class="pr500-field-help" *ngIf="f.help">{{ f.help }}</span>
             <input
@@ -124,8 +122,8 @@
               (ngModelChange)="onFieldChange(f.key, $event)"
               [name]="'pr5-' + sec.id + '-' + (f.key + '')"
               [step]="f.step != null ? f.step : 1"
-              [attr.min]="f.key === 'F01' || f.key === 'F22' ? 0 : f.key === 'F02' ? f02InputMin(m) : f.key === 'F03' ? f03InputMin(m) : null"
-              [attr.max]="f.key === 'F01' || f.key === 'F22' ? 1 : f.key === 'F02' ? f02InputMax(m) : f.key === 'F03' ? f03InputMax(m) : null"
+              [attr.min]="f.key === 'F01' || f.key === 'F22' || f.key === 'F28' ? 0 : f.key === 'F02' ? f02InputMin(m) : f.key === 'F03' ? f03InputMin(m) : null"
+              [attr.max]="f.key === 'F01' || f.key === 'F22' || f.key === 'F28' ? 1 : f.key === 'F02' ? f02InputMax(m) : f.key === 'F03' ? f03InputMax(m) : null"
             />
           </label>
         </div>

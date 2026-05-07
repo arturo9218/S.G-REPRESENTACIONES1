@@ -236,7 +236,7 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
         key: 'F47',
         code: 'AR28',
         label: 'Histéresis de alarma (K)',
-        help: 'Banda para borrar la condición de alarma sin fluctuar en el umbral (histeresis sobre F13/F14).',
+        help: 'Banda para borrar la condición de alarma sin fluctuar en el umbral.',
         step: 0.1,
       },
       {

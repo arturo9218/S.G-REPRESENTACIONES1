@@ -1,5 +1,5 @@
 // Supabase Edge Function: fetch-pr500-params
-// El ESP32 (o cualquier cliente) obtiene params F01–F22 con module_id + deviceToken (misma credencial que ingest-reading).
+// El ESP32 (o cualquier cliente) obtiene params F01–F28 (JSON en columna params) con module_id + deviceToken (como ingest-reading).
 // Deploy: supabase functions deploy fetch-pr500-params --no-verify-jwt
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';

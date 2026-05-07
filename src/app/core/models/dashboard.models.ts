@@ -101,6 +101,10 @@ export interface DashboardPr500 {
   lastComp2On?: boolean;
   lastComp3On?: boolean;
   lastAlarmOn?: boolean;
+  /** Ms ON acumulados (última ingesta); opcional si la columna existe en Supabase. */
+  lastComp1RunMs?: number | null;
+  lastComp2RunMs?: number | null;
+  lastComp3RunMs?: number | null;
 }
 
 /** Marca vertical en el análisis de gráfico (Supabase: device_chart_markers). */

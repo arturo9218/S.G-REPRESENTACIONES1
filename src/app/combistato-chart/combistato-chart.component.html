@@ -8,6 +8,16 @@
       </p>
     </div>
     <div class="cb-head-actions">
+      <button type="button" class="btn btn--ghost cb-zoom-btn" [disabled]="!displayPoints.length" (click)="chartZoomIn()">+</button>
+      <button type="button" class="btn btn--ghost cb-zoom-btn" [disabled]="!displayPoints.length" (click)="chartZoomOut()">−</button>
+      <button
+        type="button"
+        class="btn btn--ghost"
+        *ngIf="displayPoints.length && chartZoomIsActive"
+        (click)="resetChartZoom()"
+      >
+        Ver todo
+      </button>
       <button type="button" class="btn btn--ghost" (click)="toggleFullscreen()" [attr.aria-pressed]="isFullscreenUi">
         {{ isFullscreenUi ? 'Salir de pantalla completa' : 'Pantalla completa' }}
       </button>

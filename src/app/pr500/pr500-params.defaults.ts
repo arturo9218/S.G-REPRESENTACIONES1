@@ -1,5 +1,5 @@
 /**
- * Parámetros F01–F27 — PR500 para **central frigorífica**: control por presión de proceso (setpoint, diferenciales,
+ * Parámetros F01–F28 — PR500 para **central frigorífica**: control por presión de proceso (setpoint, diferenciales,
  * etapas de máquinas, alarmas). El punto físico del sensor (succión, descarga, etc.) lo define la instalación.
  * Valores por defecto orientativos; el firmware ESP32 sincroniza el mismo JSON.
  *
@@ -17,6 +17,9 @@
  * alarma y modo ciclo de compresores; 0 = desactiva esta protección.
  * F24 / F25: en modo falla de sensor, segundos que los compresores (1..F09) quedan encendidos juntos / apagados (ciclo).
  * F26 / F27: tensión mínima y máxima válida en el pin ADC (voltios). Fuera de [F26, F27] se considera falla si F23≠0.
+ *
+ * F28: 0 = asignación lógica→físico por rotación F08. 1 = balanceo por menor tiempo ON acumulado por compresor (horómetro
+ * en el ESP32). La presión sigue definiendo cuántas etapas se piden; F28 solo elige cuáles relés entre equivalentes.
  */
 export const PR500_DEFAULTS = {
   F01: 0,
@@ -46,6 +49,7 @@ export const PR500_DEFAULTS = {
   F25: 300,
   F26: 0.08,
   F27: 3.22,
+  F28: 0,
 };
 
 /** Modelo editable en formularios (sin `as const` en los defaults, para permitir asignaciones). */
@@ -126,7 +130,7 @@ export function mergePr500Params(db: unknown): Pr500FormModel {
     const n = typeof v === 'number' ? v : Number(v);
     if (!Number.isFinite(n)) continue;
     base[k] =
-      k === 'F01' || k === 'F22'
+      k === 'F01' || k === 'F22' || k === 'F28'
         ? normalizePr500F01(n)
         : k === 'F15'
           ? normalizePr500F15(n)
@@ -135,6 +139,7 @@ export function mergePr500Params(db: unknown): Pr500FormModel {
   base.F01 = normalizePr500F01(base.F01);
   base.F15 = normalizePr500F15(base.F15);
   base.F22 = normalizePr500F01(base.F22);
+  base.F28 = normalizePr500F01(base.F28);
   base.F02 = clampPr500F02(base.F02, base.F15);
   base.F03 = clampPr500F03(base.F03, base.F15);
   let f23 = Math.round(Number(base.F23));
@@ -159,7 +164,7 @@ export function pr500ToJsonBlob(m: Pr500FormModel): Record<string, number> {
   const f15 = normalizePr500F15(m.F15);
   for (const k of KEYS) {
     const v = m[k];
-    if ((k === 'F01' || k === 'F22') && typeof v === 'number') out[k as string] = normalizePr500F01(v);
+    if ((k === 'F01' || k === 'F22' || k === 'F28') && typeof v === 'number') out[k as string] = normalizePr500F01(v);
     else if (k === 'F15' && typeof v === 'number') out[k as string] = f15;
     else if (k === 'F02' && typeof v === 'number') out[k as string] = clampPr500F02(v, f15);
     else if (k === 'F03' && typeof v === 'number') out[k as string] = clampPr500F03(v, f15);

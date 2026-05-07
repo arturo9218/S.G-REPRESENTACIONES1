@@ -15,8 +15,7 @@ export const PR500_SECTIONS: Pr500Section[] = [
   {
     id: 'f01-f08',
     title: 'Bloque 1 · Marcha, presión y tiempos',
-    intro:
-      'Códigos AR01–AR08: orden de uso habitual. En el equipo y en la nube los mismos valores siguen llamándose F01, F02…',
+    intro: 'Códigos AR01–AR08 y AR28 (reparto entre compresores): orden de uso habitual para ajuste diario.',
     fields: [
       {
         key: 'F01',
@@ -72,6 +71,13 @@ export const PR500_SECTIONS: Pr500Section[] = [
         code: 'AR08',
         label: 'Rotación cada tantas horas',
         help: '0 = no rota. Si ponés horas, con el tiempo cambia qué compresor actúa como el primero, cuando ninguno está en marcha.',
+        step: 1,
+      },
+      {
+        key: 'F28',
+        code: 'AR28',
+        label: 'Balanceo por horas de marcha',
+        help: '0 = reparto por rotación AR08 (lead). 1 = el equipo elige los compresores con menor tiempo ON acumulado; AR08 entonces no define esa asignación (firmware Stage3 con horómetro en flash).',
         step: 1,
       },
     ],
