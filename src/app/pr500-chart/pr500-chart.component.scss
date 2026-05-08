@@ -343,6 +343,7 @@ $grid: rgba(148, 163, 184, 0.12);
   display: flex;
   width: 100%;
   min-height: max(280px, calc(100svh - 15.5rem));
+  touch-action: none;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid rgba(56, 189, 248, 0.12);

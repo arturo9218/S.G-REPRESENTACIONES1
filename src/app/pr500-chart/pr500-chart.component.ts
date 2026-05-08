@@ -83,6 +83,10 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   private dragStartClientX = 0;
   private dragStartLo = 0;
   private dragStartHi = 1;
+  private touchMode: 'none' | 'pan' | 'pinch' = 'none';
+  private touchStartDist = 0;
+  private touchStartSpan = 1;
+  private touchStartCenterNorm = 0.5;
 
   /** Contenedor del SVG para API de pantalla completa. */
   @ViewChild('chartStage') private chartStage?: ElementRef<HTMLElement>;
@@ -622,6 +626,91 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     this.chartZoomHi = hi;
     this.rebuildChartGeometry();
     ev.preventDefault();
+  }
+
+  onChartTouchStart(ev: TouchEvent): void {
+    if (!this.zoomedPoints.length) return;
+    if (ev.touches.length >= 2) {
+      const el = this.chartStage?.nativeElement;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const t0 = ev.touches[0];
+      const t1 = ev.touches[1];
+      this.touchMode = 'pinch';
+      this.touchStartDist = Math.abs(t1.clientX - t0.clientX);
+      this.touchStartSpan = this.chartZoomHi - this.chartZoomLo;
+      this.touchStartCenterNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / Math.max(1, r.width)));
+      ev.preventDefault();
+      return;
+    }
+    if (ev.touches.length === 1 && this.chartZoomIsActive) {
+      const t = ev.touches[0];
+      this.touchMode = 'pan';
+      this.dragStartClientX = t.clientX;
+      this.dragStartLo = this.chartZoomLo;
+      this.dragStartHi = this.chartZoomHi;
+      ev.preventDefault();
+    }
+  }
+
+  onChartTouchMove(ev: TouchEvent): void {
+    const el = this.chartStage?.nativeElement;
+    if (!el || !this.zoomedPoints.length) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 1) return;
+
+    if (this.touchMode === 'pinch' && ev.touches.length >= 2) {
+      const t0 = ev.touches[0];
+      const t1 = ev.touches[1];
+      const dist = Math.max(6, Math.abs(t1.clientX - t0.clientX));
+      const centerNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / r.width));
+      let next = this.touchStartSpan * (this.touchStartDist / dist);
+      next = Math.max(0.05, Math.min(1, next));
+      let lo = this.chartZoomLo + (this.touchStartCenterNorm - centerNorm) * (this.chartZoomHi - this.chartZoomLo);
+      let hi = lo + next;
+      lo = centerNorm - next * centerNorm;
+      hi = lo + next;
+      if (lo < 0) {
+        hi -= lo;
+        lo = 0;
+      }
+      if (hi > 1) {
+        lo -= hi - 1;
+        hi = 1;
+      }
+      this.chartZoomLo = Math.max(0, lo);
+      this.chartZoomHi = Math.min(1, hi);
+      this.rebuildChartGeometry();
+      ev.preventDefault();
+      return;
+    }
+
+    if (this.touchMode === 'pan' && ev.touches.length === 1) {
+      const t = ev.touches[0];
+      const dxNorm = (t.clientX - this.dragStartClientX) / r.width;
+      const span = this.dragStartHi - this.dragStartLo;
+      let lo = this.dragStartLo - dxNorm * span;
+      let hi = this.dragStartHi - dxNorm * span;
+      if (lo < 0) {
+        hi -= lo;
+        lo = 0;
+      }
+      if (hi > 1) {
+        lo -= hi - 1;
+        hi = 1;
+      }
+      lo = Math.max(0, lo);
+      hi = Math.min(1, hi);
+      if (hi - lo < 0.05) return;
+      this.chartZoomLo = lo;
+      this.chartZoomHi = hi;
+      this.rebuildChartGeometry();
+      ev.preventDefault();
+    }
+  }
+
+  onChartTouchEnd(): void {
+    this.touchMode = 'none';
   }
 
   onChartMouseLeave(): void {

@@ -93,6 +93,10 @@
             (mousemove)="onTempMouseMove($event)"
             (mouseleave)="onTempMouseLeave()"
             (mousedown)="startTempPan($event)"
+            (touchstart)="onTempTouchStart($event)"
+            (touchmove)="onTempTouchMove($event)"
+            (touchend)="onTempTouchEnd()"
+            (touchcancel)="onTempTouchEnd()"
           >
             <defs>
               <linearGradient id="cbFill1" x1="0" y1="0" x2="0" y2="1">
