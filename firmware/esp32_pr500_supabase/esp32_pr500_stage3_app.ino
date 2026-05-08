@@ -4,6 +4,9 @@
  * Uso previsto: **central frigorífica** — regulación por presión de proceso (p. ej. succión común o punto acordado
  * en instalación). F02/F03/F04/F14/F15 son magnitudes en el punto del sensor; F22 elige histéresis “baja P” o “alta P”.
  *
+ * Presión en ADC (pin 36): transmisor **4–20 mA** con resistencia de deriva a GND (`MA_SHUNT_OHMS`, 150 Ω por defecto).
+ * Escala de proceso **0,5…8 bar** en 4…20 mA (`MA_PRESS_BAR_MIN` / `MA_PRESS_BAR_MAX`). **F14** sigue siendo corrección (bar o psi según F15).
+ *
  * Base:
  * - Portal WiFiManager estable (probado en esp32_wifi_manager_test.ino).
  * - Control local de relés (activo-bajo), con F01 armado (solo 0=desarmado o 1=habilitado).
@@ -78,6 +81,18 @@ static float clampF02AllowZero(float v, int f15) {
 
 // ====== Pins ======
 static const int PIN_ADC = 36;
+/** Transmisor 4–20 mA con resistencia de deriva a GND (ESP32 ADC en el extremo alto del shunt).
+ *  Transmisor alimentado typical 12–24 V; masas comunes ESP / fuente del lazo.
+ *  Con R=150 Ω: 4 mA→0,60 V (≈ escala baja), 20 mA→3,00 V (≈ escala alta). */
+static constexpr float MA_SHUNT_OHMS = 150.f;
+static constexpr float MA_LOOP_MIN_A = 0.004f;
+static constexpr float MA_LOOP_MAX_A = 0.020f;
+static constexpr float MA_ADC_V_AT_4MA = MA_LOOP_MIN_A * MA_SHUNT_OHMS;
+static constexpr float MA_ADC_V_AT_20MA = MA_LOOP_MAX_A * MA_SHUNT_OHMS;
+/** Presión del proceso que representa el transmisor en esos extremos (bar). */
+static constexpr float MA_PRESS_BAR_MIN = 0.5f;
+static constexpr float MA_PRESS_BAR_MAX = 8.0f;
+
 static const int PIN_R1 = 25;
 static const int PIN_R2 = 26;
 static const int PIN_R3 = 32;
@@ -428,7 +443,8 @@ static bool saveParams() {
   return true;
 }
 
-/** Muestreo ADC pin 36: tensión 0–3,3 V y presión “cruda” 0–8 bar (sin F14). */
+/** Muestreo ADC pin 36: tensión en el shunt 4–20 mA → bar según `MA_*` (sin F14).
+ *  Si cambiás R del shunt o el rango del transmisor, ajustá las constantes `MA_SHUNT_OHMS` / `MA_PRESS_BAR_*`. */
 static void samplePressureAdc(float *adcVoltsOut, float *barRawOut) {
   analogSetPinAttenuation(PIN_ADC, ADC_11db);
   uint32_t acc = 0;
@@ -438,7 +454,14 @@ static void samplePressureAdc(float *adcVoltsOut, float *barRawOut) {
   }
   const float v = ((acc / 12.0f) / 4095.0f) * 3.3f;
   *adcVoltsOut = v;
-  *barRawOut = (v / 3.3f) * 8.0f;
+  const float spanV = MA_ADC_V_AT_20MA - MA_ADC_V_AT_4MA;
+  float bar = MA_PRESS_BAR_MIN;
+  if (spanV > 0.0001f) {
+    bar = MA_PRESS_BAR_MIN + (v - MA_ADC_V_AT_4MA) / spanV * (MA_PRESS_BAR_MAX - MA_PRESS_BAR_MIN);
+  }
+  if (bar < MA_PRESS_BAR_MIN) bar = MA_PRESS_BAR_MIN;
+  if (bar > MA_PRESS_BAR_MAX) bar = MA_PRESS_BAR_MAX;
+  *barRawOut = bar;
 }
 
 /** Acota F26/F27 (V en el pin ADC) y garantiza ventana ≥ 50 mV. */

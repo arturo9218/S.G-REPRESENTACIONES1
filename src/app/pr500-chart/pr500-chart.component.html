@@ -23,6 +23,13 @@
     <aside class="pr5-side card">
       <h2 class="pr5-side__title">Rango de fechas</h2>
       <p class="pr5-side__lead">Elegí el intervalo y aplicá para redibujar la curva.</p>
+      <div class="pr5-side__toggles">
+        <label><input type="checkbox" [(ngModel)]="showPressure" /> Presión</label>
+        <label><input type="checkbox" [(ngModel)]="showComp1" /> C1</label>
+        <label><input type="checkbox" [(ngModel)]="showComp2" /> C2</label>
+        <label><input type="checkbox" [(ngModel)]="showComp3" /> C3</label>
+        <label><input type="checkbox" [(ngModel)]="showAlarm" /> Alarma</label>
+      </div>
       <label class="pr5-field">
         <span>Desde</span>
         <input type="datetime-local" [(ngModel)]="filterFrom" name="pr5f" />
@@ -80,18 +87,25 @@
       </div>
 
       <div class="pr5-legend" *ngIf="latestReading as L">
-        <span class="pr5-legend__item pr5-legend__item--pres">Última: {{ latestPressureText() }}</span>
-        <span class="pr5-legend__pill" [class.pr5-legend__pill--active]="L.comp1_on">C1</span>
-        <span class="pr5-legend__pill" [class.pr5-legend__pill--active]="L.comp2_on">C2</span>
-        <span class="pr5-legend__pill" [class.pr5-legend__pill--active]="L.comp3_on">C3</span>
-        <span class="pr5-legend__pill pr5-legend__pill--alarm" [class.pr5-legend__pill--alarm-on]="L.alarm_on">
+        <span class="pr5-legend__item pr5-legend__item--pres" *ngIf="showPressure">Última: {{ latestPressureText() }}</span>
+        <span class="pr5-legend__pill" *ngIf="showComp1" [class.pr5-legend__pill--active]="L.comp1_on">C1</span>
+        <span class="pr5-legend__pill" *ngIf="showComp2" [class.pr5-legend__pill--active]="L.comp2_on">C2</span>
+        <span class="pr5-legend__pill" *ngIf="showComp3" [class.pr5-legend__pill--active]="L.comp3_on">C3</span>
+        <span class="pr5-legend__pill pr5-legend__pill--alarm" *ngIf="showAlarm" [class.pr5-legend__pill--alarm-on]="L.alarm_on">
           Alarma
         </span>
         <span class="pr5-legend__runhours" *ngIf="runHoursSummaryLine(L) as rs">{{ rs }}</span>
       </div>
 
       <div class="pr5-chart" *ngIf="displayPoints.length">
-        <div #chartStage class="pr5-svg-wrap">
+        <div
+          #chartStage
+          class="pr5-svg-wrap"
+          (mousemove)="onChartMouseMove($event)"
+          (mouseleave)="onChartMouseLeave()"
+          (mousedown)="startChartPan($event)"
+          (wheel)="onChartWheel($event)"
+        >
           <svg class="pr5-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
             <defs>
               <linearGradient id="pr5AreaGrad" x1="0" y1="0" x2="0" y2="1">
@@ -174,9 +188,9 @@
             </text>
 
             <g clip-path="url(#pr5PlotClip)">
-              <path *ngIf="pressureAreaPath" [attr.d]="pressureAreaPath" fill="url(#pr5AreaGrad)" stroke="none" />
+              <path *ngIf="showPressure && pressureAreaPath" [attr.d]="pressureAreaPath" fill="url(#pr5AreaGrad)" stroke="none" />
               <path
-                *ngIf="pressurePath"
+                *ngIf="showPressure && pressurePath"
                 class="pr5-line"
                 [attr.d]="pressurePath"
                 fill="none"
@@ -187,6 +201,20 @@
                 vector-effect="non-scaling-stroke"
                 filter="url(#pr5LineGlow)"
               />
+            </g>
+            <line
+              *ngIf="cursorActive && showPressure"
+              class="pr5-cursor-line"
+              [attr.x1]="cursorX"
+              [attr.y1]="plot.y0"
+              [attr.x2]="cursorX"
+              [attr.y2]="plot.y1"
+            />
+            <circle *ngIf="cursorActive && showPressure" class="pr5-cursor-dot" [attr.cx]="cursorX" [attr.cy]="cursorY" r="0.9" />
+            <g *ngIf="cursorActive && showPressure">
+              <rect class="pr5-cursor-box" [attr.x]="cursorX > 70 ? cursorX - 22 : cursorX + 1.4" [attr.y]="plot.y0 + 1.2" width="20.5" height="6.2" rx="0.9" />
+              <text class="pr5-cursor-text" [attr.x]="cursorX > 70 ? cursorX - 21 : cursorX + 2.2" [attr.y]="plot.y0 + 3.7">{{ cursorPressureLabel }}</text>
+              <text class="pr5-cursor-text pr5-cursor-text--time" [attr.x]="cursorX > 70 ? cursorX - 21 : cursorX + 2.2" [attr.y]="plot.y0 + 6">{{ cursorTimeLabel }}</text>
             </g>
 
             <!-- Eje X: tiempo -->
@@ -211,6 +239,32 @@
             >
               {{ lb.text }}
             </text>
+          </svg>
+        </div>
+      </div>
+
+      <div class="pr5-states" *ngIf="displayPoints.length && (showComp1 || showComp2 || showComp3 || showAlarm)">
+        <h3 class="pr5-states__title">Estados en el tiempo</h3>
+        <div class="pr5-states__grid">
+          <div class="pr5-states__labels">
+            <span *ngIf="showComp1">C1</span>
+            <span *ngIf="showComp2">C2</span>
+            <span *ngIf="showComp3">C3</span>
+            <span *ngIf="showAlarm">Alarma</span>
+          </div>
+          <svg class="pr5-states__svg" viewBox="0 0 100 88" preserveAspectRatio="none">
+            <ng-container *ngFor="let r of activityRects">
+              <rect
+                *ngIf="activityLaneVisible(r.lane)"
+                class="pr5-state-rect"
+                [class.pr5-state-rect--on]="r.on"
+                [attr.x]="r.x0"
+                [attr.y]="8 + r.lane * 20"
+                [attr.width]="stateRectW(r)"
+                height="14"
+              />
+            </ng-container>
+            <text *ngFor="let lb of timeLabels" class="pr5-x-tick" [attr.x]="lb.x" y="86" text-anchor="middle">{{ lb.text }}</text>
           </svg>
         </div>
       </div>

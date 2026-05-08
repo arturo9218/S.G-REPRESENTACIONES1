@@ -86,7 +86,14 @@
         </div>
         <div class="cb-empty" *ngIf="!readings.length && !loading">Sin lecturas en este rango.</div>
         <div class="cb-chart-wrap" *ngIf="readings.length">
-          <svg class="cb-svg cb-svg--temp" viewBox="0 0 100 58" preserveAspectRatio="none">
+          <svg
+            class="cb-svg cb-svg--temp"
+            viewBox="0 0 100 58"
+            preserveAspectRatio="none"
+            (mousemove)="onTempMouseMove($event)"
+            (mouseleave)="onTempMouseLeave()"
+            (mousedown)="startTempPan($event)"
+          >
             <defs>
               <linearGradient id="cbFill1" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="rgba(248,113,113,0.35)" />
@@ -105,10 +112,27 @@
               x2="100"
               [attr.y2]="g"
             />
-            <path *ngIf="showTemp1 && tempPath1" class="cb-area" [attr.d]="tempPath1 + ' L100,52 L0,52 Z'" fill="url(#cbFill1)" />
-            <path *ngIf="showTemp2 && tempPath2" class="cb-area" [attr.d]="tempPath2 + ' L100,52 L0,52 Z'" fill="url(#cbFill2)" />
+            <path *ngIf="showTemp1 && tempPath1" class="cb-area" [attr.d]="tempPath1 + ' L99,52 L4,52 Z'" fill="url(#cbFill1)" />
+            <path *ngIf="showTemp2 && tempPath2" class="cb-area" [attr.d]="tempPath2 + ' L99,52 L4,52 Z'" fill="url(#cbFill2)" />
             <path *ngIf="showTemp1 && tempPath1" class="cb-line cb-line--1" [attr.d]="tempPath1" fill="none" />
             <path *ngIf="showTemp2 && tempPath2" class="cb-line cb-line--2" [attr.d]="tempPath2" fill="none" />
+            <line
+              *ngIf="cursorActive"
+              class="cb-cursor-line"
+              [attr.x1]="cursorX"
+              y1="4"
+              [attr.x2]="cursorX"
+              y2="52"
+              vector-effect="non-scaling-stroke"
+            />
+            <circle *ngIf="cursorActive && showTemp1" class="cb-cursor-dot cb-cursor-dot--1" [attr.cx]="cursorX" [attr.cy]="cursorY1" r="0.65" />
+            <circle *ngIf="cursorActive && showTemp2" class="cb-cursor-dot cb-cursor-dot--2" [attr.cx]="cursorX" [attr.cy]="cursorY2" r="0.65" />
+            <g *ngIf="cursorActive">
+              <rect class="cb-cursor-box" [attr.x]="cursorX > 70 ? cursorX - 26 : cursorX + 1.2" y="4.5" width="24.6" height="7.4" rx="0.8" />
+              <text class="cb-cursor-text" [attr.x]="cursorX > 70 ? cursorX - 24.8 : cursorX + 2" y="7.2">S1 {{ cursorLabelTemp1 }}</text>
+              <text class="cb-cursor-text" [attr.x]="cursorX > 70 ? cursorX - 24.8 : cursorX + 2" y="9.3">S2 {{ cursorLabelTemp2 }}</text>
+              <text class="cb-cursor-text cb-cursor-text--time" [attr.x]="cursorX > 70 ? cursorX - 24.8 : cursorX + 2" y="11.2">{{ cursorLabelTime }}</text>
+            </g>
             <text *ngFor="let tl of timeLabels" class="cb-x-label" [attr.x]="tl.x" y="56" text-anchor="middle">
               {{ tl.text }}
             </text>

@@ -1,6 +1,7 @@
 import {
   Component,
   ElementRef,
+  HostListener,
   NgZone,
   OnDestroy,
   OnInit,
@@ -89,6 +90,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   displayPoints: CombistatoReadingRow[] = [];
 
   /** SVG viewBox 0 0 100 56 — temperaturas */
+  readonly tempPlot = { x0: 4, x1: 99, y0: 4, y1: 52 };
   tempPath1 = '';
   tempPath2 = '';
   tempMin = -30;
@@ -106,6 +108,20 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   isFullscreenUi = false;
   chartZoomLo = 0;
   chartZoomHi = 1;
+  cursorActive = false;
+  cursorX = 0;
+  cursorY1 = 0;
+  cursorY2 = 0;
+  cursorLabelTime = '';
+  cursorLabelTemp1 = '';
+  cursorLabelTemp2 = '';
+  private zoomStartMs = 0;
+  private zoomSpanMs = 1;
+  private zoomedPoints: CombistatoReadingRow[] = [];
+  private draggingPan = false;
+  private dragStartClientX = 0;
+  private dragStartLo = 0;
+  private dragStartHi = 1;
 
   @ViewChild('fullscreenRoot', { static: true })
   fullscreenRoot!: ElementRef<HTMLElement>;
@@ -148,6 +164,37 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     if (el && isCurrentFullscreen(el)) {
       void exitFullscreenBestEffort();
     }
+  }
+
+  @HostListener('document:mouseup')
+  onDocMouseUp(): void {
+    this.draggingPan = false;
+  }
+
+  @HostListener('document:mousemove', ['$event'])
+  onDocMouseMove(ev: MouseEvent): void {
+    if (!this.draggingPan) return;
+    const el = this.fullscreenRoot?.nativeElement?.querySelector('.cb-chart-wrap') as HTMLElement | null;
+    if (!el) return;
+    const w = Math.max(1, el.getBoundingClientRect().width);
+    const dxNorm = (ev.clientX - this.dragStartClientX) / w;
+    const span = this.dragStartHi - this.dragStartLo;
+    let lo = this.dragStartLo - dxNorm * span;
+    let hi = this.dragStartHi - dxNorm * span;
+    if (lo < 0) {
+      hi -= lo;
+      lo = 0;
+    }
+    if (hi > 1) {
+      lo -= hi - 1;
+      hi = 1;
+    }
+    lo = Math.max(0, lo);
+    hi = Math.min(1, hi);
+    if (hi - lo < 0.06) return;
+    this.chartZoomLo = lo;
+    this.chartZoomHi = hi;
+    this.rebuildChartGeometry();
   }
 
   async toggleFullscreen(): Promise<void> {
@@ -329,6 +376,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   resetChartZoom(): void {
     this.chartZoomLo = 0;
     this.chartZoomHi = 1;
+    this.cursorActive = false;
     this.rebuildChartGeometry();
   }
 
@@ -366,6 +414,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
 
   private rebuildChartGeometry(): void {
     const pts = this.getZoomedPoints(this.displayPoints);
+    this.zoomedPoints = pts;
     if (pts.length === 0) {
       this.tempPath1 = '';
       this.tempPath2 = '';
@@ -373,16 +422,19 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       this.activityRects = [];
       this.histBars = [];
       this.histMaxCount = 1;
+      this.cursorActive = false;
       return;
     }
 
     const t0 = new Date(pts[0].created_at).getTime();
     const t1 = new Date(pts[pts.length - 1].created_at).getTime();
     const span = Math.max(t1 - t0, 60_000);
+    this.zoomStartMs = t0;
+    this.zoomSpanMs = span;
 
     const xAt = (iso: string) => {
       const tx = new Date(iso).getTime();
-      return ((tx - t0) / span) * 100;
+      return this.tempPlot.x0 + ((tx - t0) / span) * (this.tempPlot.x1 - this.tempPlot.x0);
     };
 
     let minT = Infinity;
@@ -405,7 +457,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     this.tempMin = minT - pad;
     this.tempMax = maxT + pad;
     const tr = this.tempMax - this.tempMin || 1;
-    const yAt = (c: number) => 52 - ((c - this.tempMin) / tr) * 48;
+    const yAt = (c: number) =>
+      this.tempPlot.y1 - ((c - this.tempMin) / tr) * (this.tempPlot.y1 - this.tempPlot.y0);
 
     const pathFor = (getter: (p: CombistatoReadingRow) => number | null | undefined, show: boolean) => {
       if (!show) return '';
@@ -426,9 +479,9 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     this.tempPath2 = pathFor((p) => p.temp2_c, this.showTemp2);
 
     this.timeLabels = [
-      { x: 0, text: this.fmtShort(pts[0].created_at) },
-      { x: 50, text: this.fmtShort(new Date((t0 + t1) / 2).toISOString()) },
-      { x: 100, text: this.fmtShort(pts[pts.length - 1].created_at) },
+      { x: this.tempPlot.x0, text: this.fmtShort(pts[0].created_at) },
+      { x: (this.tempPlot.x0 + this.tempPlot.x1) / 2, text: this.fmtShort(new Date((t0 + t1) / 2).toISOString()) },
+      { x: this.tempPlot.x1, text: this.fmtShort(pts[pts.length - 1].created_at) },
     ];
 
     const lanes: { key: keyof CombistatoReadingRow; show: boolean; lane: number }[] = [
@@ -451,6 +504,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     this.activityRects = rects;
 
     this.buildHistogram(pts);
+    if (this.cursorActive) this.updateCursorForX(this.cursorX);
   }
 
   private fmtShort(iso: string): string {
@@ -512,5 +566,65 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
 
   barDisplayHeight(ratio: number): number {
     return Math.max(0.6, ratio * 36);
+  }
+
+  startTempPan(ev: MouseEvent): void {
+    if (!this.zoomedPoints.length || !this.chartZoomIsActive) return;
+    this.draggingPan = true;
+    this.dragStartClientX = ev.clientX;
+    this.dragStartLo = this.chartZoomLo;
+    this.dragStartHi = this.chartZoomHi;
+    ev.preventDefault();
+  }
+
+  onTempMouseLeave(): void {
+    this.cursorActive = false;
+  }
+
+  onTempMouseMove(ev: MouseEvent): void {
+    const svg = ev.currentTarget as SVGElement | null;
+    if (!svg || !this.zoomedPoints.length) return;
+    const r = svg.getBoundingClientRect();
+    if (r.width <= 1 || r.height <= 1) return;
+    const x = ((ev.clientX - r.left) / r.width) * 100;
+    this.cursorActive = true;
+    this.updateCursorForX(x);
+  }
+
+  private updateCursorForX(x: number): void {
+    if (!this.zoomedPoints.length) {
+      this.cursorActive = false;
+      return;
+    }
+    const cx = Math.max(this.tempPlot.x0, Math.min(this.tempPlot.x1, x));
+    this.cursorX = cx;
+    const ratio = (cx - this.tempPlot.x0) / Math.max(0.0001, this.tempPlot.x1 - this.tempPlot.x0);
+    const targetMs = this.zoomStartMs + ratio * this.zoomSpanMs;
+
+    let best = this.zoomedPoints[0];
+    let bestD = Math.abs(new Date(best.created_at).getTime() - targetMs);
+    for (let i = 1; i < this.zoomedPoints.length; i++) {
+      const p = this.zoomedPoints[i];
+      const d = Math.abs(new Date(p.created_at).getTime() - targetMs);
+      if (d < bestD) {
+        best = p;
+        bestD = d;
+      }
+    }
+
+    const tr = this.tempMax - this.tempMin || 1;
+    const yAt = (v: number) =>
+      this.tempPlot.y1 - ((v - this.tempMin) / tr) * (this.tempPlot.y1 - this.tempPlot.y0);
+    this.cursorY1 = yAt(best.temp1_c);
+    this.cursorY2 = best.temp2_c != null && Number.isFinite(best.temp2_c) ? yAt(best.temp2_c) : this.cursorY1;
+    this.cursorLabelTemp1 = Number.isFinite(best.temp1_c) ? `${best.temp1_c.toFixed(2)} °C` : '—';
+    this.cursorLabelTemp2 = best.temp2_c != null && Number.isFinite(best.temp2_c) ? `${best.temp2_c.toFixed(2)} °C` : '—';
+    this.cursorLabelTime = new Date(best.created_at).toLocaleString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
   }
 }

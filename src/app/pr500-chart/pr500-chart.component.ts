@@ -46,6 +46,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
   readings: Pr500ReadingRow[] = [];
   displayPoints: Pr500ReadingRow[] = [];
+  zoomedPoints: Pr500ReadingRow[] = [];
 
   pressurePath = '';
   /** Polígono bajo la curva (relleno suave en el SVG). */
@@ -63,6 +64,25 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   yGridLines: string[] = [];
   /** Rejilla vertical en marcas de tiempo (trazos suaves). */
   xGridLines: string[] = [];
+  activityRects: { lane: number; x0: number; x1: number; on: boolean }[] = [];
+  readonly activityLabels = ['C1', 'C2', 'C3', 'Alarma'];
+  showPressure = true;
+  showComp1 = true;
+  showComp2 = true;
+  showComp3 = true;
+  showAlarm = true;
+
+  cursorActive = false;
+  cursorX = 0;
+  cursorY = 0;
+  cursorTimeLabel = '';
+  cursorPressureLabel = '';
+  private zoomStartMs = 0;
+  private zoomSpanMs = 1;
+  private draggingPan = false;
+  private dragStartClientX = 0;
+  private dragStartLo = 0;
+  private dragStartHi = 1;
 
   /** Contenedor del SVG para API de pantalla completa. */
   @ViewChild('chartStage') private chartStage?: ElementRef<HTMLElement>;
@@ -94,6 +114,37 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.sub?.unsubscribe();
+  }
+
+  @HostListener('document:mouseup')
+  onDocMouseUp(): void {
+    this.draggingPan = false;
+  }
+
+  @HostListener('document:mousemove', ['$event'])
+  onDocMouseMove(ev: MouseEvent): void {
+    if (!this.draggingPan) return;
+    const el = this.chartStage?.nativeElement;
+    if (!el) return;
+    const w = Math.max(1, el.getBoundingClientRect().width);
+    const dxNorm = (ev.clientX - this.dragStartClientX) / w;
+    const span = this.dragStartHi - this.dragStartLo;
+    let lo = this.dragStartLo - dxNorm * span;
+    let hi = this.dragStartHi - dxNorm * span;
+    if (lo < 0) {
+      hi -= lo;
+      lo = 0;
+    }
+    if (hi > 1) {
+      lo -= hi - 1;
+      hi = 1;
+    }
+    lo = Math.max(0, lo);
+    hi = Math.min(1, hi);
+    if (hi - lo < 0.05) return;
+    this.chartZoomLo = lo;
+    this.chartZoomHi = hi;
+    this.rebuildChartGeometry();
   }
 
   @HostListener('document:fullscreenchange')
@@ -249,6 +300,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   resetChartZoom(): void {
     this.chartZoomLo = 0;
     this.chartZoomHi = 1;
+    this.cursorActive = false;
     this.rebuildChartGeometry();
   }
 
@@ -372,6 +424,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
   private rebuildChartGeometry(): void {
     const pts = this.getZoomedPoints(this.displayPoints);
+    this.zoomedPoints = pts;
     const { x0, x1, y0, y1 } = this.plot;
     if (pts.length === 0) {
       this.pressurePath = '';
@@ -380,11 +433,15 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       this.yAxisTicks = [];
       this.yGridLines = [];
       this.xGridLines = [];
+      this.activityRects = [];
+      this.cursorActive = false;
       return;
     }
     const t0 = new Date(pts[0].created_at).getTime();
     const t1 = new Date(pts[pts.length - 1].created_at).getTime();
     const span = Math.max(t1 - t0, 60_000);
+    this.zoomStartMs = t0;
+    this.zoomSpanMs = span;
     const plotW = x1 - x0;
     const plotH = y1 - y0;
     const xAt = (iso: string) => {
@@ -500,6 +557,119 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     }
     this.timeLabels = tLabs;
     this.xGridLines = xGrids;
+    this.activityRects = this.buildActivityRects(pts, xAt);
+    if (this.cursorActive) {
+      this.updateCursorForX(this.cursorX);
+    }
+  }
+
+  private buildActivityRects(pts: Pr500ReadingRow[], xAt: (iso: string) => number): { lane: number; x0: number; x1: number; on: boolean }[] {
+    if (pts.length < 2) return [];
+    const out: { lane: number; x0: number; x1: number; on: boolean }[] = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p = pts[i];
+      const x0 = xAt(p.created_at);
+      const x1 = xAt(pts[i + 1].created_at);
+      out.push({ lane: 0, x0, x1, on: !!p.comp1_on });
+      out.push({ lane: 1, x0, x1, on: !!p.comp2_on });
+      out.push({ lane: 2, x0, x1, on: !!p.comp3_on });
+      out.push({ lane: 3, x0, x1, on: !!p.alarm_on });
+    }
+    return out;
+  }
+
+  activityLaneVisible(lane: number): boolean {
+    if (lane === 0) return this.showComp1;
+    if (lane === 1) return this.showComp2;
+    if (lane === 2) return this.showComp3;
+    return this.showAlarm;
+  }
+
+  startChartPan(ev: MouseEvent): void {
+    if (!this.zoomedPoints.length || !this.chartZoomIsActive) return;
+    this.draggingPan = true;
+    this.dragStartClientX = ev.clientX;
+    this.dragStartLo = this.chartZoomLo;
+    this.dragStartHi = this.chartZoomHi;
+    ev.preventDefault();
+  }
+
+  onChartWheel(ev: WheelEvent): void {
+    const el = this.chartStage?.nativeElement;
+    if (!el || !this.zoomedPoints.length) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 1) return;
+    const xNorm = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+    const span = this.chartZoomHi - this.chartZoomLo;
+    const center = this.chartZoomLo + xNorm * span;
+    const factor = ev.deltaY < 0 ? 0.82 : 1 / 0.82;
+    let next = span * factor;
+    next = Math.max(0.05, Math.min(1, next));
+    let lo = center - next * xNorm;
+    let hi = lo + next;
+    if (lo < 0) {
+      hi -= lo;
+      lo = 0;
+    }
+    if (hi > 1) {
+      lo -= hi - 1;
+      hi = 1;
+    }
+    lo = Math.max(0, lo);
+    hi = Math.min(1, hi);
+    if (hi - lo < 0.05) return;
+    this.chartZoomLo = lo;
+    this.chartZoomHi = hi;
+    this.rebuildChartGeometry();
+    ev.preventDefault();
+  }
+
+  onChartMouseLeave(): void {
+    this.cursorActive = false;
+  }
+
+  onChartMouseMove(ev: MouseEvent): void {
+    const el = this.chartStage?.nativeElement;
+    if (!el || !this.zoomedPoints.length) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 1 || r.height <= 1) return;
+    const x = ((ev.clientX - r.left) / r.width) * 100;
+    this.cursorActive = true;
+    this.updateCursorForX(x);
+  }
+
+  private updateCursorForX(x: number): void {
+    if (!this.zoomedPoints.length) {
+      this.cursorActive = false;
+      return;
+    }
+    const px = Math.max(this.plot.x0, Math.min(this.plot.x1, x));
+    this.cursorX = px;
+    const ratio = (px - this.plot.x0) / Math.max(0.0001, this.plot.x1 - this.plot.x0);
+    const targetMs = this.zoomStartMs + ratio * this.zoomSpanMs;
+    let best = this.zoomedPoints[0];
+    let bestD = Math.abs(new Date(best.created_at).getTime() - targetMs);
+    for (let i = 1; i < this.zoomedPoints.length; i++) {
+      const p = this.zoomedPoints[i];
+      const d = Math.abs(new Date(p.created_at).getTime() - targetMs);
+      if (d < bestD) {
+        best = p;
+        bestD = d;
+      }
+    }
+    const yVal = this.pressureDisplayPsi ? best.pressure_bar * PR500_PSI_PER_BAR : best.pressure_bar;
+    const y = this.plot.y0 + (1 - (yVal - this.pMin) / Math.max(0.0001, this.pMax - this.pMin)) * (this.plot.y1 - this.plot.y0);
+    this.cursorY = Math.max(this.plot.y0, Math.min(this.plot.y1, y));
+    this.cursorTimeLabel = new Date(best.created_at).toLocaleString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    this.cursorPressureLabel = this.pressureDisplayPsi
+      ? `${pr500BarToPsi(best.pressure_bar).toFixed(1)} psi`
+      : `${best.pressure_bar.toFixed(2)} bar`;
   }
 
   lastRowSummary(): string {
@@ -541,5 +711,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       return `${pr500BarToPsi(L.pressure_bar).toFixed(1)} ${this.pressureYUnit}`;
     }
     return `${L.pressure_bar.toFixed(2)} ${this.pressureYUnit}`;
+  }
+
+  stateRectW(r: { x0: number; x1: number }): number {
+    return Math.max(0.08, r.x1 - r.x0);
   }
 }
