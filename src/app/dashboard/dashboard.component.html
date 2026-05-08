@@ -891,6 +891,9 @@
                       <span class="device-card__sensor-subline device-card__sensor-subline--muted" *ngIf="pr500RuntimeHoursLine(p) as hm">{{
                         hm
                       }}</span>
+                      <span class="device-card__sensor-subline device-card__sensor-subline--muted" *ngIf="pr500TempSuperheatLine(p) as ts">{{
+                        ts
+                      }}</span>
                       <div class="device-card__sensor-foot">
                         <span class="device-card__sensor-time">Último envío: {{ p.lastSeenLabel }}</span>
                         <a
@@ -931,10 +934,10 @@
                   <button
                     type="button"
                     class="device-card__btn"
-                    [attr.aria-label]="'Parámetros AR01 a AR28 de ' + p.name"
+                    [attr.aria-label]="'Parámetros AR01 a AR34 de ' + p.name"
                     (click)="goPr500Settings(p, $event)"
                   >
-                    AR01–AR28
+                    AR01–AR34
                   </button>
                   <a
                     class="device-card__btn device-card__btn--link"

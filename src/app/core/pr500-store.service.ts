@@ -190,6 +190,9 @@ export class Pr500StoreService {
         comp1_run_ms: number | null;
         comp2_run_ms: number | null;
         comp3_run_ms: number | null;
+        temp_suction_c: number | null;
+        superheat_c: number | null;
+        superheat_ok: boolean | null;
       }
     >
   > {
@@ -204,6 +207,9 @@ export class Pr500StoreService {
         comp1_run_ms: number | null;
         comp2_run_ms: number | null;
         comp3_run_ms: number | null;
+        temp_suction_c: number | null;
+        superheat_c: number | null;
+        superheat_ok: boolean | null;
       }
     >();
     if (!this.cloudEnabled() || ids.length === 0) {
@@ -228,6 +234,9 @@ export class Pr500StoreService {
           comp1_run_ms?: number | null;
           comp2_run_ms?: number | null;
           comp3_run_ms?: number | null;
+          temp_suction_c?: number | null;
+          superheat_c?: number | null;
+          superheat_ok?: boolean | null;
         };
         if (typeof row.pressure_bar !== 'number' || Number.isNaN(row.pressure_bar)) return;
         const numOrNull = (v: unknown): number | null =>
@@ -241,6 +250,9 @@ export class Pr500StoreService {
           comp1_run_ms: numOrNull(row.comp1_run_ms),
           comp2_run_ms: numOrNull(row.comp2_run_ms),
           comp3_run_ms: numOrNull(row.comp3_run_ms),
+          temp_suction_c: numOrNull(row.temp_suction_c),
+          superheat_c: numOrNull(row.superheat_c),
+          superheat_ok: row.superheat_ok == null ? null : !!row.superheat_ok,
         });
       })
     );
@@ -319,6 +331,8 @@ export class Pr500StoreService {
       const snap = lastById.get(r.id);
       const merged = mergePr500Params(r.params ?? null);
       const pressureDisplayPsi = merged.F15 >= 0.5;
+      const tempProbeEnabled = merged.F29 >= 0.5;
+      const superheatEnabled = tempProbeEnabled && merged.F32 >= 0.5;
       return {
         id: r.id,
         name: r.name,
@@ -338,6 +352,12 @@ export class Pr500StoreService {
         lastComp1RunMs: snap?.comp1_run_ms ?? null,
         lastComp2RunMs: snap?.comp2_run_ms ?? null,
         lastComp3RunMs: snap?.comp3_run_ms ?? null,
+        tempProbeEnabled,
+        superheatEnabled,
+        refrigerantCode: Math.max(0, Math.min(5, Math.round(merged.F31 ?? 0))),
+        lastTempSuctionC: snap?.temp_suction_c ?? null,
+        lastSuperheatC: snap?.superheat_c ?? null,
+        lastSuperheatOk: snap?.superheat_ok ?? null,
       };
     });
     for (const c of mapped) {

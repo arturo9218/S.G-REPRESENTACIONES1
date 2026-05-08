@@ -44,6 +44,9 @@ interface IngestPayload {
   comp1_run_ms?: unknown;
   comp2_run_ms?: unknown;
   comp3_run_ms?: unknown;
+  temp_suction_c?: unknown;
+  superheat_c?: unknown;
+  superheat_ok?: unknown;
 }
 
 /** Ms totales ON (0…MAX_SAFE_INTEGER); null si ausente o inválido. */
@@ -64,6 +67,12 @@ function ingestBool(v: unknown): boolean {
     return t === '1' || t === 'true' || t === 'on' || t === 'yes';
   }
   return false;
+}
+
+function ingestOptionalNumber(v: unknown): number | null {
+  if (v === undefined || v === null) return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 const corsHeaders = {
@@ -212,6 +221,13 @@ Deno.serve(async (req) => {
         if (r1 != null) insertRow.comp1_run_ms = r1;
         if (r2 != null) insertRow.comp2_run_ms = r2;
         if (r3 != null) insertRow.comp3_run_ms = r3;
+        const ts = ingestOptionalNumber(payload.temp_suction_c);
+        const sh = ingestOptionalNumber(payload.superheat_c);
+        if (ts != null) insertRow.temp_suction_c = ts;
+        if (sh != null) insertRow.superheat_c = sh;
+        if (payload.superheat_ok !== undefined && payload.superheat_ok !== null) {
+          insertRow.superheat_ok = ingestBool(payload.superheat_ok);
+        }
         const { error: insPrErr } = await supabase.from('pr500_readings').insert(insertRow);
         if (insPrErr) {
           return new Response(JSON.stringify({ error: insPrErr.message }), {

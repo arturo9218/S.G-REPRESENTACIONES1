@@ -105,6 +105,14 @@ export interface DashboardPr500 {
   lastComp1RunMs?: number | null;
   lastComp2RunMs?: number | null;
   lastComp3RunMs?: number | null;
+  /** Configuración de sonda/recalentamiento tomada de params (AR29..AR34). */
+  tempProbeEnabled?: boolean;
+  superheatEnabled?: boolean;
+  refrigerantCode?: number;
+  /** Última telemetría de succión/recalentamiento (si existe en pr500_readings). */
+  lastTempSuctionC?: number | null;
+  lastSuperheatC?: number | null;
+  lastSuperheatOk?: boolean | null;
 }
 
 /** Marca vertical en el análisis de gráfico (Supabase: device_chart_markers). */

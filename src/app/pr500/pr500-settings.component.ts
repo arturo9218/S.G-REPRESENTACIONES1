@@ -99,8 +99,26 @@ export class Pr500SettingsComponent implements OnChanges {
     if (!this.model) return;
     const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
     if (!Number.isFinite(n)) return;
-    if (key === 'F01' || key === 'F22' || key === 'F28') {
+    if (key === 'F01' || key === 'F22' || key === 'F28' || key === 'F29' || key === 'F32') {
       this.model[key] = normalizePr500F01(n);
+      return;
+    }
+    if (key === 'F30') {
+      this.model.F30 = Math.max(-40, Math.min(40, n));
+      return;
+    }
+    if (key === 'F31') {
+      this.model.F31 = Math.max(0, Math.min(5, Math.round(n)));
+      return;
+    }
+    if (key === 'F33') {
+      this.model.F33 = Math.max(-20, Math.min(40, n));
+      if (this.model.F34 < this.model.F33 + 0.5) this.model.F34 = this.model.F33 + 0.5;
+      return;
+    }
+    if (key === 'F34') {
+      this.model.F34 = Math.max(-20, Math.min(50, n));
+      if (this.model.F34 < this.model.F33 + 0.5) this.model.F34 = this.model.F33 + 0.5;
       return;
     }
     if (key === 'F02') {

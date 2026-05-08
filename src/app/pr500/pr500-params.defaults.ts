@@ -20,6 +20,8 @@
  *
  * F28: 0 = asignación lógica→físico por rotación F08. 1 = balanceo por menor tiempo ON acumulado por compresor (horómetro
  * en el ESP32). La presión sigue definiendo cuántas etapas se piden; F28 solo elige cuáles relés entre equivalentes.
+ *
+ * F29..F34: sonda de temperatura de succión (DS18B20), refrigerante y chequeo de recalentamiento.
  */
 export const PR500_DEFAULTS = {
   F01: 0,
@@ -50,6 +52,12 @@ export const PR500_DEFAULTS = {
   F26: 0.08,
   F27: 3.22,
   F28: 0,
+  F29: 0,
+  F30: 0,
+  F31: 0,
+  F32: 0,
+  F33: 4,
+  F34: 12,
 };
 
 /** Modelo editable en formularios (sin `as const` en los defaults, para permitir asignaciones). */
@@ -130,7 +138,7 @@ export function mergePr500Params(db: unknown): Pr500FormModel {
     const n = typeof v === 'number' ? v : Number(v);
     if (!Number.isFinite(n)) continue;
     base[k] =
-      k === 'F01' || k === 'F22' || k === 'F28'
+      k === 'F01' || k === 'F22' || k === 'F28' || k === 'F29' || k === 'F32'
         ? normalizePr500F01(n)
         : k === 'F15'
           ? normalizePr500F15(n)
@@ -140,6 +148,13 @@ export function mergePr500Params(db: unknown): Pr500FormModel {
   base.F15 = normalizePr500F15(base.F15);
   base.F22 = normalizePr500F01(base.F22);
   base.F28 = normalizePr500F01(base.F28);
+  base.F29 = normalizePr500F01(base.F29);
+  base.F32 = normalizePr500F01(base.F32);
+  base.F30 = Math.max(-40, Math.min(40, Number.isFinite(base.F30) ? base.F30 : 0));
+  base.F31 = Math.max(0, Math.min(5, Math.round(Number(base.F31))));
+  base.F33 = Math.max(-20, Math.min(40, Number.isFinite(base.F33) ? base.F33 : 4));
+  base.F34 = Math.max(-20, Math.min(50, Number.isFinite(base.F34) ? base.F34 : 12));
+  if (base.F34 < base.F33 + 0.5) base.F34 = base.F33 + 0.5;
   base.F02 = clampPr500F02(base.F02, base.F15);
   base.F03 = clampPr500F03(base.F03, base.F15);
   let f23 = Math.round(Number(base.F23));
@@ -164,7 +179,9 @@ export function pr500ToJsonBlob(m: Pr500FormModel): Record<string, number> {
   const f15 = normalizePr500F15(m.F15);
   for (const k of KEYS) {
     const v = m[k];
-    if ((k === 'F01' || k === 'F22' || k === 'F28') && typeof v === 'number') out[k as string] = normalizePr500F01(v);
+    if ((k === 'F01' || k === 'F22' || k === 'F28' || k === 'F29' || k === 'F32') && typeof v === 'number') {
+      out[k as string] = normalizePr500F01(v);
+    }
     else if (k === 'F15' && typeof v === 'number') out[k as string] = f15;
     else if (k === 'F02' && typeof v === 'number') out[k as string] = clampPr500F02(v, f15);
     else if (k === 'F03' && typeof v === 'number') out[k as string] = clampPr500F03(v, f15);

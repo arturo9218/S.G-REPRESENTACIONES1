@@ -237,4 +237,53 @@ export const PR500_SECTIONS: Pr500Section[] = [
       },
     ],
   },
+  {
+    id: 'f29-f34',
+    title: 'Bloque 5 · Sonda succión y recalentamiento',
+    intro: 'AR29–AR34: habilita DS18B20, corrige la sonda y evalúa recalentamiento según refrigerante.',
+    fields: [
+      {
+        key: 'F29',
+        code: 'AR29',
+        label: 'Habilitar sonda de temperatura',
+        help: '0 = no usa sonda. 1 = habilita lectura DS18B20 en el PR500 (pin OneWire configurado en firmware).',
+        step: 1,
+      },
+      {
+        key: 'F30',
+        code: 'AR30',
+        label: 'Corrección sonda (°C)',
+        help: 'Offset de calibración de la sonda de succión (ej. -0.4, +0.8).',
+        step: 0.1,
+      },
+      {
+        key: 'F31',
+        code: 'AR31',
+        label: 'Refrigerante (0..5)',
+        help: '0=off, 1=R134a, 2=R404A, 3=R22, 4=R410A, 5=R507A.',
+        step: 1,
+      },
+      {
+        key: 'F32',
+        code: 'AR32',
+        label: 'Habilitar chequeo de recalentamiento',
+        help: '0 = no calcula/valida SH. 1 = calcula SH con presión + temperatura de succión.',
+        step: 1,
+      },
+      {
+        key: 'F33',
+        code: 'AR33',
+        label: 'Recalentamiento mínimo (°C)',
+        help: 'Límite inferior de SH aceptable.',
+        step: 0.1,
+      },
+      {
+        key: 'F34',
+        code: 'AR34',
+        label: 'Recalentamiento máximo (°C)',
+        help: 'Límite superior de SH aceptable.',
+        step: 0.1,
+      },
+    ],
+  },
 ];

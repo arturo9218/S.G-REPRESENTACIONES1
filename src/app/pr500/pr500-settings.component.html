@@ -1,7 +1,7 @@
 <article class="card card--pr500" *ngIf="pr500Id">
   <h2 class="card__title card__title--sm">PR500 · parámetros de la central frigorífica</h2>
   <p class="card__hint card__hint--tight">
-    En pantalla cada parámetro tiene un código <strong>AR01…AR28</strong> y un texto explicativo. Cuatro bloques
+    En pantalla cada parámetro tiene un código <strong>AR01…AR34</strong> y un texto explicativo. Cinco bloques
     plegables siguen el orden de uso. Si elegís <strong>psi</strong> como unidad, el panel y el gráfico muestran esa
     escala; en la nube la medición sigue en bar.
   </p>
@@ -122,8 +122,8 @@
               (ngModelChange)="onFieldChange(f.key, $event)"
               [name]="'pr5-' + sec.id + '-' + (f.key + '')"
               [step]="f.step != null ? f.step : 1"
-              [attr.min]="f.key === 'F01' || f.key === 'F22' || f.key === 'F28' ? 0 : f.key === 'F02' ? f02InputMin(m) : f.key === 'F03' ? f03InputMin(m) : null"
-              [attr.max]="f.key === 'F01' || f.key === 'F22' || f.key === 'F28' ? 1 : f.key === 'F02' ? f02InputMax(m) : f.key === 'F03' ? f03InputMax(m) : null"
+              [attr.min]="f.key === 'F01' || f.key === 'F22' || f.key === 'F28' || f.key === 'F29' || f.key === 'F32' ? 0 : f.key === 'F02' ? f02InputMin(m) : f.key === 'F03' ? f03InputMin(m) : null"
+              [attr.max]="f.key === 'F01' || f.key === 'F22' || f.key === 'F28' || f.key === 'F29' || f.key === 'F32' ? 1 : f.key === 'F02' ? f02InputMax(m) : f.key === 'F03' ? f03InputMax(m) : null"
             />
           </label>
         </div>

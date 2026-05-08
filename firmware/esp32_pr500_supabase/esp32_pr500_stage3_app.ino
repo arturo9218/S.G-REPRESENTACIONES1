@@ -26,6 +26,8 @@
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 #include <math.h>
 #include <stdint.h>
 
@@ -81,6 +83,7 @@ static float clampF02AllowZero(float v, int f15) {
 
 // ====== Pins ======
 static const int PIN_ADC = 36;
+static const int PIN_TEMP_DS18B20 = 27;
 /** Transmisor 4–20 mA con resistencia de deriva a GND (ESP32 ADC en el extremo alto del shunt).
  *  Transmisor alimentado typical 12–24 V; masas comunes ESP / fuente del lazo.
  *  Con R=150 Ω: 4 mA→0,60 V (≈ escala baja), 20 mA→3,00 V (≈ escala alta). */
@@ -153,6 +156,18 @@ struct Params {
   float F27 = 3.22f;
   /** 0 = rotación por F08 (`g_stageRot`). 1 = balancear por menor tiempo ON acumulado (ver `/comp_runtime.json`). */
   int F28 = 0;
+  /** 0/1 habilita sonda DS18B20 (succión). */
+  int F29 = 0;
+  /** Corrección de la sonda de temperatura (°C). */
+  float F30 = 0.0f;
+  /** Refrigerante para cálculo de recalentamiento: 0=off, 1=R134a, 2=R404A, 3=R22, 4=R410A, 5=R507A. */
+  int F31 = 0;
+  /** 0/1 habilita chequeo de recalentamiento. */
+  int F32 = 0;
+  /** Recalentamiento mínimo aceptable (°C). */
+  float F33 = 4.0f;
+  /** Recalentamiento máximo aceptable (°C). */
+  float F34 = 12.0f;
 };
 
 static Cfg g_cfg;
@@ -189,6 +204,13 @@ static uint64_t g_runMsTotal[3] = {0, 0, 0};
 static unsigned long g_runtimeTickMs = 0;
 static unsigned long g_lastRuntimeSaveMs = 0;
 static bool g_runtimeDirty = false;
+static OneWire g_oneWire(PIN_TEMP_DS18B20);
+static DallasTemperature g_dsBus(&g_oneWire);
+static float g_suctionTempC = NAN;
+static bool g_suctionTempOk = false;
+static float g_superheatC = NAN;
+static int g_superheatOk = -1;
+static unsigned long g_nextTempReadAtMs = 0;
 static bool g_portalSaveRequested = false;
 static WiFiManagerParameter p_module("module_id", "Module ID", "", 47);
 static WiFiManagerParameter p_token("api_key", "Device Token", "", 23);
@@ -198,7 +220,8 @@ static WiFiManagerParameter p_url("api_url", "Ingest URL", "", 199);
 static const char *DEFAULT_PARAMS_JSON =
     "{\"F01\":0,\"F02\":2.0,\"F03\":0.5,\"F04\":0.4,\"F05\":30,\"F06\":120,\"F07\":180,\"F08\":0,\"F09\":3,"
     "\"F10\":0,\"F11\":0,\"F12\":60,\"F13\":60,\"F14\":0,\"F15\":0,\"F16\":0,\"F17\":0,\"F18\":0,\"F19\":0,\"F20\":3,"
-    "\"F21\":0,\"F22\":0,\"F23\":10,\"F24\":300,\"F25\":300,\"F26\":0.08,\"F27\":3.22,\"F28\":0}";
+    "\"F21\":0,\"F22\":0,\"F23\":10,\"F24\":300,\"F25\":300,\"F26\":0.08,\"F27\":3.22,\"F28\":0,"
+    "\"F29\":0,\"F30\":0,\"F31\":0,\"F32\":0,\"F33\":4,\"F34\":12}";
 
 static constexpr uint32_t CLOUD_CLIENT_TIMEOUT_MS = 6000;
 static constexpr uint32_t CLOUD_COOLDOWN_MS = 15000;
@@ -282,6 +305,12 @@ static void loadDefaults() {
   P.F26 = d.containsKey("F26") ? d["F26"].as<float>() : 0.08f;
   P.F27 = d.containsKey("F27") ? d["F27"].as<float>() : 3.22f;
   P.F28 = d.containsKey("F28") ? normalizeF01FromFloat(d["F28"].as<float>()) : 0;
+  P.F29 = d.containsKey("F29") ? normalizeF01FromFloat(d["F29"].as<float>()) : 0;
+  P.F30 = d.containsKey("F30") ? d["F30"].as<float>() : 0.0f;
+  P.F31 = d.containsKey("F31") ? (int)d["F31"].as<float>() : 0;
+  P.F32 = d.containsKey("F32") ? normalizeF01FromFloat(d["F32"].as<float>()) : 0;
+  P.F33 = d.containsKey("F33") ? d["F33"].as<float>() : 4.0f;
+  P.F34 = d.containsKey("F34") ? d["F34"].as<float>() : 12.0f;
   if (P.F23 < 0) P.F23 = 0;
   else if (P.F23 > 0 && P.F23 < 5) P.F23 = 5;
   else if (P.F23 > 600) P.F23 = 600;
@@ -377,6 +406,12 @@ static bool loadParams() {
   if (d.containsKey("F26")) P.F26 = d["F26"].as<float>();
   if (d.containsKey("F27")) P.F27 = d["F27"].as<float>();
   if (d.containsKey("F28")) P.F28 = normalizeF01FromFloat(d["F28"].as<float>());
+  if (d.containsKey("F29")) P.F29 = normalizeF01FromFloat(d["F29"].as<float>());
+  if (d.containsKey("F30")) P.F30 = d["F30"].as<float>();
+  if (d.containsKey("F31")) P.F31 = (int)d["F31"].as<float>();
+  if (d.containsKey("F32")) P.F32 = normalizeF01FromFloat(d["F32"].as<float>());
+  if (d.containsKey("F33")) P.F33 = d["F33"].as<float>();
+  if (d.containsKey("F34")) P.F34 = d["F34"].as<float>();
   P.F01 = normalizeF01FromFloat((float)P.F01);
   P.F02 = clampF02(P.F02, P.F15);
   P.F03 = clampF03(P.F03, P.F15);
@@ -394,6 +429,17 @@ static bool loadParams() {
   P.F21 = normalizeF01FromFloat((float)P.F21);
   P.F22 = normalizeF01FromFloat((float)P.F22);
   P.F28 = normalizeF01FromFloat((float)P.F28);
+  P.F29 = normalizeF01FromFloat((float)P.F29);
+  P.F32 = normalizeF01FromFloat((float)P.F32);
+  if (P.F31 < 0) P.F31 = 0;
+  if (P.F31 > 5) P.F31 = 5;
+  if (P.F30 < -40.f) P.F30 = -40.f;
+  if (P.F30 > 40.f) P.F30 = 40.f;
+  if (P.F33 < -20.f) P.F33 = -20.f;
+  if (P.F33 > 40.f) P.F33 = 40.f;
+  if (P.F34 < -20.f) P.F34 = -20.f;
+  if (P.F34 > 50.f) P.F34 = 50.f;
+  if (P.F34 < P.F33 + 0.5f) P.F34 = P.F33 + 0.5f;
   if (P.F23 < 0) P.F23 = 0;
   else if (P.F23 > 0 && P.F23 < 5) P.F23 = 5;
   else if (P.F23 > 600) P.F23 = 600;
@@ -436,6 +482,12 @@ static bool saveParams() {
   d["F26"] = P.F26;
   d["F27"] = P.F27;
   d["F28"] = P.F28;
+  d["F29"] = P.F29;
+  d["F30"] = P.F30;
+  d["F31"] = P.F31;
+  d["F32"] = P.F32;
+  d["F33"] = P.F33;
+  d["F34"] = P.F34;
   File f = LittleFS.open(PARAMS_PATH, "w");
   if (!f) return false;
   serializeJson(d, f);
@@ -491,6 +543,88 @@ static float pressureBarTelemetry() {
   const float b = pressureBarSensorOnly();
   if (P.F15 == 0) return b + P.F14;
   return b + P.F14 / PSI_PER_BAR;
+}
+
+/** Interpolación lineal de temperatura de saturación (°C) por presión absoluta (bar) para refrigerantes comunes. */
+static float satTempCForRefrigerant(int refCode, float pAbsBar) {
+  struct Pt {
+    float p;
+    float t;
+  };
+  static const Pt r134a[] = {{1.6f, -20.f}, {2.1f, -10.f}, {2.6f, -2.f}, {3.3f, 8.f}, {4.1f, 18.f}, {5.1f, 30.f}};
+  static const Pt r404a[] = {{2.2f, -30.f}, {2.9f, -20.f}, {3.7f, -10.f}, {4.8f, 0.f}, {6.0f, 10.f}, {7.4f, 20.f}};
+  static const Pt r22[] = {{2.1f, -20.f}, {2.9f, -10.f}, {3.8f, 0.f}, {5.0f, 10.f}, {6.4f, 20.f}, {8.1f, 30.f}};
+  static const Pt r410a[] = {{4.0f, -20.f}, {5.2f, -10.f}, {6.7f, 0.f}, {8.5f, 10.f}, {10.6f, 20.f}, {13.0f, 30.f}};
+  static const Pt r507a[] = {{2.1f, -30.f}, {2.8f, -20.f}, {3.6f, -10.f}, {4.7f, 0.f}, {5.9f, 10.f}, {7.3f, 20.f}};
+  const Pt *arr = nullptr;
+  int n = 0;
+  if (refCode == 1) {
+    arr = r134a;
+    n = (int)(sizeof(r134a) / sizeof(r134a[0]));
+  } else if (refCode == 2) {
+    arr = r404a;
+    n = (int)(sizeof(r404a) / sizeof(r404a[0]));
+  } else if (refCode == 3) {
+    arr = r22;
+    n = (int)(sizeof(r22) / sizeof(r22[0]));
+  } else if (refCode == 4) {
+    arr = r410a;
+    n = (int)(sizeof(r410a) / sizeof(r410a[0]));
+  } else if (refCode == 5) {
+    arr = r507a;
+    n = (int)(sizeof(r507a) / sizeof(r507a[0]));
+  } else {
+    return NAN;
+  }
+  if (n < 2) return NAN;
+  if (pAbsBar <= arr[0].p) return arr[0].t;
+  if (pAbsBar >= arr[n - 1].p) return arr[n - 1].t;
+  for (int i = 0; i < n - 1; i++) {
+    if (pAbsBar < arr[i + 1].p) {
+      const float p0 = arr[i].p, p1 = arr[i + 1].p;
+      const float t0 = arr[i].t, t1 = arr[i + 1].t;
+      const float k = (pAbsBar - p0) / (p1 - p0);
+      return t0 + k * (t1 - t0);
+    }
+  }
+  return arr[n - 1].t;
+}
+
+static void updateTempAndSuperheat(unsigned long nowMs) {
+  if (P.F29 == 0) {
+    g_suctionTempOk = false;
+    g_suctionTempC = NAN;
+    g_superheatC = NAN;
+    g_superheatOk = -1;
+    return;
+  }
+  if (g_nextTempReadAtMs != 0 && (long)(nowMs - g_nextTempReadAtMs) < 0) return;
+  g_nextTempReadAtMs = nowMs + 1800UL;
+  g_dsBus.requestTemperatures();
+  const float tRaw = g_dsBus.getTempCByIndex(0);
+  if (tRaw == DEVICE_DISCONNECTED_C || tRaw <= -100.f || tRaw >= 150.f) {
+    g_suctionTempOk = false;
+    g_suctionTempC = NAN;
+    g_superheatC = NAN;
+    g_superheatOk = -1;
+    return;
+  }
+  g_suctionTempOk = true;
+  g_suctionTempC = tRaw + P.F30;
+  if (P.F32 == 0 || P.F31 == 0) {
+    g_superheatC = NAN;
+    g_superheatOk = -1;
+    return;
+  }
+  const float pAbsBar = pressureBarTelemetry() + 1.01325f;
+  const float satC = satTempCForRefrigerant(P.F31, pAbsBar);
+  if (!isfinite(satC)) {
+    g_superheatC = NAN;
+    g_superheatOk = -1;
+    return;
+  }
+  g_superheatC = g_suctionTempC - satC;
+  g_superheatOk = (g_superheatC >= P.F33 && g_superheatC <= P.F34) ? 1 : 0;
 }
 
 /** Lectura en la misma unidad que F02/F03/F04 (bar o psi). */
@@ -1042,6 +1176,9 @@ static void sendIngest() {
   d["comp1_run_ms"] = (double)g_runMsTotal[0];
   d["comp2_run_ms"] = (double)g_runMsTotal[1];
   d["comp3_run_ms"] = (double)g_runMsTotal[2];
+  if (g_suctionTempOk && isfinite(g_suctionTempC)) d["temp_suction_c"] = g_suctionTempC;
+  if (isfinite(g_superheatC)) d["superheat_c"] = g_superheatC;
+  if (g_superheatOk >= 0) d["superheat_ok"] = (g_superheatOk != 0);
   String body;
   serializeJson(d, body);
   int code = http.POST(body);
@@ -1172,6 +1309,24 @@ static bool applyCloudParams(JsonObject src) {
   applyInt("F25", P.F25);
   applyFloat("F26", P.F26);
   applyFloat("F27", P.F27);
+  if (src.containsKey("F29")) {
+    const int nv = normalizeF01FromFloat(src["F29"].as<float>());
+    if (nv != P.F29) {
+      P.F29 = nv;
+      ch = true;
+    }
+  }
+  applyFloat("F30", P.F30);
+  applyInt("F31", P.F31);
+  if (src.containsKey("F32")) {
+    const int nv = normalizeF01FromFloat(src["F32"].as<float>());
+    if (nv != P.F32) {
+      P.F32 = nv;
+      ch = true;
+    }
+  }
+  applyFloat("F33", P.F33);
+  applyFloat("F34", P.F34);
   if (src.containsKey("F28")) {
     const int nv = normalizeF01FromFloat(src["F28"].as<float>());
     if (nv != P.F28) {
@@ -1291,6 +1446,52 @@ static bool applyCloudParams(JsonObject src) {
     if (n28 != P.F28) ch = true;
     P.F28 = n28;
   }
+  {
+    const n29 = normalizeF01FromFloat((float)P.F29);
+    if (n29 != P.F29) ch = true;
+    P.F29 = n29;
+  }
+  {
+    const n32 = normalizeF01FromFloat((float)P.F32);
+    if (n32 != P.F32) ch = true;
+    P.F32 = n32;
+  }
+  if (P.F31 < 0) {
+    P.F31 = 0;
+    ch = true;
+  }
+  if (P.F31 > 5) {
+    P.F31 = 5;
+    ch = true;
+  }
+  if (P.F30 < -40.f) {
+    P.F30 = -40.f;
+    ch = true;
+  }
+  if (P.F30 > 40.f) {
+    P.F30 = 40.f;
+    ch = true;
+  }
+  if (P.F33 < -20.f) {
+    P.F33 = -20.f;
+    ch = true;
+  }
+  if (P.F33 > 40.f) {
+    P.F33 = 40.f;
+    ch = true;
+  }
+  if (P.F34 < -20.f) {
+    P.F34 = -20.f;
+    ch = true;
+  }
+  if (P.F34 > 50.f) {
+    P.F34 = 50.f;
+    ch = true;
+  }
+  if (P.F34 < P.F33 + 0.5f) {
+    P.F34 = P.F33 + 0.5f;
+    ch = true;
+  }
   clampAdcThresholds();
   return ch;
 }
@@ -1349,6 +1550,17 @@ static void printParams() {
                 (int)g_alarmSensor);
   Serial.printf("[PRM] F23=%d (s conf. falla ADC; 0=off) F24=%d F25=%d (ciclo ON/OFF emerg.)\n", P.F23, P.F24, P.F25);
   Serial.printf("[PRM] F26=%.3fV F27=%.3fV (ventana ADC válida)\n", P.F26, P.F27);
+  Serial.printf("[PRM] F29=%d (sonda temp) F30=%.2f°C (offset) F31=%d (refrigerante) F32=%d SH[%.1f..%.1f]°C\n", P.F29,
+                P.F30, P.F31, P.F32, P.F33, P.F34);
+  if (g_suctionTempOk && isfinite(g_suctionTempC)) {
+    if (isfinite(g_superheatC)) {
+      Serial.printf("[TMP] Succión=%.2f°C SH=%.2f°C ok=%d\n", g_suctionTempC, g_superheatC, g_superheatOk);
+    } else {
+      Serial.printf("[TMP] Succión=%.2f°C (SH no calculado)\n", g_suctionTempC);
+    }
+  } else {
+    Serial.println(F("[TMP] Sonda succión no disponible."));
+  }
   printCompressorRuntime();
   Serial.printf("[PRM] manual F17=%.2f F18=%.2f F19=%.2f (>=0.5=ON relé C1/C2/C3; en app o serie: set f17 1)\n", P.F17, P.F18, P.F19);
   if (P.F01 < 1 && (P.F17 >= 0.5f || P.F18 >= 0.5f || P.F19 >= 0.5f)) {
@@ -1366,7 +1578,7 @@ static void tryHandleSetLine(const String &raw) {
   rest.trim();
   int sp = rest.indexOf(' ');
   if (sp <= 0) {
-    Serial.println(F("Uso: set f01 0|1 | set f28 0|1 | set f17 1 | set f02 2.5 | ..."));
+    Serial.println(F("Uso: set f01 0|1 | set f28 0|1 | set f29 1 | set f31 2 | set f02 2.5 | ..."));
     return;
   }
   String key = rest.substring(0, sp);
@@ -1404,9 +1616,15 @@ static void tryHandleSetLine(const String &raw) {
   else if (key == "f26") P.F26 = v;
   else if (key == "f27") P.F27 = v;
   else if (key == "f28") P.F28 = normalizeF01FromFloat(v);
+  else if (key == "f29") P.F29 = normalizeF01FromFloat(v);
+  else if (key == "f30") P.F30 = v;
+  else if (key == "f31") P.F31 = (int)v;
+  else if (key == "f32") P.F32 = normalizeF01FromFloat(v);
+  else if (key == "f33") P.F33 = v;
+  else if (key == "f34") P.F34 = v;
   else {
     Serial.println(
-        F("Claves: f01…f28 (f28=1 balanceo horómetro; f26/f27=V ADC; f23 falla sensor; f24/f25 emerg.)"));
+        F("Claves: f01…f34 (f29 sonda temp; f31 refrigerante; f32/f33/f34 recalentamiento)."));
     return;
   }
   if (P.F09 < 1) P.F09 = 1;
@@ -1424,6 +1642,17 @@ static void tryHandleSetLine(const String &raw) {
   P.F16 = normalizeF01FromFloat((float)P.F16);
   P.F21 = normalizeF01FromFloat((float)P.F21);
   P.F28 = normalizeF01FromFloat((float)P.F28);
+  P.F29 = normalizeF01FromFloat((float)P.F29);
+  P.F32 = normalizeF01FromFloat((float)P.F32);
+  if (P.F31 < 0) P.F31 = 0;
+  if (P.F31 > 5) P.F31 = 5;
+  if (P.F30 < -40.f) P.F30 = -40.f;
+  if (P.F30 > 40.f) P.F30 = 40.f;
+  if (P.F33 < -20.f) P.F33 = -20.f;
+  if (P.F33 > 40.f) P.F33 = 40.f;
+  if (P.F34 < -20.f) P.F34 = -20.f;
+  if (P.F34 > 50.f) P.F34 = 50.f;
+  if (P.F34 < P.F33 + 0.5f) P.F34 = P.F33 + 0.5f;
   if (P.F23 < 0) P.F23 = 0;
   else if (P.F23 > 0 && P.F23 < 5) P.F23 = 5;
   else if (P.F23 > 600) P.F23 = 600;
@@ -1456,6 +1685,8 @@ static void printStatus() {
 void setup() {
   pinMode(PIN_FORCE_PORTAL, INPUT_PULLUP);
   setupRelaysSafe();
+  g_dsBus.begin();
+  g_dsBus.setResolution(10);
   Serial.begin(115200);
   delay(300);
   Serial.println(F("\nESP32 PR500 STAGE3 APP"));
@@ -1482,6 +1713,7 @@ void setup() {
 void loop() {
   maintainWifi();
   const unsigned long nowMs = millis();
+  updateTempAndSuperheat(nowMs);
   float adcV, barRaw;
   samplePressureAdc(&adcV, &barRaw);
   const float p =

@@ -2388,6 +2388,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return `Horas marcha: C1 ${h(a)} · C2 ${h(b)} · C3 ${h(c)}`;
   }
 
+  pr500TempSuperheatLine(p: DashboardPr500): string {
+    if (!p.tempProbeEnabled) return '';
+    const t = p.lastTempSuctionC;
+    const sh = p.lastSuperheatC;
+    const tTxt = t != null && Number.isFinite(t) ? `${t.toFixed(1)}°C` : '—';
+    if (!p.superheatEnabled) return `Succión: ${tTxt}`;
+    const shTxt = sh != null && Number.isFinite(sh) ? `${sh.toFixed(1)}°C` : '—';
+    const okTxt =
+      p.lastSuperheatOk == null ? 'sin estado' : p.lastSuperheatOk ? 'OK' : 'fuera de rango';
+    return `Succión: ${tTxt} · SH: ${shTxt} · ${okTxt}`;
+  }
+
   goPr500Settings(p: DashboardPr500, ev?: Event): void {
     ev?.stopPropagation();
     this.openSettingsPr500Params(p.id);
