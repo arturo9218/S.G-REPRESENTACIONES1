@@ -22,7 +22,10 @@
   <div class="pr5-layout" *ngIf="pr500Id">
     <aside class="pr5-side card">
       <h2 class="pr5-side__title">Rango de fechas</h2>
-      <p class="pr5-side__lead">Elegí el intervalo y aplicá para redibujar la curva.</p>
+      <p class="pr5-side__lead">
+        Elegí el intervalo y aplicá para redibujar la curva. En el celular, <strong>tocá el gráfico</strong> (toque corto) para
+        fijar el valor en ese instante; con zoom activo, arrastrá para mover el rango.
+      </p>
       <div class="pr5-presets" *ngIf="pr500Id">
         <span class="pr5-presets__label">Rápido</span>
         <button type="button" class="btn btn--ghost pr5-preset-btn" [disabled]="loading" (click)="applyPresetRange(24)">
@@ -44,6 +47,17 @@
         <label><input type="checkbox" [(ngModel)]="showComp3" (ngModelChange)="onLayerToggle()" /> C3</label>
         <label><input type="checkbox" [(ngModel)]="showAlarm" (ngModelChange)="onLayerToggle()" /> Alarma</label>
       </div>
+      <label class="pr5-field pr5-field--style" *ngIf="pr500Id">
+        <span>Estilo del gráfico</span>
+        <select
+          class="pr5-style-select"
+          [(ngModel)]="chartStylePreset"
+          (ngModelChange)="onChartStyleChange()"
+          name="pr5chartstyle"
+        >
+          <option *ngFor="let o of chartStyleOptions" [ngValue]="o.value">{{ o.label }}</option>
+        </select>
+      </label>
       <label class="pr5-field">
         <span>Desde</span>
         <input type="datetime-local" [(ngModel)]="filterFrom" name="pr5f" />
@@ -80,7 +94,9 @@
         <h2 class="pr5-main__title">Presión de proceso</h2>
         <div class="pr5-main__actions">
           <p class="pr5-main__unit">Eje Y: {{ pressureYUnit }}</p>
-          <span class="pr5-main__zoom-hint" *ngIf="displayPoints.length">Agrandar: + / − · Reset: Ver todo</span>
+          <span class="pr5-main__zoom-hint" *ngIf="displayPoints.length"
+            >PC: rueda · Móvil: toque = valor · Zoom: pellizco / arrastre · Estilo: panel izquierdo</span
+          >
           <div class="pr5-main__zoom-btns" *ngIf="displayPoints.length">
             <button type="button" class="btn btn--ghost pr5-zoom-btn" (click)="chartZoomIn()">+</button>
             <button type="button" class="btn btn--ghost pr5-zoom-btn" (click)="chartZoomOut()">−</button>
@@ -125,14 +141,19 @@
         <div
           #chartStage
           class="pr5-svg-wrap"
+          [class.pr5-svg-wrap--style-line]="chartStylePreset === 'line'"
+          [class.pr5-svg-wrap--style-minimal]="chartStylePreset === 'minimal'"
+          [class.pr5-svg-wrap--style-technical]="chartStylePreset === 'technical'"
+          [class.pr5-svg-wrap--style-trend]="chartStylePreset === 'trend'"
           (mousemove)="onChartMouseMove($event)"
           (mouseleave)="onChartMouseLeave()"
           (mousedown)="startChartPan($event)"
           (wheel)="onChartWheel($event)"
+          (dblclick)="resetChartZoom()"
           (touchstart)="onChartTouchStart($event)"
           (touchmove)="onChartTouchMove($event)"
-          (touchend)="onChartTouchEnd()"
-          (touchcancel)="onChartTouchEnd()"
+          (touchend)="onChartTouchEnd($event)"
+          (touchcancel)="onChartTouchCancel()"
         >
           <svg class="pr5-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
             <defs>
@@ -246,26 +267,61 @@
             </text>
 
             <g clip-path="url(#pr5PlotClip)">
-              <path *ngIf="showPressure && pressureAreaPath" [attr.d]="pressureAreaPath" fill="url(#pr5AreaGrad)" stroke="none" />
+              <ng-container *ngIf="chartStylePreset === 'trend'">
+                <line
+                  *ngFor="let gx of chartTrendGridXs"
+                  class="pr5-grid-line pr5-grid-line--trend-v"
+                  [attr.x1]="gx"
+                  [attr.y1]="plot.y0"
+                  [attr.x2]="gx"
+                  [attr.y2]="plot.y1"
+                  vector-effect="non-scaling-stroke"
+                />
+              </ng-container>
+              <path *ngIf="chartShowsAreaFill() && pressureAreaPath" [attr.d]="pressureAreaPath" fill="url(#pr5AreaGrad)" stroke="none" />
               <path
-                *ngIf="showPressure && pressurePath"
+                *ngIf="showPressure && chartStylePreset !== 'trend' && pressurePath"
                 class="pr5-line"
                 [attr.d]="pressurePath"
                 fill="none"
                 stroke="url(#pr5LineGrad)"
-                stroke-width="1.15"
+                [attr.stroke-width]="chartStylePreset === 'minimal' ? 0.88 : 1.15"
                 stroke-linecap="round"
                 stroke-linejoin="round"
                 vector-effect="non-scaling-stroke"
-                filter="url(#pr5LineGlow)"
+                [attr.filter]="chartPressureUsesGlow() ? 'url(#pr5LineGlow)' : null"
               />
+              <ng-container *ngIf="showPressure && chartStylePreset === 'trend'">
+                <line
+                  *ngFor="let seg of pressureTrendSegs"
+                  fill="none"
+                  stroke-linecap="round"
+                  vector-effect="non-scaling-stroke"
+                  [attr.x1]="seg.x1"
+                  [attr.y1]="seg.y1"
+                  [attr.x2]="seg.x2"
+                  [attr.y2]="seg.y2"
+                  class="pr5-trend-seg"
+                  [class.pr5-trend-seg--up]="seg.trend === 'up'"
+                  [class.pr5-trend-seg--down]="seg.trend === 'down'"
+                  [class.pr5-trend-seg--flat]="seg.trend === 'flat'"
+                />
+                <circle
+                  *ngFor="let d of pressureTrendDots"
+                  class="pr5-trend-dot"
+                  [attr.cx]="d.cx"
+                  [attr.cy]="d.cy"
+                  r="0.75"
+                  vector-effect="non-scaling-stroke"
+                />
+              </ng-container>
               <path
                 *ngIf="hasTempAxis && showTempSuction && tempPath"
                 class="pr5-line-temp"
                 [attr.d]="tempPath"
                 fill="none"
                 stroke="url(#pr5TempGrad)"
-                stroke-width="0.95"
+                [attr.stroke-width]="chartStylePreset === 'minimal' ? 0.78 : 0.95"
                 stroke-linecap="round"
                 stroke-linejoin="round"
                 vector-effect="non-scaling-stroke"
@@ -276,7 +332,7 @@
                 [attr.d]="superheatPath"
                 fill="none"
                 stroke="url(#pr5ShGrad)"
-                stroke-width="0.85"
+                [attr.stroke-width]="chartStylePreset === 'minimal' ? 0.68 : 0.85"
                 stroke-dasharray="1.6 1.1"
                 stroke-linecap="round"
                 stroke-linejoin="round"

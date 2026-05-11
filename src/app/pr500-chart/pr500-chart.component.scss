@@ -184,6 +184,21 @@ $grid: rgba(148, 163, 184, 0.12);
   font-size: 0.88rem;
 }
 
+.pr5-field--style {
+  margin-top: 0.35rem;
+}
+
+.pr5-style-select {
+  border-radius: 10px;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  width: 100%;
+}
+
 .btn--block {
   width: 100%;
   margin-top: 0.35rem;
@@ -403,6 +418,52 @@ $grid: rgba(148, 163, 184, 0.12);
   max-height: none;
   border-radius: 0;
   border-width: 0;
+}
+
+.pr5-svg-wrap--style-minimal .pr5-grid-line {
+  stroke: rgba(148, 163, 184, 0.07);
+}
+
+.pr5-svg-wrap--style-minimal .pr5-grid-line--vert {
+  stroke: rgba(148, 163, 184, 0.06);
+}
+
+.pr5-svg-wrap--style-technical .pr5-plot-frame {
+  stroke: rgba(56, 189, 248, 0.45);
+}
+
+.pr5-svg-wrap--style-technical .pr5-grid-line {
+  stroke: rgba(148, 163, 184, 0.16);
+}
+
+.pr5-grid-line--trend-v {
+  stroke: rgba(148, 163, 184, 0.12);
+  stroke-width: 0.22;
+}
+
+.pr5-trend-seg {
+  fill: none;
+}
+
+.pr5-trend-seg--up {
+  stroke: #f87171;
+  stroke-width: 1.05;
+}
+
+.pr5-trend-seg--down {
+  stroke: #38bdf8;
+  stroke-width: 1.05;
+}
+
+.pr5-trend-seg--flat {
+  stroke: #64748b;
+  stroke-width: 0.82;
+}
+
+.pr5-trend-dot {
+  fill: #f1f5f9;
+  stroke: #0f172a;
+  stroke-width: 0.22;
 }
 
 .pr5-svg {

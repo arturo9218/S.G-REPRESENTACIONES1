@@ -5,6 +5,7 @@ import { AuthService } from '../core/auth.service';
 import { environment } from '../../environments/environment';
 import { isSupabaseConfigured } from '../core/supabase-config';
 import { mergePr500Params, PR500_PSI_PER_BAR, pr500BarToPsi } from '../pr500/pr500-params.defaults';
+import type { ChartStylePreset } from '../core/models/dashboard.models';
 
 export interface Pr500ReadingRow {
   id: number;
@@ -55,6 +56,26 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   pressurePath = '';
   /** Polígono bajo la curva (relleno suave en el SVG). */
   pressureAreaPath = '';
+  /** Estilo «Análisis de gráfico» (localStorage independiente del dashboard). */
+  private readonly chartStyleStorageKey = 'ar_pr500_chart_style_v1';
+  chartStylePreset: ChartStylePreset = 'area';
+  readonly chartStyleOptions: { value: ChartStylePreset; label: string }[] = [
+    { value: 'area', label: 'Área (relleno suave)' },
+    { value: 'line', label: 'Solo líneas' },
+    { value: 'minimal', label: 'Minimal (limpio)' },
+    { value: 'technical', label: 'Técnico (rejilla)' },
+    { value: 'trend', label: 'Tendencia (color por subida/bajada)' },
+  ];
+  /** Modo tendencia: tramos de presión coloreados + puntos. */
+  pressureTrendSegs: Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    trend: 'up' | 'down' | 'flat';
+  }> = [];
+  pressureTrendDots: Array<{ cx: number; cy: number }> = [];
+  readonly chartTrendGridXs = [20, 35, 50, 65, 80];
   /** Serie °C (eje derecho); tramos separados si hay huecos en los datos. */
   tempPath = '';
   superheatPath = '';
@@ -106,6 +127,13 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   private touchStartCenterNorm = 0.5;
   private touchStartZoomLo = 0;
   private touchStartZoomHi = 1;
+  /** Móvil: toque corto sin pan/pellizco → fijar cursor (valor en ese instante). */
+  private touchSessionMultiFinger = false;
+  private touchTapStartX = 0;
+  private touchTapStartY = 0;
+  private touchTapMoved = false;
+  /** Hubo desplazamiento real en modo pan (zoom activo). */
+  private touchPanDidNudge = false;
 
   /** Contenedor del SVG para API de pantalla completa. */
   @ViewChild('chartStage') private chartStage?: ElementRef<HTMLElement>;
@@ -123,6 +151,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    this.loadChartStylePreset();
     this.sub = this.route.queryParamMap.subscribe((q) => {
       const id = q.get('pr500Id');
       this.pr500Id = id && id.length > 10 ? id : null;
@@ -218,6 +247,69 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   /** Toggles de capas: redibujar sin nuevo fetch. */
   onLayerToggle(): void {
     this.rebuildChartGeometry();
+  }
+
+  loadChartStylePreset(): void {
+    try {
+      const v = localStorage.getItem(this.chartStyleStorageKey);
+      if (v === 'area' || v === 'line' || v === 'minimal' || v === 'technical' || v === 'trend') {
+        this.chartStylePreset = v;
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+    this.chartStylePreset = 'area';
+  }
+
+  onChartStyleChange(): void {
+    try {
+      localStorage.setItem(this.chartStyleStorageKey, this.chartStylePreset);
+    } catch {
+      /* ignore */
+    }
+    this.rebuildChartGeometry();
+  }
+
+  chartShowsAreaFill(): boolean {
+    return this.showPressure && (this.chartStylePreset === 'area' || this.chartStylePreset === 'technical');
+  }
+
+  chartPressureUsesGlow(): boolean {
+    return this.chartStylePreset === 'area' || this.chartStylePreset === 'technical';
+  }
+
+  private noteTouchTapStart(ev: TouchEvent): void {
+    if (ev.touches.length >= 2) {
+      this.touchSessionMultiFinger = true;
+      return;
+    }
+    if (ev.touches.length === 1) {
+      const t = ev.touches[0];
+      this.touchTapStartX = t.clientX;
+      this.touchTapStartY = t.clientY;
+      this.touchTapMoved = false;
+      this.touchPanDidNudge = false;
+    }
+  }
+
+  private noteTouchTapMove(ev: TouchEvent): void {
+    if (this.touchSessionMultiFinger || ev.touches.length !== 1) return;
+    const t = ev.touches[0];
+    if (Math.hypot(t.clientX - this.touchTapStartX, t.clientY - this.touchTapStartY) > 16) {
+      this.touchTapMoved = true;
+    }
+  }
+
+  /** Misma lógica que mousemove: posición en viewBox 0–100 y cursor activo. */
+  applyCursorFromClientX(clientX: number): void {
+    const el = this.chartStage?.nativeElement;
+    if (!el || !this.zoomedPoints.length) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 1) return;
+    const x = ((clientX - r.left) / r.width) * 100;
+    this.cursorActive = true;
+    this.updateCursorForX(x);
   }
 
   private toLocalInput(d: Date): string {
@@ -476,6 +568,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       this.yGridLines = [];
       this.xGridLines = [];
       this.activityRects = [];
+      this.pressureTrendSegs = [];
+      this.pressureTrendDots = [];
       this.cursorActive = false;
       return;
     }
@@ -542,6 +636,31 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     }
     this.pressurePath = parts.join(' ');
     this.pressureAreaPath = `${this.pressurePath} L${lastX.toFixed(2)},${y1} L${firstX.toFixed(2)},${y1} Z`;
+
+    this.pressureTrendSegs = [];
+    this.pressureTrendDots = [];
+    if (this.chartStylePreset === 'trend' && this.showPressure && pts.length >= 2) {
+      const eps = this.pressureDisplayPsi ? 0.04 : 0.0015;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const v0 = toY(pts[i].pressure_bar);
+        const v1 = toY(pts[i + 1].pressure_bar);
+        if (!Number.isFinite(v0) || !Number.isFinite(v1)) continue;
+        const d = v1 - v0;
+        const trend = d > eps ? 'up' : d < -eps ? 'down' : 'flat';
+        this.pressureTrendSegs.push({
+          x1: xAt(pts[i].created_at),
+          y1: yAtVal(v0),
+          x2: xAt(pts[i + 1].created_at),
+          y2: yAtVal(v1),
+          trend,
+        });
+      }
+      for (let i = 0; i < pts.length; i++) {
+        const v = toY(pts[i].pressure_bar);
+        if (!Number.isFinite(v)) continue;
+        this.pressureTrendDots.push({ cx: xAt(pts[i].created_at), cy: yAtVal(v) });
+      }
+    }
 
     this.tempPath = '';
     this.superheatPath = '';
@@ -749,6 +868,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
   onChartTouchStart(ev: TouchEvent): void {
     if (!this.zoomedPoints.length) return;
+    this.noteTouchTapStart(ev);
     if (ev.touches.length >= 2) {
       const el = this.chartStage?.nativeElement;
       if (!el) return;
@@ -777,6 +897,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   onChartTouchMove(ev: TouchEvent): void {
     const el = this.chartStage?.nativeElement;
     if (!el || !this.zoomedPoints.length) return;
+    this.noteTouchTapMove(ev);
     const r = el.getBoundingClientRect();
     if (r.width <= 1) return;
 
@@ -822,6 +943,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       lo = Math.max(0, lo);
       hi = Math.min(1, hi);
       if (hi - lo < 0.05) return;
+      if (Math.abs(dxNorm) > 0.002) this.touchPanDidNudge = true;
       this.chartZoomLo = lo;
       this.chartZoomHi = hi;
       this.rebuildChartGeometry();
@@ -829,8 +951,23 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     }
   }
 
-  onChartTouchEnd(): void {
+  onChartTouchEnd(ev: TouchEvent): void {
     this.touchMode = 'none';
+    if (ev.touches.length === 0) {
+      if (!this.touchSessionMultiFinger && !this.touchTapMoved && !this.touchPanDidNudge && ev.changedTouches.length > 0) {
+        this.applyCursorFromClientX(ev.changedTouches[0].clientX);
+      }
+      this.touchSessionMultiFinger = false;
+      this.touchTapMoved = false;
+      this.touchPanDidNudge = false;
+    }
+  }
+
+  onChartTouchCancel(): void {
+    this.touchMode = 'none';
+    this.touchSessionMultiFinger = false;
+    this.touchTapMoved = false;
+    this.touchPanDidNudge = false;
   }
 
   onChartMouseLeave(): void {
@@ -838,13 +975,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   }
 
   onChartMouseMove(ev: MouseEvent): void {
-    const el = this.chartStage?.nativeElement;
-    if (!el || !this.zoomedPoints.length) return;
-    const r = el.getBoundingClientRect();
-    if (r.width <= 1 || r.height <= 1) return;
-    const x = ((ev.clientX - r.left) / r.width) * 100;
-    this.cursorActive = true;
-    this.updateCursorForX(x);
+    if (!this.chartStage?.nativeElement || !this.zoomedPoints.length) return;
+    this.applyCursorFromClientX(ev.clientX);
   }
 
   private updateCursorForX(x: number): void {
