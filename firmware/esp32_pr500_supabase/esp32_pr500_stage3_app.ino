@@ -6,6 +6,7 @@
  *
  * Presión en ADC (pin 36): transmisor **4–20 mA** con resistencia de deriva a GND (`MA_SHUNT_OHMS`, 150 Ω por defecto).
  * Escala de proceso **0,5…8 bar** en 4…20 mA (`MA_PRESS_BAR_MIN` / `MA_PRESS_BAR_MAX`). **F14** sigue siendo corrección (bar o psi según F15).
+ * Suavizado: **N muestras** por ciclo con promedio **recortado** (se descartan min/max) y filtro **EMA** entre ciclos (`PRESSURE_ADC_*`, `PRESSURE_EMA_ALPHA`).
  *
  * Base:
  * - Portal WiFiManager estable (probado en esp32_wifi_manager_test.ino).
@@ -83,6 +84,7 @@ static float clampF02AllowZero(float v, int f15) {
 
 // ====== Pins ======
 static const int PIN_ADC = 36;
+/** DS18B20 OneWire: usar **3.3 V** en VCC y pull-up 4,7 kΩ entre DATA y **3.3 V** (no 5 V en DATA: el ESP32 no es tolerante a 5 V). */
 static const int PIN_TEMP_DS18B20 = 27;
 /** Transmisor 4–20 mA con resistencia de deriva a GND (ESP32 ADC en el extremo alto del shunt).
  *  Transmisor alimentado typical 12–24 V; masas comunes ESP / fuente del lazo.
@@ -95,6 +97,12 @@ static constexpr float MA_ADC_V_AT_20MA = MA_LOOP_MAX_A * MA_SHUNT_OHMS;
 /** Presión del proceso que representa el transmisor en esos extremos (bar). */
 static constexpr float MA_PRESS_BAR_MIN = 0.5f;
 static constexpr float MA_PRESS_BAR_MAX = 8.0f;
+
+/** Muestreo ADC: N lecturas por ciclo; se descartan mínimo y máximo (promedio recortado) y luego filtro EMA entre ciclos. */
+static constexpr int PRESSURE_ADC_SAMPLE_COUNT = 32;
+static constexpr uint32_t PRESSURE_ADC_INTER_SAMPLE_US = 400;
+/** Peso de la lectura nueva en el EMA (0…1). Más bajo = más suave, más lento a seguir transitorios. */
+static constexpr float PRESSURE_EMA_ALPHA = 0.22f;
 
 static const int PIN_R1 = 25;
 static const int PIN_R2 = 26;
@@ -211,6 +219,8 @@ static bool g_suctionTempOk = false;
 static float g_superheatC = NAN;
 static int g_superheatOk = -1;
 static unsigned long g_nextTempReadAtMs = 0;
+/** Presión bar del transmisor (sin F14), ya filtrada EMA; usada en control, alarmas y telemetría. */
+static float g_pressureBarFiltered = NAN;
 static bool g_portalSaveRequested = false;
 static WiFiManagerParameter p_module("module_id", "Module ID", "", 47);
 static WiFiManagerParameter p_token("api_key", "Device Token", "", 23);
@@ -225,6 +235,8 @@ static const char *DEFAULT_PARAMS_JSON =
 
 static constexpr uint32_t CLOUD_CLIENT_TIMEOUT_MS = 6000;
 static constexpr uint32_t CLOUD_COOLDOWN_MS = 15000;
+/** Si no hay WiFi o falla autoConnect, el portal PR500-Setup no bloquea para siempre: tras estos segundos sigue el `loop` con control local. */
+static constexpr uint32_t WIFI_CONFIG_PORTAL_TIMEOUT_SEC = 300;
 
 /** Evita encadenar bloqueos HTTP cuando Internet está caído pero WiFi sigue "conectado". */
 static bool cloudInCooldown(unsigned long nowMs) {
@@ -495,16 +507,24 @@ static bool saveParams() {
   return true;
 }
 
-/** Muestreo ADC pin 36: tensión en el shunt 4–20 mA → bar según `MA_*` (sin F14).
- *  Si cambiás R del shunt o el rango del transmisor, ajustá las constantes `MA_SHUNT_OHMS` / `MA_PRESS_BAR_*`. */
+/** Muestreo ADC pin 36: N lecturas, promedio recortado (sin min/max) → tensión y bar (`MA_*`, sin F14). */
 static void samplePressureAdc(float *adcVoltsOut, float *barRawOut) {
   analogSetPinAttenuation(PIN_ADC, ADC_11db);
-  uint32_t acc = 0;
-  for (int i = 0; i < 12; i++) {
-    acc += analogRead(PIN_ADC);
-    delay(2);
+  constexpr int N = PRESSURE_ADC_SAMPLE_COUNT;
+  const int n = (N >= 8 && N <= 64) ? N : 16;
+  uint32_t sum = 0;
+  uint16_t vmin = 4095;
+  uint16_t vmax = 0;
+  for (int i = 0; i < n; i++) {
+    const uint16_t s = (uint16_t)analogRead(PIN_ADC);
+    sum += s;
+    if (s < vmin) vmin = s;
+    if (s > vmax) vmax = s;
+    delayMicroseconds(PRESSURE_ADC_INTER_SAMPLE_US);
   }
-  const float v = ((acc / 12.0f) / 4095.0f) * 3.3f;
+  const int denom = n - 2;
+  const float avgCounts = denom > 0 ? (float)(sum - vmin - vmax) / (float)denom : (float)sum / (float)n;
+  const float v = (avgCounts / 4095.0f) * 3.3f;
   *adcVoltsOut = v;
   const float spanV = MA_ADC_V_AT_20MA - MA_ADC_V_AT_4MA;
   float bar = MA_PRESS_BAR_MIN;
@@ -514,6 +534,18 @@ static void samplePressureAdc(float *adcVoltsOut, float *barRawOut) {
   if (bar < MA_PRESS_BAR_MIN) bar = MA_PRESS_BAR_MIN;
   if (bar > MA_PRESS_BAR_MAX) bar = MA_PRESS_BAR_MAX;
   *barRawOut = bar;
+}
+
+/** Actualiza `g_pressureBarFiltered` (EMA) a partir del promedio recortado `barRaw` de esta iteración. */
+static void updatePressureFilter(float barRaw) {
+  float a = PRESSURE_EMA_ALPHA;
+  if (a < 0.02f) a = 0.02f;
+  if (a > 1.f) a = 1.f;
+  if (!isfinite(g_pressureBarFiltered)) {
+    g_pressureBarFiltered = barRaw;
+    return;
+  }
+  g_pressureBarFiltered = a * barRaw + (1.f - a) * g_pressureBarFiltered;
 }
 
 /** Acota F26/F27 (V en el pin ADC) y garantiza ventana ≥ 50 mV. */
@@ -531,16 +563,17 @@ static void clampAdcThresholds() {
 /** Tensión dentro de la ventana F26…F27 (parametrizable desde la app). */
 static bool adcVoltageValid(float v) { return v >= P.F26 && v <= P.F27; }
 
-/** Presión del sensor escalada a bar (sin offset F14). */
+/** Presión del sensor escalada a bar (sin offset F14), una pasada de muestreo (p. ej. diagnóstico en `setup`). */
 static float pressureBarSensorOnly() {
   float v, b;
   samplePressureAdc(&v, &b);
   return b;
 }
 
-/** Presión para `ingest-reading` (siempre bar absoluto). F14 en bar si F15=0; si F15=1, F14 es offset en psi → suma en bar. */
+/** Presión para `ingest-reading` (bar con F14). Usa el valor EMA del último `loop` si ya está inicializado. */
 static float pressureBarTelemetry() {
-  const float b = pressureBarSensorOnly();
+  float b = g_pressureBarFiltered;
+  if (!isfinite(b)) b = pressureBarSensorOnly();
   if (P.F15 == 0) return b + P.F14;
   return b + P.F14 / PSI_PER_BAR;
 }
@@ -627,9 +660,10 @@ static void updateTempAndSuperheat(unsigned long nowMs) {
   g_superheatOk = (g_superheatC >= P.F33 && g_superheatC <= P.F34) ? 1 : 0;
 }
 
-/** Lectura en la misma unidad que F02/F03/F04 (bar o psi). */
+/** Lectura en la misma unidad que F02/F03/F04 (bar o psi); usa presión filtrada si existe. */
 static float pressureReadingControlUnit() {
-  const float b = pressureBarSensorOnly();
+  float b = g_pressureBarFiltered;
+  if (!isfinite(b)) b = pressureBarSensorOnly();
   if (P.F15 == 0) return b + P.F14;
   return b * PSI_PER_BAR + P.F14;
 }
@@ -1024,7 +1058,12 @@ static void runConfigPortalStable() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true, true);
   delay(280);
+  Serial.printf("[WiFi] Portal %s (máx. %lu s). Sin conectar a tiempo → control local sin WiFi.\n", AP_NAME,
+                (unsigned long)WIFI_CONFIG_PORTAL_TIMEOUT_SEC);
   wm.startConfigPortal(AP_NAME);
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("[WiFi] Portal cerrado sin STA: continuando con regulación local."));
+  }
 }
 
 static void copyPortalConfigAndSave() {
@@ -1065,7 +1104,7 @@ static void setupWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.persistent(false);
-  wm.setConfigPortalTimeout(0);
+  wm.setConfigPortalTimeout(WIFI_CONFIG_PORTAL_TIMEOUT_SEC);
   wm.setConnectTimeout(15);
   wm.setMinimumSignalQuality(8);
   wm.setSaveConfigCallback([]() { g_portalSaveRequested = true; });
@@ -1081,11 +1120,18 @@ static void setupWifi() {
   if (forcePortal) {
     runConfigPortalStable();
   } else if (!wm.autoConnect(AP_NAME)) {
-    runConfigPortalStable();
+    // autoConnect ya intentó STA y, si hacía falta, abrió el portal hasta timeout o guardado.
+    Serial.println(F("[WiFi] autoConnect sin STA: se sigue con control local (sin segunda sesión de portal)."));
   }
   flushPortalSaveIfNeeded();
   applyPublicDnsIfStaUp();
-  Serial.printf("[WiFi] SSID=%s IP=%s RSSI=%d\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[WiFi] SSID=%s IP=%s RSSI=%d\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(),
+                  (int)WiFi.RSSI());
+  } else {
+    Serial.println(F("[WiFi] Sin STA: presión/compresores en modo local. Ingest y pull de parámetros en pausa."));
+    Serial.println(F("[WiFi] Para WiFi: GPIO14 a GND al arranque (portal) o corregir credenciales guardadas."));
+  }
 }
 
 static void maintainWifi() {
@@ -1447,12 +1493,12 @@ static bool applyCloudParams(JsonObject src) {
     P.F28 = n28;
   }
   {
-    const n29 = normalizeF01FromFloat((float)P.F29);
+    const int n29 = normalizeF01FromFloat((float)P.F29);
     if (n29 != P.F29) ch = true;
     P.F29 = n29;
   }
   {
-    const n32 = normalizeF01FromFloat((float)P.F32);
+    const int n32 = normalizeF01FromFloat((float)P.F32);
     if (n32 != P.F32) ch = true;
     P.F32 = n32;
   }
@@ -1685,6 +1731,7 @@ static void printStatus() {
 void setup() {
   pinMode(PIN_FORCE_PORTAL, INPUT_PULLUP);
   setupRelaysSafe();
+  pinMode(PIN_TEMP_DS18B20, INPUT_PULLUP);
   g_dsBus.begin();
   g_dsBus.setResolution(10);
   Serial.begin(115200);
@@ -1704,6 +1751,9 @@ void setup() {
   setupWifi();
   g_lastSendMs = millis() - g_cfg.intervalMs;
   g_lastParamsPullMs = millis() - g_cfg.paramsPullMs + 5000UL;
+  Serial.printf(
+      "[DS18] pin GPIO%d sensores=%u | AR29=%d (poner 1 para usar sonda). Cable: VCC=3.3V, GND, DQ=GPIO%d, R 4k7 entre DQ y 3.3V.\n",
+      PIN_TEMP_DS18B20, (unsigned)g_dsBus.getDeviceCount(), P.F29, PIN_TEMP_DS18B20);
   printStatus();
   Serial.println(
       F("[INIT] App: editá parámetros en Angular → se bajan solos. Serie: p | runtime | set f28 1 | pull | pullms 60000"));
@@ -1713,11 +1763,13 @@ void setup() {
 void loop() {
   maintainWifi();
   const unsigned long nowMs = millis();
-  updateTempAndSuperheat(nowMs);
   float adcV, barRaw;
   samplePressureAdc(&adcV, &barRaw);
+  updatePressureFilter(barRaw);
+  updateTempAndSuperheat(nowMs);
+  const float bCtl = g_pressureBarFiltered;
   const float p =
-      (P.F15 == 0) ? (barRaw + P.F14) : (barRaw * PSI_PER_BAR + P.F14);
+      (P.F15 == 0) ? (bCtl + P.F14) : (bCtl * PSI_PER_BAR + P.F14);
   updateSensorFault(adcV, nowMs);
   if (adcVoltageValid(adcV)) {
     updateSafety(p, nowMs);
