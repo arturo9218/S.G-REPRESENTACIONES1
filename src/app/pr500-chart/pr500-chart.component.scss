@@ -149,6 +149,10 @@ $grid: rgba(148, 163, 184, 0.12);
   font-size: 0.76rem;
   color: #cbd5e1;
 
+  .pr5-side__toggles--full {
+    grid-column: 1 / -1;
+  }
+
   label {
     display: inline-flex;
     align-items: center;
@@ -240,6 +244,18 @@ $grid: rgba(148, 163, 184, 0.12);
   border-radius: 14px;
 }
 
+.pr5-main--charts-tall .pr5-svg-wrap {
+  min-height: max(380px, calc(100svh - 10rem));
+}
+
+.pr5-main--charts-tall .pr5-states__svg {
+  min-height: 200px;
+}
+
+.pr5-main--charts-tall .pr5-states__labels {
+  min-height: 150px;
+}
+
 .pr5-main__head {
   display: flex;
   flex-wrap: wrap;
@@ -256,6 +272,19 @@ $grid: rgba(148, 163, 184, 0.12);
   align-items: center;
   justify-content: flex-end;
   gap: 0.45rem 0.65rem;
+}
+
+.pr5-tall-btn {
+  margin-top: 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.pr5-tall-btn--inline {
+  margin-top: 0;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.74rem;
+  white-space: nowrap;
 }
 
 .pr5-fs-btn {
@@ -603,11 +632,59 @@ $grid: rgba(148, 163, 184, 0.12);
   padding-top: 0.62rem;
 }
 
+.pr5-states__head {
+  margin-bottom: 0.45rem;
+}
+
 .pr5-states__title {
-  margin: 0 0 0.4rem;
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: #cbd5e1;
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #e2e8f0;
+}
+
+.pr5-states__hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  color: rgba(148, 163, 184, 0.95);
+  line-height: 1.45;
+  max-width: 52rem;
+}
+
+.pr5-step-grid {
+  stroke: rgba(148, 163, 184, 0.1);
+  stroke-width: 0.2;
+}
+
+.pr5-step-baseline {
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 0.22;
+  stroke-dasharray: 0.8 0.7;
+}
+
+.pr5-step-line {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pr5-step-line--c1 {
+  stroke: #4ade80;
+  stroke-width: 1.05;
+}
+
+.pr5-step-line--c2 {
+  stroke: #22d3ee;
+  stroke-width: 1.05;
+}
+
+.pr5-step-line--c3 {
+  stroke: #a78bfa;
+  stroke-width: 1.05;
+}
+
+.pr5-step-line--alarm {
+  stroke: #fb7185;
+  stroke-width: 0.95;
 }
 
 .pr5-states__grid {

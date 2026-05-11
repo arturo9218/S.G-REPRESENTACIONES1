@@ -6,7 +6,7 @@
       <p class="pr5-sub">
         Curva de presión de proceso en el rango elegido. La nube guarda siempre bar; si el control está en
         <strong>psi</strong>, el eje izquierdo usa esa unidad. Si el firmware envía sonda de succión y superheat,
-        podés superponer <strong>°C</strong> en el eje derecho. Debajo: estado de compresores y alarma.
+        podés superponer <strong>°C</strong> en el eje derecho. Debajo: marcha ON/OFF de compresores y alarma (escalón o barras).
       </p>
     </div>
     <div class="pr5-head-actions">
@@ -46,6 +46,10 @@
         <label><input type="checkbox" [(ngModel)]="showComp2" (ngModelChange)="onLayerToggle()" /> C2</label>
         <label><input type="checkbox" [(ngModel)]="showComp3" (ngModelChange)="onLayerToggle()" /> C3</label>
         <label><input type="checkbox" [(ngModel)]="showAlarm" (ngModelChange)="onLayerToggle()" /> Alarma</label>
+        <label class="pr5-side__toggles--full">
+          <input type="checkbox" [(ngModel)]="showMotorStepChart" (ngModelChange)="onMotorViewToggle()" /> Gráfico escalón
+          ON/OFF (motores)
+        </label>
       </div>
       <label class="pr5-field pr5-field--style" *ngIf="pr500Id">
         <span>Estilo del gráfico</span>
@@ -69,6 +73,9 @@
       <button type="button" class="btn btn--primary btn--block" [disabled]="loading" (click)="applyFilters()">
         Aplicar rango
       </button>
+      <button type="button" class="btn btn--ghost btn--block pr5-tall-btn" (click)="toggleChartTallLayout()">
+        {{ chartTallLayout ? 'Gráficos: tamaño normal' : 'Gráficos más altos' }}
+      </button>
       <dl class="pr5-side__meta" *ngIf="displayPoints.length">
         <div class="pr5-side__meta-row">
           <dt>Eje vertical</dt>
@@ -89,7 +96,7 @@
       </dl>
     </aside>
 
-    <section class="pr5-main card">
+    <section class="pr5-main card" [class.pr5-main--charts-tall]="chartTallLayout">
       <div class="pr5-main__head">
         <h2 class="pr5-main__title">Presión de proceso</h2>
         <div class="pr5-main__actions">
@@ -108,6 +115,14 @@
             (click)="resetChartZoom()"
           >
             Ver todo
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost pr5-tall-btn pr5-tall-btn--inline"
+            *ngIf="displayPoints.length"
+            (click)="toggleChartTallLayout()"
+          >
+            {{ chartTallLayout ? 'Menos alto' : 'Más alto' }}
           </button>
           <button
             type="button"
@@ -415,7 +430,13 @@
       </div>
 
       <div class="pr5-states" *ngIf="displayPoints.length && (showComp1 || showComp2 || showComp3 || showAlarm)">
-        <h3 class="pr5-states__title">Estados en el tiempo</h3>
+        <div class="pr5-states__head">
+          <h3 class="pr5-states__title">Motores y alarma en el tiempo</h3>
+          <p class="pr5-states__hint" *ngIf="showMotorStepChart">
+            Línea escalón: <strong>arriba = ON</strong>, abajo = OFF (entre lecturas). Misma escala de tiempo que el gráfico de arriba.
+          </p>
+          <p class="pr5-states__hint" *ngIf="!showMotorStepChart">Vista por tramos (barras). Activá «Gráfico escalón» en el panel para ver curvas ON/OFF.</p>
+        </div>
         <div class="pr5-states__grid">
           <div class="pr5-states__labels">
             <span *ngIf="showComp1">C1</span>
@@ -424,17 +445,77 @@
             <span *ngIf="showAlarm">Alarma</span>
           </div>
           <svg class="pr5-states__svg" viewBox="0 0 100 88" preserveAspectRatio="none">
-            <ng-container *ngFor="let r of activityRects">
-              <rect
-                *ngIf="activityLaneVisible(r.lane)"
-                class="pr5-state-rect"
-                [class.pr5-state-rect--on]="r.on"
-                [attr.x]="r.x0"
-                [attr.y]="8 + r.lane * 20"
-                [attr.width]="stateRectW(r)"
-                height="14"
+            <defs>
+              <clipPath id="pr5MotorLaneClip">
+                <rect x="0" y="4" width="100" height="80" rx="0.2" />
+              </clipPath>
+            </defs>
+            <ng-container *ngFor="let lb of timeLabels">
+              <line
+                class="pr5-step-grid"
+                [attr.x1]="lb.x"
+                [attr.x2]="lb.x"
+                y1="6"
+                y2="82"
+                vector-effect="non-scaling-stroke"
               />
             </ng-container>
+            <g clip-path="url(#pr5MotorLaneClip)">
+              <ng-container *ngFor="let lane of motorLanes">
+                <line
+                  *ngIf="activityLaneVisible(lane)"
+                  class="pr5-step-baseline"
+                  [attr.x1]="plot.x0"
+                  [attr.y1]="motorLaneBaselineY(lane)"
+                  [attr.x2]="plot.x1"
+                  [attr.y2]="motorLaneBaselineY(lane)"
+                  vector-effect="non-scaling-stroke"
+                />
+              </ng-container>
+              <ng-container *ngIf="showMotorStepChart">
+                <path
+                  *ngIf="showComp1 && comp1StepPath"
+                  class="pr5-step-line pr5-step-line--c1"
+                  [attr.d]="comp1StepPath"
+                  fill="none"
+                  vector-effect="non-scaling-stroke"
+                />
+                <path
+                  *ngIf="showComp2 && comp2StepPath"
+                  class="pr5-step-line pr5-step-line--c2"
+                  [attr.d]="comp2StepPath"
+                  fill="none"
+                  vector-effect="non-scaling-stroke"
+                />
+                <path
+                  *ngIf="showComp3 && comp3StepPath"
+                  class="pr5-step-line pr5-step-line--c3"
+                  [attr.d]="comp3StepPath"
+                  fill="none"
+                  vector-effect="non-scaling-stroke"
+                />
+                <path
+                  *ngIf="showAlarm && alarmStepPath"
+                  class="pr5-step-line pr5-step-line--alarm"
+                  [attr.d]="alarmStepPath"
+                  fill="none"
+                  vector-effect="non-scaling-stroke"
+                />
+              </ng-container>
+              <ng-container *ngIf="!showMotorStepChart">
+                <ng-container *ngFor="let r of activityRects">
+                  <rect
+                    *ngIf="activityLaneVisible(r.lane)"
+                    class="pr5-state-rect"
+                    [class.pr5-state-rect--on]="r.on"
+                    [attr.x]="r.x0"
+                    [attr.y]="8 + r.lane * 20"
+                    [attr.width]="stateRectW(r)"
+                    height="14"
+                  />
+                </ng-container>
+              </ng-container>
+            </g>
             <text *ngFor="let lb of timeLabels" class="pr5-x-tick" [attr.x]="lb.x" y="86" text-anchor="middle">{{ lb.text }}</text>
           </svg>
         </div>

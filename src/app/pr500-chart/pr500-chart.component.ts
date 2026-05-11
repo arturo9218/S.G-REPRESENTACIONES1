@@ -98,7 +98,17 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   /** Rejilla vertical en marcas de tiempo (trazos suaves). */
   xGridLines: string[] = [];
   activityRects: { lane: number; x0: number; x1: number; on: boolean }[] = [];
+  /** Trazos escalón ON/OFF (misma escala X que presión); vacíos si no aplica. */
+  comp1StepPath = '';
+  comp2StepPath = '';
+  comp3StepPath = '';
+  alarmStepPath = '';
+  /** Vista escalón vs barras por tramo. */
+  showMotorStepChart = true;
   readonly activityLabels = ['C1', 'C2', 'C3', 'Alarma'];
+  /** Gráficos de presión + motores más altos (localStorage). */
+  private readonly chartTallStorageKey = 'ar_pr500_chart_tall_v1';
+  chartTallLayout = false;
   showPressure = true;
   /** Curvas desde `temp_suction_c` / `superheat_c` si existen en el rango. */
   showTempSuction = true;
@@ -152,6 +162,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadChartStylePreset();
+    this.loadChartTallLayout();
     this.sub = this.route.queryParamMap.subscribe((q) => {
       const id = q.get('pr500Id');
       this.pr500Id = id && id.length > 10 ? id : null;
@@ -269,6 +280,51 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       /* ignore */
     }
     this.rebuildChartGeometry();
+  }
+
+  loadChartTallLayout(): void {
+    try {
+      this.chartTallLayout = localStorage.getItem(this.chartTallStorageKey) === '1';
+    } catch {
+      this.chartTallLayout = false;
+    }
+  }
+
+  toggleChartTallLayout(): void {
+    this.chartTallLayout = !this.chartTallLayout;
+    try {
+      localStorage.setItem(this.chartTallStorageKey, this.chartTallLayout ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }
+
+  onMotorViewToggle(): void {
+    this.rebuildChartGeometry();
+  }
+
+  /** Escalón “mantiene valor hasta la siguiente muestra” (misma convención que muchos SCADA). */
+  private static buildBooleanStepPath(
+    pts: Pr500ReadingRow[],
+    xAt: (iso: string) => number,
+    isOn: (p: Pr500ReadingRow) => boolean,
+    yOn: number,
+    yOff: number
+  ): string {
+    if (pts.length === 0) return '';
+    const yv = (i: number) => (isOn(pts[i]) ? yOn : yOff);
+    const x0 = xAt(pts[0].created_at);
+    const parts: string[] = [`M${x0.toFixed(2)},${yv(0).toFixed(2)}`];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const xa = xAt(pts[i + 1].created_at);
+      const yi = yv(i);
+      const yj = yv(i + 1);
+      parts.push(`L${xa.toFixed(2)},${yi.toFixed(2)}`);
+      if (yj !== yi) {
+        parts.push(`L${xa.toFixed(2)},${yj.toFixed(2)}`);
+      }
+    }
+    return parts.join(' ');
   }
 
   chartShowsAreaFill(): boolean {
@@ -570,6 +626,10 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       this.activityRects = [];
       this.pressureTrendSegs = [];
       this.pressureTrendDots = [];
+      this.comp1StepPath = '';
+      this.comp2StepPath = '';
+      this.comp3StepPath = '';
+      this.alarmStepPath = '';
       this.cursorActive = false;
       return;
     }
@@ -800,6 +860,25 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     this.timeLabels = tLabs;
     this.xGridLines = xGrids;
     this.activityRects = this.buildActivityRects(pts, xAt);
+    const laneY = (lane: number) => {
+      const base = 8 + lane * 20;
+      return { yOn: base + 2.5, yOff: base + 11.5 };
+    };
+    if (this.showMotorStepChart && pts.length >= 1) {
+      const l0 = laneY(0);
+      const l1 = laneY(1);
+      const l2 = laneY(2);
+      const l3 = laneY(3);
+      this.comp1StepPath = this.showComp1 ? Pr500ChartComponent.buildBooleanStepPath(pts, xAt, (p) => !!p.comp1_on, l0.yOn, l0.yOff) : '';
+      this.comp2StepPath = this.showComp2 ? Pr500ChartComponent.buildBooleanStepPath(pts, xAt, (p) => !!p.comp2_on, l1.yOn, l1.yOff) : '';
+      this.comp3StepPath = this.showComp3 ? Pr500ChartComponent.buildBooleanStepPath(pts, xAt, (p) => !!p.comp3_on, l2.yOn, l2.yOff) : '';
+      this.alarmStepPath = this.showAlarm ? Pr500ChartComponent.buildBooleanStepPath(pts, xAt, (p) => !!p.alarm_on, l3.yOn, l3.yOff) : '';
+    } else {
+      this.comp1StepPath = '';
+      this.comp2StepPath = '';
+      this.comp3StepPath = '';
+      this.alarmStepPath = '';
+    }
     if (this.cursorActive) {
       this.updateCursorForX(this.cursorX);
     }
@@ -818,6 +897,12 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       out.push({ lane: 3, x0, x1, on: !!p.alarm_on });
     }
     return out;
+  }
+
+  readonly motorLanes = [0, 1, 2, 3] as const;
+
+  motorLaneBaselineY(lane: number): number {
+    return 8 + lane * 20 + 11.5;
   }
 
   activityLaneVisible(lane: number): boolean {
