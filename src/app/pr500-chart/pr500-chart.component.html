@@ -5,8 +5,8 @@
       <h1 class="pr5-title">{{ pr500Name }}</h1>
       <p class="pr5-sub">
         Curva de presión de proceso en el rango elegido. La nube guarda siempre bar; si el control está en
-        <strong>psi</strong>, el eje vertical se muestra en esa unidad. Debajo: estado reciente de compresores y
-        alarma.
+        <strong>psi</strong>, el eje izquierdo usa esa unidad. Si el firmware envía sonda de succión y superheat,
+        podés superponer <strong>°C</strong> en el eje derecho. Debajo: estado de compresores y alarma.
       </p>
     </div>
     <div class="pr5-head-actions">
@@ -23,12 +23,26 @@
     <aside class="pr5-side card">
       <h2 class="pr5-side__title">Rango de fechas</h2>
       <p class="pr5-side__lead">Elegí el intervalo y aplicá para redibujar la curva.</p>
+      <div class="pr5-presets" *ngIf="pr500Id">
+        <span class="pr5-presets__label">Rápido</span>
+        <button type="button" class="btn btn--ghost pr5-preset-btn" [disabled]="loading" (click)="applyPresetRange(24)">
+          24 h
+        </button>
+        <button type="button" class="btn btn--ghost pr5-preset-btn" [disabled]="loading" (click)="applyPresetRange(48)">
+          48 h
+        </button>
+        <button type="button" class="btn btn--ghost pr5-preset-btn" [disabled]="loading" (click)="applyPresetRange(168)">
+          7 d
+        </button>
+      </div>
       <div class="pr5-side__toggles">
-        <label><input type="checkbox" [(ngModel)]="showPressure" /> Presión</label>
-        <label><input type="checkbox" [(ngModel)]="showComp1" /> C1</label>
-        <label><input type="checkbox" [(ngModel)]="showComp2" /> C2</label>
-        <label><input type="checkbox" [(ngModel)]="showComp3" /> C3</label>
-        <label><input type="checkbox" [(ngModel)]="showAlarm" /> Alarma</label>
+        <label><input type="checkbox" [(ngModel)]="showPressure" (ngModelChange)="onLayerToggle()" /> Presión</label>
+        <label><input type="checkbox" [(ngModel)]="showTempSuction" (ngModelChange)="onLayerToggle()" /> Succión °C</label>
+        <label><input type="checkbox" [(ngModel)]="showSuperheat" (ngModelChange)="onLayerToggle()" /> Superheat</label>
+        <label><input type="checkbox" [(ngModel)]="showComp1" (ngModelChange)="onLayerToggle()" /> C1</label>
+        <label><input type="checkbox" [(ngModel)]="showComp2" (ngModelChange)="onLayerToggle()" /> C2</label>
+        <label><input type="checkbox" [(ngModel)]="showComp3" (ngModelChange)="onLayerToggle()" /> C3</label>
+        <label><input type="checkbox" [(ngModel)]="showAlarm" (ngModelChange)="onLayerToggle()" /> Alarma</label>
       </div>
       <label class="pr5-field">
         <span>Desde</span>
@@ -47,8 +61,12 @@
           <dd>{{ pressureYUnit === 'psi' ? 'psi (convertido desde bar)' : 'bar' }}</dd>
         </div>
         <div class="pr5-side__meta-row">
-          <dt>Escala actual</dt>
+          <dt>Escala P</dt>
           <dd>{{ pMin.toFixed(pressureDisplayPsi ? 1 : 2) }} — {{ pMax.toFixed(pressureDisplayPsi ? 1 : 2) }}</dd>
+        </div>
+        <div class="pr5-side__meta-row" *ngIf="hasTempAxis">
+          <dt>Escala °C</dt>
+          <dd>{{ tMin.toFixed(1) }} — {{ tMax.toFixed(1) }}</dd>
         </div>
         <div class="pr5-side__meta-row">
           <dt>Datos</dt>
@@ -88,6 +106,12 @@
 
       <div class="pr5-legend" *ngIf="latestReading as L">
         <span class="pr5-legend__item pr5-legend__item--pres" *ngIf="showPressure">Última: {{ latestPressureText() }}</span>
+        <span class="pr5-legend__item pr5-legend__item--succ" *ngIf="showTempSuction && latestSuctionSummary()">{{
+          latestSuctionSummary()
+        }}</span>
+        <span class="pr5-legend__item pr5-legend__item--sh" *ngIf="showSuperheat && latestSuperheatSummary()">{{
+          latestSuperheatSummary()
+        }}</span>
         <span class="pr5-legend__pill" *ngIf="showComp1" [class.pr5-legend__pill--active]="L.comp1_on">C1</span>
         <span class="pr5-legend__pill" *ngIf="showComp2" [class.pr5-legend__pill--active]="L.comp2_on">C2</span>
         <span class="pr5-legend__pill" *ngIf="showComp3" [class.pr5-legend__pill--active]="L.comp3_on">C3</span>
@@ -121,6 +145,14 @@
                 <stop offset="0%" stop-color="#38bdf8" />
                 <stop offset="100%" stop-color="#3b82f6" />
               </linearGradient>
+              <linearGradient id="pr5TempGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#4ade80" />
+                <stop offset="100%" stop-color="#22c55e" />
+              </linearGradient>
+              <linearGradient id="pr5ShGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#fbbf24" />
+                <stop offset="100%" stop-color="#f59e0b" />
+              </linearGradient>
               <filter id="pr5LineGlow" x="-20%" y="-20%" width="140%" height="140%">
                 <feGaussianBlur in="SourceGraphic" stdDeviation="0.35" result="b" />
                 <feMerge>
@@ -146,6 +178,15 @@
             <!-- Título eje Y -->
             <text class="pr5-axis-title pr5-axis-title--y" [attr.x]="plot.x0 - 2.4" [attr.y]="plot.y0 - 1.2" text-anchor="end">
               Presión ({{ pressureYUnit }})
+            </text>
+            <text
+              *ngIf="hasTempAxis"
+              class="pr5-axis-title pr5-axis-title--y pr5-axis-title--yr"
+              [attr.x]="plot.x1 + 6.2"
+              [attr.y]="plot.y0 - 1.2"
+              text-anchor="middle"
+            >
+              °C
             </text>
 
             <!-- Rejilla vertical (tiempo) -->
@@ -191,6 +232,19 @@
               {{ t.label }}
             </text>
 
+            <line
+              *ngFor="let t of tempAxisTicks"
+              class="pr5-axis-mark pr5-axis-mark--yr"
+              [attr.x1]="t.markX0"
+              [attr.y1]="t.y"
+              [attr.x2]="t.markX1"
+              [attr.y2]="t.y"
+              vector-effect="non-scaling-stroke"
+            />
+            <text *ngFor="let t of tempAxisTicks" class="pr5-y-tick pr5-y-tick--r" [attr.x]="plot.x1 + 2.35" [attr.y]="t.y + 0.9" text-anchor="start">
+              {{ t.label }}
+            </text>
+
             <g clip-path="url(#pr5PlotClip)">
               <path *ngIf="showPressure && pressureAreaPath" [attr.d]="pressureAreaPath" fill="url(#pr5AreaGrad)" stroke="none" />
               <path
@@ -205,20 +259,77 @@
                 vector-effect="non-scaling-stroke"
                 filter="url(#pr5LineGlow)"
               />
+              <path
+                *ngIf="hasTempAxis && showTempSuction && tempPath"
+                class="pr5-line-temp"
+                [attr.d]="tempPath"
+                fill="none"
+                stroke="url(#pr5TempGrad)"
+                stroke-width="0.95"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                vector-effect="non-scaling-stroke"
+              />
+              <path
+                *ngIf="hasTempAxis && showSuperheat && superheatPath"
+                class="pr5-line-sh"
+                [attr.d]="superheatPath"
+                fill="none"
+                stroke="url(#pr5ShGrad)"
+                stroke-width="0.85"
+                stroke-dasharray="1.6 1.1"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                vector-effect="non-scaling-stroke"
+              />
             </g>
             <line
-              *ngIf="cursorActive && showPressure"
+              *ngIf="cursorActive && (showPressure || hasTempAxis)"
               class="pr5-cursor-line"
               [attr.x1]="cursorX"
               [attr.y1]="plot.y0"
               [attr.x2]="cursorX"
               [attr.y2]="plot.y1"
             />
-            <circle *ngIf="cursorActive && showPressure" class="pr5-cursor-dot" [attr.cx]="cursorX" [attr.cy]="cursorY" r="0.9" />
-            <g *ngIf="cursorActive && showPressure">
-              <rect class="pr5-cursor-box" [attr.x]="cursorX > 70 ? cursorX - 22 : cursorX + 1.4" [attr.y]="plot.y0 + 1.2" width="20.5" height="6.2" rx="0.9" />
-              <text class="pr5-cursor-text" [attr.x]="cursorX > 70 ? cursorX - 21 : cursorX + 2.2" [attr.y]="plot.y0 + 3.7">{{ cursorPressureLabel }}</text>
-              <text class="pr5-cursor-text pr5-cursor-text--time" [attr.x]="cursorX > 70 ? cursorX - 21 : cursorX + 2.2" [attr.y]="plot.y0 + 6">{{ cursorTimeLabel }}</text>
+            <circle
+              *ngIf="cursorActive && (showPressure || hasTempAxis)"
+              class="pr5-cursor-dot"
+              [attr.cx]="cursorX"
+              [attr.cy]="cursorY"
+              r="0.9"
+            />
+            <g *ngIf="cursorActive && (showPressure || hasTempAxis)">
+              <rect
+                class="pr5-cursor-box"
+                [attr.x]="cursorX > 68 ? cursorX - 24 : cursorX + 1.4"
+                [attr.y]="plot.y0 + 1.2"
+                [attr.width]="cursorPressureLabel && cursorTempLabel ? 24 : 21"
+                [attr.height]="cursorTooltipHeight()"
+                rx="0.9"
+              />
+              <text
+                *ngIf="cursorPressureLabel"
+                class="pr5-cursor-text"
+                [attr.x]="cursorX > 68 ? cursorX - 23 : cursorX + 2.2"
+                [attr.y]="plot.y0 + 3.7"
+              >
+                {{ cursorPressureLabel }}
+              </text>
+              <text
+                *ngIf="cursorTempLabel"
+                class="pr5-cursor-text pr5-cursor-text--temp"
+                [attr.x]="cursorX > 68 ? cursorX - 23 : cursorX + 2.2"
+                [attr.y]="plot.y0 + (cursorPressureLabel ? 5.85 : 3.7)"
+              >
+                {{ cursorTempLabel }}
+              </text>
+              <text
+                class="pr5-cursor-text pr5-cursor-text--time"
+                [attr.x]="cursorX > 68 ? cursorX - 23 : cursorX + 2.2"
+                [attr.y]="cursorTimeTextY()"
+              >
+                {{ cursorTimeLabel }}
+              </text>
             </g>
 
             <!-- Eje X: tiempo -->

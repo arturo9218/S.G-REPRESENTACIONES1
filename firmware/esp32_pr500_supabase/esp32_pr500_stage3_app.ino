@@ -1288,6 +1288,16 @@ static bool applyCloudParams(JsonObject src) {
       ch = true;
     }
   }
+  /* F15 antes de F02–F14: misma unidad que serie/app; convierte umbrales si solo cambia la unidad. */
+  if (src.containsKey("F15")) {
+    int nv = (int)src["F15"].as<float>();
+    if (nv != 0) nv = 1;
+    if (nv != P.F15) {
+      convertLocalParamsForF15(P.F15, nv);
+      P.F15 = nv;
+      ch = true;
+    }
+  }
   applyFloat("F02", P.F02);
   applyFloat("F03", P.F03);
   applyFloat("F04", P.F04);
@@ -1315,14 +1325,6 @@ static bool applyCloudParams(JsonObject src) {
   applyInt("F12", P.F12);
   applyInt("F13", P.F13);
   applyFloat("F14", P.F14);
-  if (src.containsKey("F15")) {
-    int nv = (int)src["F15"].as<float>();
-    if (nv != 0) nv = 1;
-    if (nv != P.F15) {
-      P.F15 = nv;
-      ch = true;
-    }
-  }
   applyFloat("F17", P.F17);
   applyFloat("F18", P.F18);
   applyFloat("F19", P.F19);
@@ -1778,7 +1780,7 @@ void loop() {
     g_highCondSince = 0;
   }
   if (!g_alarmSensor) maybeRotateCompressors(nowMs);
-  if (!g_alarmSensor) updateHyst(p);
+  if (!g_alarmSensor && adcVoltageValid(adcV)) updateHyst(p);
   applyRelays(nowMs);
   tickCompressorRuntime(nowMs);
   maybeSaveCompressorRuntime(nowMs);

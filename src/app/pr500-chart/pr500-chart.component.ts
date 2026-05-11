@@ -23,6 +23,10 @@ export interface Pr500ReadingRow {
   comp1_run_ms?: number | null;
   comp2_run_ms?: number | null;
   comp3_run_ms?: number | null;
+  /** Sonda succión / superheat (migración 039 + firmware Stage3). */
+  temp_suction_c?: number | null;
+  superheat_c?: number | null;
+  superheat_ok?: boolean | null;
 }
 
 const MAX_FETCH = 8000;
@@ -51,13 +55,21 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   pressurePath = '';
   /** Polígono bajo la curva (relleno suave en el SVG). */
   pressureAreaPath = '';
+  /** Serie °C (eje derecho); tramos separados si hay huecos en los datos. */
+  tempPath = '';
+  superheatPath = '';
   pMin = 0;
   pMax = 6;
+  /** Rango del eje derecho (succión / superheat). */
+  tMin = 0;
+  tMax = 40;
+  hasTempAxis = false;
+  tempAxisTicks: { y: number; label: string; markX0: number; markX1: number }[] = [];
   /** Escala Y según `params.F15` del controlador (telemetría siempre en bar). */
   pressureDisplayPsi = false;
   pressureYUnit: 'bar' | 'psi' = 'bar';
-  /** Área útil del SVG (viewBox 0–100). Más margen izquierdo para escala de presión. */
-  readonly plot = { x0: 19, x1: 99, y0: 7, y1: 83 };
+  /** Área útil del SVG (viewBox 0–100). `x1` se estrecha si hay eje de temperatura. */
+  plot = { x0: 19, x1: 99, y0: 7, y1: 83 };
   /** Marcas del eje X: posición, texto y segmento de marca bajo el gráfico. */
   timeLabels: { x: number; y: number; text: string; tickY0: number; tickY1: number }[] = [];
   yAxisTicks: { y: number; label: string; markX0: number; markX1: number }[] = [];
@@ -67,6 +79,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   activityRects: { lane: number; x0: number; x1: number; on: boolean }[] = [];
   readonly activityLabels = ['C1', 'C2', 'C3', 'Alarma'];
   showPressure = true;
+  /** Curvas desde `temp_suction_c` / `superheat_c` si existen en el rango. */
+  showTempSuction = true;
+  showSuperheat = true;
   showComp1 = true;
   showComp2 = true;
   showComp3 = true;
@@ -77,6 +92,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   cursorY = 0;
   cursorTimeLabel = '';
   cursorPressureLabel = '';
+  /** Línea extra en el tooltip (succión / SH). */
+  cursorTempLabel = '';
   private zoomStartMs = 0;
   private zoomSpanMs = 1;
   private draggingPan = false;
@@ -87,6 +104,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   private touchStartDist = 0;
   private touchStartSpan = 1;
   private touchStartCenterNorm = 0.5;
+  private touchStartZoomLo = 0;
+  private touchStartZoomHi = 1;
 
   /** Contenedor del SVG para API de pantalla completa. */
   @ViewChild('chartStage') private chartStage?: ElementRef<HTMLElement>;
@@ -184,6 +203,21 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     const from = new Date(to.getTime() - 48 * 3600 * 1000);
     this.filterTo = this.toLocalInput(to);
     this.filterFrom = this.toLocalInput(from);
+  }
+
+  /** Atajos de rango (recarga datos). */
+  applyPresetRange(hours: 24 | 48 | 168): void {
+    const to = new Date();
+    const from = new Date(to.getTime() - hours * 3600 * 1000);
+    this.filterTo = this.toLocalInput(to);
+    this.filterFrom = this.toLocalInput(from);
+    this.resetChartZoom();
+    void this.loadAll();
+  }
+
+  /** Toggles de capas: redibujar sin nuevo fetch. */
+  onLayerToggle(): void {
+    this.rebuildChartGeometry();
   }
 
   private toLocalInput(d: Date): string {
@@ -429,10 +463,14 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   private rebuildChartGeometry(): void {
     const pts = this.getZoomedPoints(this.displayPoints);
     this.zoomedPoints = pts;
-    const { x0, x1, y0, y1 } = this.plot;
     if (pts.length === 0) {
       this.pressurePath = '';
       this.pressureAreaPath = '';
+      this.tempPath = '';
+      this.superheatPath = '';
+      this.hasTempAxis = false;
+      this.tempAxisTicks = [];
+      this.plot.x1 = 99;
       this.timeLabels = [];
       this.yAxisTicks = [];
       this.yGridLines = [];
@@ -446,12 +484,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     const span = Math.max(t1 - t0, 60_000);
     this.zoomStartMs = t0;
     this.zoomSpanMs = span;
-    const plotW = x1 - x0;
-    const plotH = y1 - y0;
-    const xAt = (iso: string) => {
-      const tx = new Date(iso).getTime();
-      return x0 + ((tx - t0) / span) * plotW;
-    };
+
     let minP = Infinity;
     let maxP = -Infinity;
     const toY = (bar: number) => (this.pressureDisplayPsi ? bar * PR500_PSI_PER_BAR : bar);
@@ -469,6 +502,29 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     const pad = Math.max((maxP - minP) * 0.08, this.pressureDisplayPsi ? 0.5 : 0.02);
     this.pMin = minP - pad;
     this.pMax = maxP + pad;
+
+    let minT = Infinity;
+    let maxT = -Infinity;
+    for (const p of pts) {
+      if (this.showTempSuction && p.temp_suction_c != null && Number.isFinite(p.temp_suction_c)) {
+        minT = Math.min(minT, p.temp_suction_c);
+        maxT = Math.max(maxT, p.temp_suction_c);
+      }
+      if (this.showSuperheat && p.superheat_c != null && Number.isFinite(p.superheat_c)) {
+        minT = Math.min(minT, p.superheat_c);
+        maxT = Math.max(maxT, p.superheat_c);
+      }
+    }
+    this.hasTempAxis = Number.isFinite(minT) && Number.isFinite(maxT);
+    this.plot.x1 = this.hasTempAxis ? 86.5 : 99;
+    const { x0, x1, y0, y1 } = this.plot;
+    const plotW = x1 - x0;
+    const plotH = y1 - y0;
+    const xAt = (iso: string) => {
+      const tx = new Date(iso).getTime();
+      return x0 + ((tx - t0) / span) * plotW;
+    };
+
     const pSpan = this.pMax - this.pMin || 1;
     const yAtVal = (val: number) => {
       return y0 + (1 - (val - this.pMin) / pSpan) * plotH;
@@ -486,6 +542,69 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     }
     this.pressurePath = parts.join(' ');
     this.pressureAreaPath = `${this.pressurePath} L${lastX.toFixed(2)},${y1} L${firstX.toFixed(2)},${y1} Z`;
+
+    this.tempPath = '';
+    this.superheatPath = '';
+    this.tempAxisTicks = [];
+    if (this.hasTempAxis) {
+      const tPad = Math.max((maxT - minT) * 0.1, 0.6);
+      this.tMin = minT - tPad;
+      this.tMax = maxT + tPad;
+      const tSpan = this.tMax - this.tMin || 1;
+      const yAtT = (tc: number) => y0 + (1 - (tc - this.tMin) / tSpan) * plotH;
+
+      const buildSegmentedPath = (pick: (row: Pr500ReadingRow) => number | null | undefined): string => {
+        const seg: string[] = [];
+        let penUp = true;
+        for (let i = 0; i < pts.length; i++) {
+          const row = pts[i];
+          const v = pick(row);
+          if (v == null || !Number.isFinite(v)) {
+            penUp = true;
+            continue;
+          }
+          const xx = xAt(row.created_at);
+          const yy = yAtT(v);
+          seg.push(`${penUp ? 'M' : 'L'}${xx.toFixed(2)},${yy.toFixed(2)}`);
+          penUp = false;
+        }
+        return seg.join(' ');
+      };
+
+      if (this.showTempSuction) this.tempPath = buildSegmentedPath((r) => r.temp_suction_c);
+      if (this.showSuperheat) this.superheatPath = buildSegmentedPath((r) => r.superheat_c);
+
+      const tStep = Pr500ChartComponent.niceStep(tSpan, 5);
+      const firstTT = Math.ceil(this.tMin / tStep) * tStep;
+      const tticks: { y: number; label: string; markX0: number; markX1: number }[] = [];
+      for (let v = firstTT; v <= this.tMax + tStep * 0.001; v += tStep) {
+        if (v < this.tMin - tStep * 0.001) continue;
+        const yp = yAtT(v);
+        if (yp < y0 - 0.5 || yp > y1 + 0.5) continue;
+        tticks.push({
+          y: yp,
+          label: `${v.toFixed(1)}°`,
+          markX0: x1,
+          markX1: x1 + 1.15,
+        });
+        if (tticks.length >= 8) break;
+      }
+      if (tticks.length === 0) {
+        tticks.push({
+          y: yAtT(this.tMax),
+          label: `${this.tMax.toFixed(1)}°`,
+          markX0: x1,
+          markX1: x1 + 1.15,
+        });
+        tticks.push({
+          y: yAtT(this.tMin),
+          label: `${this.tMin.toFixed(1)}°`,
+          markX0: x1,
+          markX1: x1 + 1.15,
+        });
+      }
+      this.tempAxisTicks = tticks;
+    }
 
     const step = Pr500ChartComponent.niceStep(pSpan, 6);
     const firstTick = Math.ceil(this.pMin / step) * step;
@@ -639,6 +758,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       this.touchMode = 'pinch';
       this.touchStartDist = Math.abs(t1.clientX - t0.clientX);
       this.touchStartSpan = this.chartZoomHi - this.chartZoomLo;
+      this.touchStartZoomLo = this.chartZoomLo;
+      this.touchStartZoomHi = this.chartZoomHi;
       this.touchStartCenterNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / Math.max(1, r.width)));
       ev.preventDefault();
       return;
@@ -663,13 +784,12 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       const t0 = ev.touches[0];
       const t1 = ev.touches[1];
       const dist = Math.max(6, Math.abs(t1.clientX - t0.clientX));
-      const centerNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / r.width));
       let next = this.touchStartSpan * (this.touchStartDist / dist);
       next = Math.max(0.05, Math.min(1, next));
-      let lo = this.chartZoomLo + (this.touchStartCenterNorm - centerNorm) * (this.chartZoomHi - this.chartZoomLo);
+      const span0 = this.touchStartZoomHi - this.touchStartZoomLo;
+      const center = this.touchStartZoomLo + this.touchStartCenterNorm * span0;
+      let lo = center - next * this.touchStartCenterNorm;
       let hi = lo + next;
-      lo = centerNorm - next * centerNorm;
-      hi = lo + next;
       if (lo < 0) {
         hi -= lo;
         lo = 0;
@@ -746,8 +866,25 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
         bestD = d;
       }
     }
-    const yVal = this.pressureDisplayPsi ? best.pressure_bar * PR500_PSI_PER_BAR : best.pressure_bar;
-    const y = this.plot.y0 + (1 - (yVal - this.pMin) / Math.max(0.0001, this.pMax - this.pMin)) * (this.plot.y1 - this.plot.y0);
+    let y: number;
+    if (this.showPressure && Number.isFinite(best.pressure_bar)) {
+      const yVal = this.pressureDisplayPsi ? best.pressure_bar * PR500_PSI_PER_BAR : best.pressure_bar;
+      y = this.plot.y0 + (1 - (yVal - this.pMin) / Math.max(0.0001, this.pMax - this.pMin)) * (this.plot.y1 - this.plot.y0);
+    } else if (this.hasTempAxis) {
+      const tSpan = this.tMax - this.tMin || 1;
+      let tv: number | null = null;
+      if (this.showTempSuction && best.temp_suction_c != null && Number.isFinite(best.temp_suction_c)) {
+        tv = best.temp_suction_c;
+      } else if (this.showSuperheat && best.superheat_c != null && Number.isFinite(best.superheat_c)) {
+        tv = best.superheat_c;
+      }
+      y =
+        tv != null
+          ? this.plot.y0 + (1 - (tv - this.tMin) / tSpan) * (this.plot.y1 - this.plot.y0)
+          : (this.plot.y0 + this.plot.y1) / 2;
+    } else {
+      y = (this.plot.y0 + this.plot.y1) / 2;
+    }
     this.cursorY = Math.max(this.plot.y0, Math.min(this.plot.y1, y));
     this.cursorTimeLabel = new Date(best.created_at).toLocaleString('es-AR', {
       day: '2-digit',
@@ -756,9 +893,39 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       minute: '2-digit',
       second: '2-digit',
     });
-    this.cursorPressureLabel = this.pressureDisplayPsi
-      ? `${pr500BarToPsi(best.pressure_bar).toFixed(1)} psi`
-      : `${best.pressure_bar.toFixed(2)} bar`;
+    this.cursorPressureLabel =
+      this.showPressure && Number.isFinite(best.pressure_bar)
+        ? this.pressureDisplayPsi
+          ? `${pr500BarToPsi(best.pressure_bar).toFixed(1)} psi`
+          : `${best.pressure_bar.toFixed(2)} bar`
+        : '';
+
+    this.cursorTempLabel = '';
+    if (this.hasTempAxis) {
+      const bits: string[] = [];
+      if (this.showTempSuction && best.temp_suction_c != null && Number.isFinite(best.temp_suction_c)) {
+        bits.push(`Succión ${best.temp_suction_c.toFixed(1)} °C`);
+      }
+      if (this.showSuperheat && best.superheat_c != null && Number.isFinite(best.superheat_c)) {
+        const warn = best.superheat_ok === false ? ' ⚠' : '';
+        bits.push(`SH ${best.superheat_c.toFixed(1)} °C${warn}`);
+      }
+      this.cursorTempLabel = bits.join(' · ');
+    }
+  }
+
+  cursorTooltipHeight(): number {
+    const lines = (this.cursorPressureLabel ? 1 : 0) + (this.cursorTempLabel ? 1 : 0) + 1;
+    if (lines <= 2) return 6.2;
+    return 8.9;
+  }
+
+  /** Posición Y del renglón de hora en el tooltip del cursor (viewBox). */
+  cursorTimeTextY(): number {
+    const p = this.plot.y0;
+    if (this.cursorPressureLabel && this.cursorTempLabel) return p + 8.15;
+    if (this.cursorPressureLabel || this.cursorTempLabel) return p + 6;
+    return p + 5.35;
   }
 
   lastRowSummary(): string {
@@ -770,7 +937,15 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       ? `${pr500BarToPsi(r.pressure_bar).toFixed(1)} psi (${r.pressure_bar.toFixed(2)} bar)`
       : `${r.pressure_bar.toFixed(2)} bar`;
     const rh = this.runHoursSummaryLine(r);
-    const base = `Última lectura: ${pStr} · Compresores C1–C3 y alarma según leyenda · DI ${di(r.di1_ok)}/${di(r.di2_ok)}/${di(r.di3_ok)}/${di(r.di4_ok)}`;
+    const tbits: string[] = [];
+    if (r.temp_suction_c != null && Number.isFinite(r.temp_suction_c)) {
+      tbits.push(`succión ${r.temp_suction_c.toFixed(1)} °C`);
+    }
+    if (r.superheat_c != null && Number.isFinite(r.superheat_c)) {
+      tbits.push(`SH ${r.superheat_c.toFixed(1)} °C`);
+    }
+    const tExtra = tbits.length ? ` · ${tbits.join(', ')}` : '';
+    const base = `Última lectura: ${pStr}${tExtra} · Compresores C1–C3 y alarma según leyenda · DI ${di(r.di1_ok)}/${di(r.di2_ok)}/${di(r.di3_ok)}/${di(r.di4_ok)}`;
     return rh ? `${base} · ${rh}` : base;
   }
 
@@ -800,6 +975,19 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       return `${pr500BarToPsi(L.pressure_bar).toFixed(1)} ${this.pressureYUnit}`;
     }
     return `${L.pressure_bar.toFixed(2)} ${this.pressureYUnit}`;
+  }
+
+  latestSuctionSummary(): string {
+    const L = this.latestReading;
+    if (!L || L.temp_suction_c == null || !Number.isFinite(L.temp_suction_c)) return '';
+    return `Succión ${L.temp_suction_c.toFixed(1)} °C`;
+  }
+
+  latestSuperheatSummary(): string {
+    const L = this.latestReading;
+    if (!L || L.superheat_c == null || !Number.isFinite(L.superheat_c)) return '';
+    const warn = L.superheat_ok === false ? ' · fuera de ventana' : '';
+    return `SH ${L.superheat_c.toFixed(1)} °C${warn}`;
   }
 
   stateRectW(r: { x0: number; x1: number }): number {

@@ -118,6 +118,29 @@ $grid: rgba(148, 163, 184, 0.12);
   line-height: 1.45;
 }
 
+.pr5-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+  margin-bottom: 0.75rem;
+}
+
+.pr5-presets__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #7dd3fc;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-right: 0.15rem;
+}
+
+.pr5-preset-btn {
+  padding: 0.28rem 0.5rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
 .pr5-side__toggles {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -289,6 +312,28 @@ $grid: rgba(148, 163, 184, 0.12);
   font-weight: 700;
 }
 
+.pr5-legend__item--succ {
+  margin-right: 0.25rem;
+  padding: 0.22rem 0.5rem;
+  border-radius: 8px;
+  background: rgba(20, 83, 45, 0.35);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  color: #bbf7d0;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.pr5-legend__item--sh {
+  margin-right: 0.25rem;
+  padding: 0.22rem 0.5rem;
+  border-radius: 8px;
+  background: rgba(120, 53, 15, 0.35);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fef3c7;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .pr5-legend__pill {
   display: inline-flex;
   align-items: center;
@@ -428,6 +473,31 @@ $grid: rgba(148, 163, 184, 0.12);
   fill: none;
 }
 
+.pr5-line-temp {
+  fill: none;
+  opacity: 0.95;
+}
+
+.pr5-line-sh {
+  fill: none;
+  opacity: 0.92;
+}
+
+.pr5-axis-title--yr {
+  fill: #86efac;
+  font-size: 2px;
+}
+
+.pr5-axis-mark--yr {
+  stroke: rgba(134, 239, 172, 0.45);
+  stroke-width: 0.28;
+}
+
+.pr5-y-tick--r {
+  fill: #bbf7d0;
+  font-size: 1.95px;
+}
+
 .pr5-cursor-line {
   stroke: rgba(125, 211, 252, 0.9);
   stroke-width: 0.28;
@@ -458,6 +528,12 @@ $grid: rgba(148, 163, 184, 0.12);
   fill: #94a3b8;
   font-size: 1.42px;
   font-weight: 600;
+}
+
+.pr5-cursor-text--temp {
+  fill: #bbf7d0;
+  font-size: 1.55px;
+  font-weight: 700;
 }
 
 .pr5-states {
