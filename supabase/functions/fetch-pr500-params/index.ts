@@ -1,5 +1,5 @@
 // Supabase Edge Function: fetch-pr500-params
-// El ESP32 (o cualquier cliente) obtiene params F01–F28 (JSON en columna params) con module_id + deviceToken (como ingest-reading).
+// El ESP32 (o cualquier cliente) obtiene params F01–F34 (JSON compacto) con module_id + deviceToken (como ingest-reading).
 // Deploy: supabase functions deploy fetch-pr500-params --no-verify-jwt
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -12,6 +12,28 @@ const corsHeaders = {
 interface Body {
   moduleId?: string;
   deviceToken?: string;
+}
+
+/** Solo F01–F34 numéricos: reduce tamaño del JSON y evita que metadatos en `params` (JSONB) inflen el parseo en el ESP32 (~4 KB pool). */
+const PR500_PARAM_KEYS = [
+  'F01', 'F02', 'F03', 'F04', 'F05', 'F06', 'F07', 'F08', 'F09', 'F10',
+  'F11', 'F12', 'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'F20',
+  'F21', 'F22', 'F23', 'F24', 'F25', 'F26', 'F27', 'F28', 'F29', 'F30',
+  'F31', 'F32', 'F33', 'F34',
+] as const;
+
+function sanitizePr500Params(raw: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const k of PR500_PARAM_KEYS) {
+    const v = raw[k];
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      out[k] = v;
+    } else if (typeof v === 'string' && v.trim().length > 0) {
+      const n = Number(v);
+      if (Number.isFinite(n)) out[k] = n;
+    }
+  }
+  return out;
 }
 
 Deno.serve(async (req) => {
@@ -66,10 +88,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const params =
+    const rawParams =
       row.params != null && typeof row.params === 'object' && !Array.isArray(row.params)
         ? (row.params as Record<string, unknown>)
         : {};
+    const params = sanitizePr500Params(rawParams);
     const updatedAt =
       typeof row.updated_at === 'string' && row.updated_at.trim()
         ? row.updated_at.trim()

@@ -31,6 +31,8 @@
 #include <DallasTemperature.h>
 #include <math.h>
 #include <stdint.h>
+#include <esp_system.h>
+#include <esp_timer.h>
 
 extern "C" {
 #include "lwip/ip_addr.h"
@@ -219,6 +221,9 @@ static bool g_suctionTempOk = false;
 static float g_superheatC = NAN;
 static int g_superheatOk = -1;
 static unsigned long g_nextTempReadAtMs = 0;
+/** DS18B20: conversión sin bloquear el loop (`setWaitForConversion(false)`). */
+static bool g_tempConvPending = false;
+static unsigned long g_tempConvStartMs = 0;
 /** Presión bar del transmisor (sin F14), ya filtrada EMA; usada en control, alarmas y telemetría. */
 static float g_pressureBarFiltered = NAN;
 static bool g_portalSaveRequested = false;
@@ -235,6 +240,10 @@ static const char *DEFAULT_PARAMS_JSON =
 
 static constexpr uint32_t CLOUD_CLIENT_TIMEOUT_MS = 6000;
 static constexpr uint32_t CLOUD_COOLDOWN_MS = 15000;
+/** F06/F07/F05 en 0 permitían ON/OFF cada ~60 ms (chasquido) → con motores por relé suele haber EMI/reinicios. Pisos solo acotan por debajo; si F06≥5 s se respeta. */
+static constexpr uint32_t RELAY_FLOOR_MIN_OFF_MS = 5000;
+static constexpr uint32_t RELAY_FLOOR_MIN_ON_MS = 5000;
+static constexpr uint32_t RELAY_FLOOR_START_GAP_MS = 3000;
 /** Si no hay WiFi o falla autoConnect, el portal PR500-Setup no bloquea para siempre: tras estos segundos sigue el `loop` con control local. */
 static constexpr uint32_t WIFI_CONFIG_PORTAL_TIMEOUT_SEC = 300;
 
@@ -282,8 +291,12 @@ static void loadDefaults() {
   strlcpy(g_cfg.apiUrl, DEFAULT_INGEST_URL, sizeof(g_cfg.apiUrl));
   g_cfg.intervalMs = 15000;
   g_cfg.paramsPullMs = 60000;
-  StaticJsonDocument<256> d;
-  deserializeJson(d, DEFAULT_PARAMS_JSON);
+  /* DEFAULT_PARAMS_JSON tiene muchos Fxx; 256 B de pool ArduinoJson queda corto → defaults rotos. */
+  StaticJsonDocument<2048> d;
+  {
+    const DeserializationError e = deserializeJson(d, DEFAULT_PARAMS_JSON);
+    if (e) Serial.printf("[PRM] loadDefaults JSON: %s (revisar DEFAULT_PARAMS_JSON)\n", e.c_str());
+  }
   P.F01 = normalizeF01FromFloat(d["F01"].as<float>());
   P.F02 = d["F02"] | 2.0f;
   P.F03 = d["F03"] | 0.5f;
@@ -459,6 +472,7 @@ static bool loadParams() {
   if (P.F24 > 7200) P.F24 = 7200;
   if (P.F25 < 10) P.F25 = 10;
   if (P.F25 > 7200) P.F25 = 7200;
+  if (P.F04 < 0.f) P.F04 = 0.f;
   clampAdcThresholds();
   return true;
 }
@@ -629,35 +643,54 @@ static void updateTempAndSuperheat(unsigned long nowMs) {
     g_suctionTempC = NAN;
     g_superheatC = NAN;
     g_superheatOk = -1;
+    g_tempConvPending = false;
     return;
   }
+
+  if (g_tempConvPending) {
+    uint8_t resBits = g_dsBus.getResolution();
+    if (resBits < 9) resBits = 10;
+    const int16_t mw = g_dsBus.millisToWaitForConversion(resBits);
+    uint16_t needMs = 100;
+    if (mw >= 100 && mw <= 900) needMs = (uint16_t)mw;
+    else if (mw > 900) needMs = 900;
+    if ((unsigned long)(nowMs - g_tempConvStartMs) < (unsigned long)needMs) return;
+
+    g_tempConvPending = false;
+    const float tRaw = g_dsBus.getTempCByIndex(0);
+    g_nextTempReadAtMs = nowMs + 1800UL;
+
+    if (tRaw == DEVICE_DISCONNECTED_C || tRaw <= -100.f || tRaw >= 150.f) {
+      g_suctionTempOk = false;
+      g_suctionTempC = NAN;
+      g_superheatC = NAN;
+      g_superheatOk = -1;
+      return;
+    }
+    g_suctionTempOk = true;
+    g_suctionTempC = tRaw + P.F30;
+    if (P.F32 == 0 || P.F31 == 0) {
+      g_superheatC = NAN;
+      g_superheatOk = -1;
+      return;
+    }
+    const float pAbsBar = pressureBarTelemetry() + 1.01325f;
+    const float satC = satTempCForRefrigerant(P.F31, pAbsBar);
+    if (!isfinite(satC)) {
+      g_superheatC = NAN;
+      g_superheatOk = -1;
+      return;
+    }
+    g_superheatC = g_suctionTempC - satC;
+    g_superheatOk = (g_superheatC >= P.F33 && g_superheatC <= P.F34) ? 1 : 0;
+    return;
+  }
+
   if (g_nextTempReadAtMs != 0 && (long)(nowMs - g_nextTempReadAtMs) < 0) return;
-  g_nextTempReadAtMs = nowMs + 1800UL;
+
   g_dsBus.requestTemperatures();
-  const float tRaw = g_dsBus.getTempCByIndex(0);
-  if (tRaw == DEVICE_DISCONNECTED_C || tRaw <= -100.f || tRaw >= 150.f) {
-    g_suctionTempOk = false;
-    g_suctionTempC = NAN;
-    g_superheatC = NAN;
-    g_superheatOk = -1;
-    return;
-  }
-  g_suctionTempOk = true;
-  g_suctionTempC = tRaw + P.F30;
-  if (P.F32 == 0 || P.F31 == 0) {
-    g_superheatC = NAN;
-    g_superheatOk = -1;
-    return;
-  }
-  const float pAbsBar = pressureBarTelemetry() + 1.01325f;
-  const float satC = satTempCForRefrigerant(P.F31, pAbsBar);
-  if (!isfinite(satC)) {
-    g_superheatC = NAN;
-    g_superheatOk = -1;
-    return;
-  }
-  g_superheatC = g_suctionTempC - satC;
-  g_superheatOk = (g_superheatC >= P.F33 && g_superheatC <= P.F34) ? 1 : 0;
+  g_tempConvPending = true;
+  g_tempConvStartMs = nowMs;
 }
 
 /** Lectura en la misma unidad que F02/F03/F04 (bar o psi); usa presión filtrada si existe. */
@@ -1020,9 +1053,12 @@ static void applyRelays(unsigned long nowMs) {
     if (phy == 2 && P.F19 >= 0.5f) targetPhys[phy] = true;
   }
 
-  const uint32_t minOff = (uint32_t)max(0, P.F06) * 1000UL;
-  const uint32_t minOn = (uint32_t)max(0, P.F07) * 1000UL;
-  const uint32_t gap = (uint32_t)max(0, P.F05) * 1000UL;
+  const uint32_t wantOffMs = (uint32_t)max(0, P.F06) * 1000UL;
+  const uint32_t wantOnMs = (uint32_t)max(0, P.F07) * 1000UL;
+  const uint32_t wantGapMs = (uint32_t)max(0, P.F05) * 1000UL;
+  const uint32_t minOff = wantOffMs > RELAY_FLOOR_MIN_OFF_MS ? wantOffMs : RELAY_FLOOR_MIN_OFF_MS;
+  const uint32_t minOn = wantOnMs > RELAY_FLOOR_MIN_ON_MS ? wantOnMs : RELAY_FLOOR_MIN_ON_MS;
+  const uint32_t gap = wantGapMs > RELAY_FLOOR_START_GAP_MS ? wantGapMs : RELAY_FLOOR_START_GAP_MS;
   for (int phy = 0; phy < N; phy++) {
     const int pin = pinOf(phy);
     const bool cur = relayIsOn(pin);
@@ -1047,6 +1083,82 @@ static void applyRelays(unsigned long nowMs) {
   }
 }
 
+static void printBootResetReason() {
+  const esp_reset_reason_t r = esp_reset_reason();
+  const char *msg = "desconocido";
+  switch (r) {
+    case ESP_RST_POWERON:
+      msg = "encendido";
+      break;
+    case ESP_RST_SW:
+      msg = "reset software";
+      break;
+    case ESP_RST_PANIC:
+      msg = "panic/assert";
+      break;
+    case ESP_RST_INT_WDT:
+      msg = "watchdog interrupciones";
+      break;
+    case ESP_RST_TASK_WDT:
+      msg = "watchdog tarea (loop bloqueado mucho tiempo)";
+      break;
+    case ESP_RST_WDT:
+      msg = "watchdog";
+      break;
+    case ESP_RST_DEEPSLEEP:
+      msg = "deep sleep";
+      break;
+    case ESP_RST_BROWNOUT:
+      msg = "BROWNOUT (caida de tension alimentacion)";
+      break;
+    case ESP_RST_SDIO:
+      msg = "SDIO";
+      break;
+    default:
+      break;
+  }
+  Serial.printf("[RST] ultimo reinicio: %s (codigo=%d)\n", msg, (int)r);
+}
+
+/** Si el `loop()` deja de terminar (pila WiFi/HTTP colgada, etc.), sin desenchufar: reinicio a los ~120 s. */
+static constexpr uint64_t LOOP_STUCK_CHECK_US = 120ULL * 1000000ULL;
+static volatile uint32_t g_loopBeatCount = 0;
+static esp_timer_handle_t g_loopStuckTimer = nullptr;
+
+static void loopStuckTimerCb(void * /*arg*/) {
+  static uint32_t lastBeat = UINT32_MAX;
+  const uint32_t b = g_loopBeatCount;
+  if (lastBeat != UINT32_MAX && b == lastBeat) {
+    esp_restart();
+  }
+  lastBeat = b;
+}
+
+static void loopWatchdogTimerStop() {
+  if (g_loopStuckTimer) esp_timer_stop(g_loopStuckTimer);
+}
+
+static void loopWatchdogTimerResume() {
+  if (!g_loopStuckTimer) return;
+  (void)esp_timer_start_periodic(g_loopStuckTimer, LOOP_STUCK_CHECK_US);
+}
+
+static void loopWatchdogTimerBegin() {
+  if (g_loopStuckTimer) return;
+  esp_timer_create_args_t t = {};
+  t.callback = &loopStuckTimerCb;
+  t.name = "pr500_loop";
+  if (esp_timer_create(&t, &g_loopStuckTimer) != ESP_OK) {
+    Serial.println(F("[WDT] esp_timer_create fallo"));
+    return;
+  }
+  if (esp_timer_start_periodic(g_loopStuckTimer, LOOP_STUCK_CHECK_US) != ESP_OK) {
+    Serial.println(F("[WDT] esp_timer_start_periodic fallo"));
+    return;
+  }
+  Serial.println(F("[WDT] loop sin avanzar ~120s -> reinicio automatico (evita desenchufar)"));
+}
+
 static void setupRelaysSafe() {
   digitalWrite(PIN_R1, relayOffLevel()); digitalWrite(PIN_R2, relayOffLevel()); digitalWrite(PIN_R3, relayOffLevel());
   pinMode(PIN_R1, OUTPUT); pinMode(PIN_R2, OUTPUT); pinMode(PIN_R3, OUTPUT);
@@ -1054,6 +1166,7 @@ static void setupRelaysSafe() {
 }
 
 static void runConfigPortalStable() {
+  loopWatchdogTimerStop();
   // Modo estable: solo AP/STA para portal (sin BLE).
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true, true);
@@ -1064,6 +1177,7 @@ static void runConfigPortalStable() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println(F("[WiFi] Portal cerrado sin STA: continuando con regulación local."));
   }
+  loopWatchdogTimerResume();
 }
 
 static void copyPortalConfigAndSave() {
@@ -1116,6 +1230,8 @@ static void setupWifi() {
   wm.addParameter(&p_token);
   wm.addParameter(&p_anon);
   wm.addParameter(&p_url);
+  Serial.println(
+      F("[WiFi] Si abre el portal PR500-Setup, puede tardar hasta ~5 min; al cerrar sigue el control local."));
   bool forcePortal = digitalRead(PIN_FORCE_PORTAL) == LOW;
   if (forcePortal) {
     runConfigPortalStable();
@@ -1137,9 +1253,10 @@ static void setupWifi() {
 static void maintainWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
   unsigned long now = millis();
-  if (g_lastRetryMs != 0 && (now - g_lastRetryMs < 10000UL)) return;
+  if (g_lastRetryMs != 0 && (now - g_lastRetryMs < 20000UL)) return;
   g_lastRetryMs = now;
   if (!WiFi.SSID().length()) return;
+  yield();
   WiFi.reconnect();
 }
 
@@ -1178,13 +1295,32 @@ static void printNetDiag() {
 
   WiFiClientSecure c;
   c.setInsecure();
-  c.setTimeout(12000);
+  c.setTimeout(5000);
   if (!c.connect(host, 443)) {
     Serial.printf("[NET] TCP 443 rechazado o timeout host=%s (firewall/router o URL de otro proyecto)\n", host);
     return;
   }
   Serial.println(F("[NET] TCP 443 OK — si [TX] sigue fallando, revisá anon_key o body del POST."));
   c.stop();
+}
+
+/** Vacía el cuerpo HTTP acotado en tiempo/bytes (evita `getString()` sin tope → heap / lwIP inestable). */
+static void discardHttpResponseBody(HTTPClient &http, int maxBytes) {
+  WiFiClient *s = http.getStreamPtr();
+  if (!s || maxBytes <= 0) return;
+  int n = 0;
+  const unsigned long t0 = millis();
+  while (n < maxBytes && (millis() - t0 < 8000UL)) {
+    if (s->available() > 0) {
+      const int c = s->read();
+      if (c < 0) break;
+      n++;
+      continue;
+    }
+    if (!http.connected()) break;
+    yield();
+    delay(1);
+  }
 }
 
 static void sendIngest() {
@@ -1205,7 +1341,10 @@ static void sendIngest() {
   client.setTimeout(CLOUD_CLIENT_TIMEOUT_MS);
   HTTPClient http;
   http.setTimeout(CLOUD_CLIENT_TIMEOUT_MS);
-  if (!http.begin(client, g_cfg.apiUrl)) return;
+  if (!http.begin(client, g_cfg.apiUrl)) {
+    http.end();
+    return;
+  }
   http.addHeader("Content-Type", "application/json");
   if (strlen(g_cfg.anonKey) > 10) {
     http.addHeader("apikey", g_cfg.anonKey);
@@ -1228,12 +1367,22 @@ static void sendIngest() {
   String body;
   serializeJson(d, body);
   int code = http.POST(body);
+  yield();
   if (code >= 0) {
     Serial.printf("[TX] HTTP %d\n", code);
     if (code >= 400) {
-      String resp = http.getString();
-      if (resp.length() > 220) resp = resp.substring(0, 220) + "...";
-      Serial.printf("[TX] body=%s\n", resp.c_str());
+      WiFiClient *rs = http.getStreamPtr();
+      char peek[200];
+      int np = 0;
+      if (rs) {
+        while (np < (int)sizeof(peek) - 1 && rs->available() > 0) {
+          const int ch = rs->read();
+          if (ch < 0) break;
+          peek[np++] = (char)ch;
+        }
+      }
+      peek[np] = 0;
+      if (np > 0) Serial.printf("[TX] body=%s\n", peek);
     }
     g_lastTxErrLogMs = 0;
   } else {
@@ -1246,6 +1395,7 @@ static void sendIngest() {
                     (int)WiFi.RSSI(), (unsigned long)(CLOUD_COOLDOWN_MS / 1000UL));
     }
   }
+  discardHttpResponseBody(http, 4096);
   http.end();
 }
 
@@ -1408,6 +1558,10 @@ static bool applyCloudParams(JsonObject src) {
       ch = true;
     }
   }
+  if (P.F04 < 0.f) {
+    P.F04 = 0.f;
+    ch = true;
+  }
   if (P.F08 < 0) {
     P.F08 = 0;
     ch = true;
@@ -1556,34 +1710,77 @@ static void tryPullParamsFromCloud() {
   client.setTimeout(CLOUD_CLIENT_TIMEOUT_MS);
   HTTPClient http;
   http.setTimeout(CLOUD_CLIENT_TIMEOUT_MS);
-  if (!http.begin(client, url)) return;
+  if (!http.begin(client, url)) {
+    http.end();
+    return;
+  }
   http.addHeader("Content-Type", "application/json");
   if (strlen(g_cfg.anonKey) > 10) {
     http.addHeader("apikey", g_cfg.anonKey);
     http.addHeader("Authorization", String("Bearer ") + g_cfg.anonKey);
   }
+  /* Cuerpo POST mínimo (moduleId + deviceToken); respuesta: ok + updated_at + params (solo F01–F34 en Edge; pool 4K). */
   StaticJsonDocument<256> req;
   req["moduleId"] = g_cfg.moduleId;
   req["deviceToken"] = g_cfg.apiKey;
   String body;
   serializeJson(req, body);
   int code = http.POST(body);
-  String resp = http.getString();
-  http.end();
+  yield();
+
   if (code != 200) {
     if (code < 0) g_lastCloudFailMs = now;
     if (g_lastPullErrLogMs == 0 || (now - g_lastPullErrLogMs > 60000UL)) {
       g_lastPullErrLogMs = now;
       Serial.printf("[PULL] HTTP %d (module_id/token deben coincidir con el PR500 en la app)\n", code);
-      if (resp.length() > 0 && resp.length() < 240) Serial.printf("[PULL] %s\n", resp.c_str());
+      WiFiClient *rs = http.getStreamPtr();
+      char peek[220];
+      int np = 0;
+      if (rs) {
+        while (np < (int)sizeof(peek) - 1 && rs->available() > 0) {
+          const int ch = rs->read();
+          if (ch < 0) break;
+          peek[np++] = (char)ch;
+        }
+      }
+      peek[np] = 0;
+      if (np > 0 && np < 240) Serial.printf("[PULL] %s\n", peek);
+    }
+    discardHttpResponseBody(http, 4096);
+    http.end();
+    return;
+  }
+
+  StaticJsonDocument<4096> doc;
+  const DeserializationError jerr = deserializeJson(doc, http.getStream());
+  discardHttpResponseBody(http, 8192);
+  http.end();
+
+  if (jerr) {
+    if (g_lastPullErrLogMs == 0 || (now - g_lastPullErrLogMs > 60000UL)) {
+      g_lastPullErrLogMs = now;
+      Serial.printf("[PULL] JSON err %s\n", jerr.c_str());
     }
     return;
   }
-  g_lastPullErrLogMs = 0;
-  StaticJsonDocument<3072> doc;
-  if (deserializeJson(doc, resp)) return;
-  if (!doc["ok"].as<bool>()) return;
+
+  if (!doc["ok"].as<bool>()) {
+    if (g_lastPullErrLogMs == 0 || (now - g_lastPullErrLogMs > 60000UL)) {
+      g_lastPullErrLogMs = now;
+      Serial.println(F("[PULL] respuesta ok=false (token/modulo o servidor)"));
+    }
+    return;
+  }
   JsonObject p = doc["params"].as<JsonObject>();
+  if (!p) {
+    if (g_lastPullErrLogMs == 0 || (now - g_lastPullErrLogMs > 60000UL)) {
+      g_lastPullErrLogMs = now;
+      Serial.println(F("[PULL] falta objeto params en JSON"));
+    }
+    return;
+  }
+
+  g_lastPullErrLogMs = 0;
   if (applyCloudParams(p)) {
     saveParams();
     Serial.println(F("[PULL] Parámetros actualizados desde la app (Supabase)."));
@@ -1636,7 +1833,7 @@ static void tryHandleSetLine(const String &raw) {
   if (key == "f01") P.F01 = normalizeF01FromFloat(v);
   else if (key == "f02") P.F02 = clampF02(v, P.F15);
   else if (key == "f03") P.F03 = clampF03(v, P.F15);
-  else if (key == "f04") P.F04 = v;
+  else if (key == "f04") P.F04 = (v < 0.f) ? 0.f : v;
   else if (key == "f05") P.F05 = (int)v;
   else if (key == "f06") P.F06 = (int)v;
   else if (key == "f07") P.F07 = (int)v;
@@ -1736,9 +1933,12 @@ void setup() {
   pinMode(PIN_TEMP_DS18B20, INPUT_PULLUP);
   g_dsBus.begin();
   g_dsBus.setResolution(10);
+  g_dsBus.setWaitForConversion(false);
   Serial.begin(115200);
+  Serial.setTimeout(30);
   delay(300);
   Serial.println(F("\nESP32 PR500 STAGE3 APP"));
+  printBootResetReason();
   loadDefaults();
   ensureFs();
   loadConfig();
@@ -1760,9 +1960,89 @@ void setup() {
   Serial.println(
       F("[INIT] App: editá parámetros en Angular → se bajan solos. Serie: p | runtime | set f28 1 | pull | pullms 60000"));
   Serial.println(F("[INIT] status | net | url ... | portal | reboot"));
+  loopWatchdogTimerBegin();
+}
+
+static void handleSerialLine(const String &raw) {
+  if (raw.length() == 0) return;
+  if (raw.length() >= 4 && raw.substring(0, 4).equalsIgnoreCase("url ")) {
+    String u = raw.substring(4);
+    u.trim();
+    if (isValidIngestUrl(u.c_str())) {
+      strlcpy(g_cfg.apiUrl, u.c_str(), sizeof(g_cfg.apiUrl));
+      saveConfig();
+      Serial.printf("[CFG] api_url guardada OK len=%u\n", (unsigned)strlen(g_cfg.apiUrl));
+    } else {
+      Serial.println(F("[CFG] URL inválida. Ejemplo:"));
+      Serial.println(F("url https://abcdefghijklmnop.supabase.co/functions/v1/ingest-reading"));
+    }
+    return;
+  }
+  String cmd = raw;
+  cmd.toLowerCase();
+  if (cmd.startsWith("set ")) {
+    tryHandleSetLine(raw);
+  } else if (cmd == "p") {
+    printParams();
+  } else if (cmd == "runtime" || cmd == "run") {
+    printCompressorRuntime();
+  } else if (cmd == "pull") {
+    tryPullParamsFromCloud();
+  } else if (cmd.startsWith("pullms ")) {
+    unsigned long n = (unsigned long)cmd.substring(7).toInt();
+    if (n >= 15000UL && n <= 3600000UL) {
+      g_cfg.paramsPullMs = (uint32_t)n;
+      saveConfig();
+      Serial.printf("[CFG] params_pull_ms=%lu\n", (unsigned long)g_cfg.paramsPullMs);
+    } else {
+      Serial.println(F("pullms entre 15000 y 3600000"));
+    }
+  } else if (cmd == "status") {
+    printStatus();
+  } else if (cmd == "net") {
+    printNetDiag();
+  } else if (cmd == "portal") {
+    runConfigPortalStable();
+    flushPortalSaveIfNeeded();
+    Serial.printf("[WiFi] Portal cerrado. SSID=%s IP=%s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+  } else if (cmd == "reboot") {
+    if (g_runtimeDirty) saveCompressorRuntime(millis());
+    ESP.restart();
+  } else {
+    Serial.println(F("p | runtime | set f28 1 | pull | pullms 60000 | status | net | url ... | portal | reboot"));
+  }
+}
+
+/** Evita `readStringUntil`: sin `\n` bloqueaba el loop hasta ~1 s por carácter (timeout por defecto). */
+static void pollSerialCommands() {
+  static char buf[200];
+  static size_t len = 0;
+  static bool overflow = false;
+  while (Serial.available()) {
+    const int c = Serial.read();
+    if (c < 0) break;
+    if (c == '\r') continue;
+    if (c == '\n') {
+      if (!overflow && len > 0) {
+        buf[len] = 0;
+        handleSerialLine(String(buf));
+      }
+      overflow = false;
+      len = 0;
+      continue;
+    }
+    if (overflow) continue;
+    if (len + 1 >= sizeof(buf)) {
+      overflow = true;
+      len = 0;
+      continue;
+    }
+    buf[len++] = (char)c;
+  }
 }
 
 void loop() {
+  g_loopBeatCount++;
   maintainWifi();
   const unsigned long nowMs = millis();
   float adcV, barRaw;
@@ -1785,71 +2065,25 @@ void loop() {
   tickCompressorRuntime(nowMs);
   maybeSaveCompressorRuntime(nowMs);
 
+  /* No encadenar dos HTTPS en el mismo loop: hasta ~12 s bloqueados → TASK_WDT o sensación de cuelgue. */
+  bool cloudHttpThisLoop = false;
   if (nowMs - g_lastSendMs >= g_cfg.intervalMs) {
     g_lastSendMs = nowMs;
     sendIngest();
+    cloudHttpThisLoop = true;
   }
   if (WiFi.status() == WL_CONNECTED && strlen(g_cfg.moduleId) && strlen(g_cfg.apiKey)) {
     if (nowMs - g_lastParamsPullMs >= g_cfg.paramsPullMs) {
-      g_lastParamsPullMs = nowMs;
-      tryPullParamsFromCloud();
-    }
-  }
-
-  if (Serial.available()) {
-    String raw = Serial.readStringUntil('\n');
-    raw.trim();
-    if (raw.length() == 0) {
-      /* skip */
-    } else if (raw.length() >= 4 && raw.substring(0, 4).equalsIgnoreCase("url ")) {
-      String u = raw.substring(4);
-      u.trim();
-      if (isValidIngestUrl(u.c_str())) {
-        strlcpy(g_cfg.apiUrl, u.c_str(), sizeof(g_cfg.apiUrl));
-        saveConfig();
-        Serial.printf("[CFG] api_url guardada OK len=%u\n", (unsigned)strlen(g_cfg.apiUrl));
-      } else {
-        Serial.println(F("[CFG] URL inválida. Ejemplo:"));
-        Serial.println(F("url https://abcdefghijklmnop.supabase.co/functions/v1/ingest-reading"));
-      }
-    } else {
-      String cmd = raw;
-      cmd.toLowerCase();
-      if (cmd.startsWith("set ")) {
-        tryHandleSetLine(raw);
-      } else if (cmd == "p") {
-        printParams();
-      } else if (cmd == "runtime" || cmd == "run") {
-        printCompressorRuntime();
-      } else if (cmd == "pull") {
+      if (!cloudHttpThisLoop) {
+        g_lastParamsPullMs = nowMs;
         tryPullParamsFromCloud();
-      } else if (cmd.startsWith("pullms ")) {
-        unsigned long n = (unsigned long)cmd.substring(7).toInt();
-        if (n >= 15000UL && n <= 3600000UL) {
-          g_cfg.paramsPullMs = (uint32_t)n;
-          saveConfig();
-          Serial.printf("[CFG] params_pull_ms=%lu\n", (unsigned long)g_cfg.paramsPullMs);
-        } else {
-          Serial.println(F("pullms entre 15000 y 3600000"));
-        }
-      } else if (cmd == "status") {
-        printStatus();
-      } else if (cmd == "net") {
-        printNetDiag();
-      } else if (cmd == "portal") {
-        runConfigPortalStable();
-        flushPortalSaveIfNeeded();
-        Serial.printf("[WiFi] Portal cerrado. SSID=%s IP=%s\n", WiFi.SSID().c_str(),
-                      WiFi.localIP().toString().c_str());
-      } else if (cmd == "reboot") {
-        if (g_runtimeDirty) saveCompressorRuntime(millis());
-        ESP.restart();
-      } else {
-        Serial.println(F("p | runtime | set f28 1 | pull | pullms 60000 | status | net | url ... | portal | reboot"));
       }
     }
   }
 
+  pollSerialCommands();
+
+  yield();
   delay(60);
 }
 
