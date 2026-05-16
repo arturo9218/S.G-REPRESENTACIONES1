@@ -6,6 +6,11 @@ $muted: #94a3b8;
 $accent: #38bdf8;
 $line: #3b82f6;
 $grid: rgba(148, 163, 184, 0.12);
+/** Mismos tonos que el gráfico escalón C1/C2/C3 de abajo. */
+$motor-c1: #4ade80;
+$motor-c2: #22d3ee;
+$motor-c3: #a78bfa;
+$motor-none: #64748b;
 
 .page--dark.pr5-page {
   min-height: 100vh;
@@ -428,6 +433,7 @@ $grid: rgba(148, 163, 184, 0.12);
 
 /* Ocupa el alto disponible del panel; sin aspect-ratio fijo (evita bandas vacías con viewBox cuadrado + meet). */
 .pr5-svg-wrap {
+  position: relative;
   flex: 1 1 auto;
   display: flex;
   width: 100%;
@@ -489,10 +495,59 @@ $grid: rgba(148, 163, 184, 0.12);
   stroke-width: 0.82;
 }
 
-.pr5-trend-dot {
-  fill: #f1f5f9;
-  stroke: #0f172a;
-  stroke-width: 0.22;
+.pr5-motor-dots-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.pr5-motor-dot-html {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid #0f172a;
+  border-radius: 50%;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+}
+
+.pr5-motor-dot-html--cursor {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.45);
+  z-index: 3;
+}
+
+.pr5-legend__dot-hint {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin-left: 0.35rem;
+}
+
+.pr5-legend__dot-swatch {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.pr5-legend__dot-swatch--c1 {
+  background: $motor-c1;
+}
+
+.pr5-legend__dot-swatch--c2 {
+  background: $motor-c2;
+}
+
+.pr5-legend__dot-swatch--c3 {
+  background: $motor-c3;
 }
 
 .pr5-svg {
@@ -668,17 +723,17 @@ $grid: rgba(148, 163, 184, 0.12);
 }
 
 .pr5-step-line--c1 {
-  stroke: #4ade80;
+  stroke: $motor-c1;
   stroke-width: 1.05;
 }
 
 .pr5-step-line--c2 {
-  stroke: #22d3ee;
+  stroke: $motor-c2;
   stroke-width: 1.05;
 }
 
 .pr5-step-line--c3 {
-  stroke: #a78bfa;
+  stroke: $motor-c3;
   stroke-width: 1.05;
 }
 

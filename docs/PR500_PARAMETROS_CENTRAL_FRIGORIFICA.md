@@ -23,8 +23,9 @@ Para `F22 = 1`, por etapa `i` (`i=0` C1, `i=1` C2, `i=2` C3):
 - `F05`: retardo minimo entre arranques.
 - `F06`: tiempo minimo apagado por compresor.
 - `F07`: tiempo minimo encendido por compresor.
-- `F08`: rotacion de “lead” cada N horas (`0` = sin rotacion). Solo avanza con **ningun** compresor en marcha.
-- `F09`: cantidad de compresores en demanda (`1..3`).
+- `F08`: cada **N horas** (entero), si **ningun** relé está ON, avanza el desfase `g_stageRot` (solo con `F28=0`). **`0`** = sin rotación de mapeo.
+- `F09`: cantidad de **etapas de demanda por presión** (`1..3`). **No** limita qué bornes físicos R1/R2/R3 se usan (ver sección siguiente).
+- `F28`: **`0`** = asignar etapas a relés con rotación (`F08`); **`1`** = balanceo por horómetro entre los primeros `F09` relés del pool (índices 0…F09−1).
 - `F10`: umbral alarma **baja** presion (`0` = desactiva). Misma unidad que `F15`.
 - `F11`: umbral alarma **alta** presion (`0` = desactiva).
 - `F12`: segundos con `P < F10` para hacer latch de alarma baja.
@@ -59,6 +60,80 @@ El firmware Stage3 envía en cada POST a `ingest-reading` los campos opcionales 
 ### App web: ver presion en psi
 
 Si en `pr500_controllers.params` el control tiene **`F15 = 1`**, el panel y el grafico convierten `pressure_bar` (bar) a **psi** para mostrar. La base de datos no cambia: sigue en bar.
+
+## F09, F08 y F28: etapas lógicas, relés físicos y rotación
+
+Esta sección aclara malentendidos frecuentes (p. ej. “con `F09=2` solo deben prender R1 y R2” o “la rotación apaga R1 al prender R2”). Firmware de referencia: `firmware/esp32_pr500_supabase/esp32_pr500_stage3_app.ino`.
+
+### Tres ideas distintas (no mezclar)
+
+| Concepto | Parámetro | Qué hace en Stage3 |
+|----------|-----------|-------------------|
+| **Cuántas etapas de presión** pueden pedir marcha **a la vez** | **`F09`** (`1..3`) | Si la presión lo exige, pueden estar ON la etapa lógica 0, la 1 y/o la 2 **en paralelo** (hasta `F09` etapas). |
+| **Qué relé físico** (R1, R2, R3) corresponde a cada etapa lógica | **`F28`** + **`F08`** | Con `F28=0`, el mapeo rota entre los **tres** bornes. Con `F28=1`, solo se usan relés **0…F09−1** (p. ej. R1 y R2 si `F09=2`). |
+| **Tiempos mínimos** entre arranques y ON/OFF | **`F05`**, **`F06`**, **`F07`** | Anti-ciclado; **no** implementan “al prender R2 apagar R1”. |
+
+En la app y en la nube, **C1 / C2 / C3** son los **tres relés físicos** (`r1_on`, `r2_on`, `r3_on`), no “tres máquinas obligatorias”. Si en planta solo hay **dos compresores**, cableados en R1 y R2, conviene configurar parámetros para que el firmware **no energice R3** en automático (ver abajo).
+
+### Qué **no** hace `F09 = 2`
+
+- **No** significa “solo usar bornes R1 y R2”.
+- **No** significa “un solo compresor a la vez”.
+- Significa: la lógica de presión puede activar hasta **dos etapas lógicas** (0 y 1) **simultáneamente** si los umbrales (F02, F03, F04, F22) lo piden.
+
+La etapa lógica 2 queda **siempre desactivada** en histéresis cuando `F09=2` (no hay “tercera etapa de demanda”).
+
+### Qué **no** hace la rotación (`F08` con `F28 = 0`)
+
+Malentendido habitual: “si R1 prendió primero y después prende R2, debería apagar R1”.
+
+En Stage3 la rotación **no** es lead/lag alternado. Es:
+
+1. **`F08`**: cada **N horas** (valor entero de `F08`), solo si **ningún** relé está ON, se incrementa `g_stageRot` (0 → 1 → 2 → 0).
+2. **`F28 = 0`**: cada etapa lógica que pide marcha se asigna a un relé físico con  
+   **`relé_físico = (etapa_lógica + g_stageRot) % 3`**.
+
+Si las **dos** etapas lógicas piden ON a la vez, pueden quedar **dos relés ON en paralelo** (no se apaga el primero al encender el segundo).
+
+#### Tabla de mapeo (`F28 = 0`, `F09 ≥ 2`, ambas etapas 0 y 1 pedidas)
+
+| `g_stageRot` | Etapa 0 → relé | Etapa 1 → relé | Relés ON (típico) |
+|--------------|----------------|----------------|-------------------|
+| 0 | R1 (C1) | R2 (C2) | R1 + R2 |
+| 1 | R2 (C2) | R3 (C3) | R2 + **R3** |
+| 2 | R3 (C3) | R1 (C1) | **R3** + R1 |
+
+Por eso, con **dos compresores reales** en R1 y R2 pero **`F28=0`** y **`F08>0`**, es **normal** ver en telemetría **`comp3_on = true`**: una etapa está accionando el **tercer relé**, aunque no exista “máquina 3”.
+
+### Modo balanceo (`F28 = 1`)
+
+Con **`F28 = 1`**, el pool de relés es solo **`0 … F09−1`**:
+
+- **`F09 = 2`** → pool **R1 y R2** únicamente; **R3 no se enciende** en automático por balanceo.
+- Se eligen los relés con **menor** tiempo ON acumulado (`comp*_run_ms` / horómetro en flash) para repartir desgaste **entre esos dos bornes**.
+
+Recomendado para centrales con **solo dos compresores** cableados en C1 y C2.
+
+### Ajustes recomendados según instalación
+
+| Instalación | Sugerencia |
+|-------------|------------|
+| **2 compresores en R1 y R2**, sin uso de R3 | **`F09 = 2`**, **`F28 = 1`**, **`F08 = 0`** (o `F08` alto si no querés cambiar mapeo horario). **`F17`/`F18`/`F19 = 0`**. |
+| **3 compresores**, reparto por horas de marcha | **`F09 = 3`**, **`F28 = 1`** (balanceo) o **`F28 = 0`** + **`F08`** según estrategia de rotación de lead. |
+| **Solo un compresor** en servicio automático | **`F09 = 1`**. |
+| Relé R3 sin motor (reserva) | Igual que 2 compresores: **`F28 = 1`** y **`F09 = 2`**; dejar R3 sin carga. |
+
+### Telemetría y “volvió en línea con C3 ON”
+
+Tras corte de WiFi o reinicio del ESP:
+
+- La app muestra el último `comp1_on` / `comp2_on` / `comp3_on` recibido; puede coincidir con un tramo en que **`g_stageRot`** era 1 o 2.
+- Un reinicio **no** borra parámetros en flash (`/pr500_params.json`); ver persistencia en firmware.
+- Si tras el evento **sigue** apareciendo C3 con **`F09=2`** y **`F28=1`**, revisar manual **`F19`**, alarma de sensor (**F23**…**F25** enciende solo los primeros `F09` relés en emergencia, no R3 si `F09=2`), o pull de parámetros desde la nube con valores distintos.
+
+### Referencia rápida en monitor serie
+
+Tras el arranque, líneas `[PRM]` incluyen `F09`, `F22`, `rot=` (`g_stageRot`). Con `F22=1` se imprimen umbrales ON/OFF por etapa. Comando útil: `p` o `status`.
 
 ## Recomendacion de ajuste inicial (psi)
 
@@ -113,3 +188,9 @@ Referencia en firmware Stage3:
 
 Si la minima cae de mas: bajar `F04` o subir `F02`.
 Si hay ciclado: subir `F03` y/o `F07`; revisar `F06`.
+
+### 5) Dos compresores (solo R1 y R2)
+
+- Confirmar **`F09=2`**, **`F28=1`**, **`F08=0`** (salvo que se quiera otra política documentada arriba).
+- Con demanda alta, verificar en serial o panel que **no** queda `comp3_on` en régimen normal.
+- Si con **`F28=0`** y **`F08>0`** aparece C3 ON con dos etapas activas, es comportamiento esperado del mapeo `(etapa + rot) % 3`, no fallo de `F09`.

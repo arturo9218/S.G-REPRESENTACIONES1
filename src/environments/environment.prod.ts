@@ -9,7 +9,8 @@ export const environment = {
   adminEmails: ['arturoalmeida9218@gmail.com'] as readonly string[],
   deviceCloudSync: true,
   ingestFunctionPath: '/functions/v1/ingest-reading',
-  readingsPollIntervalMs: 4000,
+  /** Panel: menos consultas a PostgREST (antes 4 s). Ajustá si necesitás UI más reactiva. */
+  readingsPollIntervalMs: 15000,
   deviceOfflineAfterMs: 90000,
   displayLineVoltageVForFallback: 220,
   vapidPublicKey: VAPID_INJECT,

@@ -150,6 +150,16 @@
           Alarma
         </span>
         <span class="pr5-legend__runhours" *ngIf="runHoursSummaryLine(L) as rs">{{ rs }}</span>
+        <span
+          class="pr5-legend__dot-hint"
+          *ngIf="showPressure && (showComp1 || showComp2 || showComp3)"
+        >
+          Puntos:
+          <span class="pr5-legend__dot-swatch pr5-legend__dot-swatch--c1" *ngIf="showComp1">C1</span>
+          <span class="pr5-legend__dot-swatch pr5-legend__dot-swatch--c2" *ngIf="showComp2">C2</span>
+          <span class="pr5-legend__dot-swatch pr5-legend__dot-swatch--c3" *ngIf="showComp3">C3</span>
+          · 2 ON = mitad · 3 ON = tercios
+        </span>
       </div>
 
       <div class="pr5-chart" *ngIf="displayPoints.length">
@@ -321,14 +331,6 @@
                   [class.pr5-trend-seg--down]="seg.trend === 'down'"
                   [class.pr5-trend-seg--flat]="seg.trend === 'flat'"
                 />
-                <circle
-                  *ngFor="let d of pressureTrendDots"
-                  class="pr5-trend-dot"
-                  [attr.cx]="d.cx"
-                  [attr.cy]="d.cy"
-                  r="0.75"
-                  vector-effect="non-scaling-stroke"
-                />
               </ng-container>
               <path
                 *ngIf="hasTempAxis && showTempSuction && tempPath"
@@ -363,7 +365,7 @@
               [attr.y2]="plot.y1"
             />
             <circle
-              *ngIf="cursorActive && (showPressure || hasTempAxis)"
+              *ngIf="cursorActive && (hasTempAxis && !showPressure)"
               class="pr5-cursor-dot"
               [attr.cx]="cursorX"
               [attr.cy]="cursorY"
@@ -426,6 +428,24 @@
               {{ lb.text }}
             </text>
           </svg>
+          <div class="pr5-motor-dots-overlay" *ngIf="showPressure">
+            <span
+              *ngFor="let m of pressureMotorDots"
+              class="pr5-motor-dot-html"
+              [style.left.%]="m.xPct"
+              [style.top.%]="m.yPct"
+              [style.background]="m.background"
+              [attr.title]="m.title"
+            ></span>
+            <span
+              *ngIf="cursorActive && cursorMotorBackground"
+              class="pr5-motor-dot-html pr5-motor-dot-html--cursor"
+              [style.left.%]="cursorX"
+              [style.top.%]="cursorY"
+              [style.background]="cursorMotorBackground"
+              [attr.title]="cursorMotorTitle"
+            ></span>
+          </div>
         </div>
       </div>
 

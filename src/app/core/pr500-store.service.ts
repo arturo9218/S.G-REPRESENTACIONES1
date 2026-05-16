@@ -6,6 +6,7 @@ import {
   pr500ToJsonBlob,
   type Pr500FormModel,
 } from '../pr500/pr500-params.defaults';
+import { PR500_READINGS_POSTGREST_COLUMNS } from '../pr500/pr500-readings.select';
 import { AuthService } from './auth.service';
 import type { DashboardPr500 } from './models/dashboard.models';
 import { ingestFunctionUrl, isSupabaseConfigured } from './supabase-config';
@@ -175,7 +176,51 @@ export class Pr500StoreService {
     return Date.now() - atMs <= offlineAfterMs;
   }
 
-  /** Una consulta por controlador: última fila de presión para las tarjetas del panel. */
+  private static latestReadingSnapFromRow(row: {
+      pressure_bar: number;
+      comp1_on: boolean;
+      comp2_on: boolean;
+      comp3_on: boolean;
+      alarm_on: boolean;
+      comp1_run_ms?: number | null;
+      comp2_run_ms?: number | null;
+      comp3_run_ms?: number | null;
+      temp_suction_c?: number | null;
+      superheat_c?: number | null;
+      superheat_ok?: boolean | null;
+    }
+  ): {
+    pressure_bar: number;
+    comp1_on: boolean;
+    comp2_on: boolean;
+    comp3_on: boolean;
+    alarm_on: boolean;
+    comp1_run_ms: number | null;
+    comp2_run_ms: number | null;
+    comp3_run_ms: number | null;
+    temp_suction_c: number | null;
+    superheat_c: number | null;
+    superheat_ok: boolean | null;
+  } | null {
+    if (typeof row.pressure_bar !== 'number' || Number.isNaN(row.pressure_bar)) return null;
+    const numOrNull = (v: unknown): number | null =>
+      v != null && typeof v === 'number' && Number.isFinite(v) ? v : null;
+    return {
+      pressure_bar: row.pressure_bar,
+      comp1_on: !!row.comp1_on,
+      comp2_on: !!row.comp2_on,
+      comp3_on: !!row.comp3_on,
+      alarm_on: !!row.alarm_on,
+      comp1_run_ms: numOrNull(row.comp1_run_ms),
+      comp2_run_ms: numOrNull(row.comp2_run_ms),
+      comp3_run_ms: numOrNull(row.comp3_run_ms),
+      temp_suction_c: numOrNull(row.temp_suction_c),
+      superheat_c: numOrNull(row.superheat_c),
+      superheat_ok: row.superheat_ok == null ? null : !!row.superheat_ok,
+    };
+  }
+
+  /** Última lectura por controlador para tarjetas del panel (RPC batch si existe en Supabase). */
   private async fetchLatestPr500Readings(
     ids: string[]
   ): Promise<
@@ -215,45 +260,52 @@ export class Pr500StoreService {
     if (!this.cloudEnabled() || ids.length === 0) {
       return out;
     }
+
+    const { data: batch, error: batchErr } = await this.auth.client.rpc('get_pr500_latest_readings', {
+      p_pr500_ids: ids,
+    });
+    const rpcMissing =
+      batchErr &&
+      (batchErr.code === 'PGRST202' ||
+        batchErr.message?.includes('Could not find') ||
+        batchErr.message?.includes('get_pr500_latest_readings'));
+    if (!batchErr && Array.isArray(batch)) {
+      for (const row of batch as Array<{ pr500_id: string; pressure_bar: number; comp1_on: boolean; comp2_on: boolean; comp3_on: boolean; alarm_on: boolean; comp1_run_ms?: number | null; comp2_run_ms?: number | null; comp3_run_ms?: number | null; temp_suction_c?: number | null; superheat_c?: number | null; superheat_ok?: boolean | null }>) {
+        const snap = Pr500StoreService.latestReadingSnapFromRow(row);
+        if (snap) out.set(row.pr500_id, snap);
+      }
+      return out;
+    }
+    if (!rpcMissing && batchErr) {
+      console.warn('Supabase get_pr500_latest_readings:', batchErr.message);
+    }
+
     await Promise.all(
       ids.map(async (id) => {
         const { data, error } = await this.auth.client
           .from('pr500_readings')
-          .select('*')
+          .select(PR500_READINGS_POSTGREST_COLUMNS)
           .eq('pr500_id', id)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
         if (error || !data) return;
-        const row = data as {
-          pressure_bar: number;
-          comp1_on: boolean;
-          comp2_on: boolean;
-          comp3_on: boolean;
-          alarm_on: boolean;
-          comp1_run_ms?: number | null;
-          comp2_run_ms?: number | null;
-          comp3_run_ms?: number | null;
-          temp_suction_c?: number | null;
-          superheat_c?: number | null;
-          superheat_ok?: boolean | null;
-        };
-        if (typeof row.pressure_bar !== 'number' || Number.isNaN(row.pressure_bar)) return;
-        const numOrNull = (v: unknown): number | null =>
-          v != null && typeof v === 'number' && Number.isFinite(v) ? v : null;
-        out.set(id, {
-          pressure_bar: row.pressure_bar,
-          comp1_on: !!row.comp1_on,
-          comp2_on: !!row.comp2_on,
-          comp3_on: !!row.comp3_on,
-          alarm_on: !!row.alarm_on,
-          comp1_run_ms: numOrNull(row.comp1_run_ms),
-          comp2_run_ms: numOrNull(row.comp2_run_ms),
-          comp3_run_ms: numOrNull(row.comp3_run_ms),
-          temp_suction_c: numOrNull(row.temp_suction_c),
-          superheat_c: numOrNull(row.superheat_c),
-          superheat_ok: row.superheat_ok == null ? null : !!row.superheat_ok,
-        });
+        const snap = Pr500StoreService.latestReadingSnapFromRow(
+          data as {
+            pressure_bar: number;
+            comp1_on: boolean;
+            comp2_on: boolean;
+            comp3_on: boolean;
+            alarm_on: boolean;
+            comp1_run_ms?: number | null;
+            comp2_run_ms?: number | null;
+            comp3_run_ms?: number | null;
+            temp_suction_c?: number | null;
+            superheat_c?: number | null;
+            superheat_ok?: boolean | null;
+          }
+        );
+        if (snap) out.set(id, snap);
       })
     );
     return out;

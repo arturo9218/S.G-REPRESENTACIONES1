@@ -5,6 +5,7 @@ import { AuthService } from '../core/auth.service';
 import { environment } from '../../environments/environment';
 import { isSupabaseConfigured } from '../core/supabase-config';
 import { mergePr500Params, PR500_PSI_PER_BAR, pr500BarToPsi } from '../pr500/pr500-params.defaults';
+import { PR500_READINGS_POSTGREST_COLUMNS } from '../pr500/pr500-readings.select';
 import type { ChartStylePreset } from '../core/models/dashboard.models';
 
 export interface Pr500ReadingRow {
@@ -28,6 +29,14 @@ export interface Pr500ReadingRow {
   temp_suction_c?: number | null;
   superheat_c?: number | null;
   superheat_ok?: boolean | null;
+}
+
+/** Punto motor en capa HTML (% del viewBox 0–100) para que siga redondo con el SVG estirado. */
+export interface Pr500MotorDotMarker {
+  xPct: number;
+  yPct: number;
+  background: string;
+  title: string;
 }
 
 /** Estadísticas de marcha ON reconstruidas entre lecturas (misma convención que el escalón / barras). */
@@ -99,7 +108,10 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     y2: number;
     trend: 'up' | 'down' | 'flat';
   }> = [];
-  pressureTrendDots: Array<{ cx: number; cy: number }> = [];
+  /** Puntos sobre la curva de presión: color por compresores ON (todos los estilos). */
+  pressureMotorDots: Pr500MotorDotMarker[] = [];
+  cursorMotorBackground = '';
+  cursorMotorTitle = '';
   readonly chartTrendGridXs = [20, 35, 50, 65, 80];
   /** Serie °C (eje derecho); tramos separados si hay huecos en los datos. */
   tempPath = '';
@@ -444,7 +456,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
       const { data: rows, error: eRows } = await this.auth.client
         .from('pr500_readings')
-        .select('*')
+        .select(PR500_READINGS_POSTGREST_COLUMNS)
         .eq('pr500_id', this.pr500Id)
         .gte('created_at', fromIso)
         .lte('created_at', toIso)
@@ -725,6 +737,79 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     return v.toFixed(2);
   }
 
+  /** Igual que `.pr5-step-line--c1|c2|c3` del gráfico de motores inferior. */
+  private static readonly MOTOR_DOT_COLORS = {
+    c1: '#4ade80',
+    c2: '#22d3ee',
+    c3: '#a78bfa',
+    none: '#64748b',
+  } as const;
+
+  private static readonly MOTOR_DOT_MAX = 360;
+
+  /** Círculo liso o conic-gradient: 2 ON = mitades, 3 ON = tercios (orden C1→C2→C3). */
+  static motorConicGradient(c1: boolean, c2: boolean, c3: boolean): string {
+    const colors: string[] = [];
+    if (c1) colors.push(Pr500ChartComponent.MOTOR_DOT_COLORS.c1);
+    if (c2) colors.push(Pr500ChartComponent.MOTOR_DOT_COLORS.c2);
+    if (c3) colors.push(Pr500ChartComponent.MOTOR_DOT_COLORS.c3);
+    if (colors.length === 0) return Pr500ChartComponent.MOTOR_DOT_COLORS.none;
+    if (colors.length === 1) return colors[0];
+    const step = 360 / colors.length;
+    const stops: string[] = [];
+    for (let i = 0; i < colors.length; i++) {
+      const a0 = i * step;
+      const a1 = (i + 1) * step;
+      stops.push(`${colors[i]} ${a0}deg ${a1}deg`);
+    }
+    return `conic-gradient(from -90deg, ${stops.join(', ')})`;
+  }
+
+  static motorDotTitle(c1: boolean, c2: boolean, c3: boolean): string {
+    const on: string[] = [];
+    if (c1) on.push('C1');
+    if (c2) on.push('C2');
+    if (c3) on.push('C3');
+    return on.length ? `${on.join(' + ')} ON` : 'Sin compresor ON';
+  }
+
+  private motorStatesFromRow(p: Pr500ReadingRow): { c1: boolean; c2: boolean; c3: boolean } {
+    return {
+      c1: this.showComp1 && !!p.comp1_on,
+      c2: this.showComp2 && !!p.comp2_on,
+      c3: this.showComp3 && !!p.comp3_on,
+    };
+  }
+
+  private rebuildPressureMotorDots(
+    pts: Pr500ReadingRow[],
+    xAt: (iso: string) => number,
+    yAtVal: (val: number) => number
+  ): void {
+    this.pressureMotorDots = [];
+    if (!this.showPressure || pts.length === 0) return;
+    const dotStep =
+      pts.length > Pr500ChartComponent.MOTOR_DOT_MAX
+        ? Math.ceil(pts.length / Pr500ChartComponent.MOTOR_DOT_MAX)
+        : 1;
+    const pushAt = (i: number) => {
+      const yv = this.pressureDisplayPsi ? pts[i].pressure_bar * PR500_PSI_PER_BAR : pts[i].pressure_bar;
+      if (!Number.isFinite(yv)) return;
+      const y = yAtVal(yv);
+      if (!Number.isFinite(y)) return;
+      const m = this.motorStatesFromRow(pts[i]);
+      this.pressureMotorDots.push({
+        xPct: xAt(pts[i].created_at),
+        yPct: y,
+        background: Pr500ChartComponent.motorConicGradient(m.c1, m.c2, m.c3),
+        title: Pr500ChartComponent.motorDotTitle(m.c1, m.c2, m.c3),
+      });
+    };
+    for (let i = 0; i < pts.length; i += dotStep) pushAt(i);
+    const lastIdx = pts.length - 1;
+    if (lastIdx >= 0 && lastIdx % dotStep !== 0) pushAt(lastIdx);
+  }
+
   private static niceStep(range: number, targetTicks: number): number {
     const rough = range / Math.max(targetTicks - 1, 1);
     const pow10 = Math.pow(10, Math.floor(Math.log10(Math.max(rough, 1e-9))));
@@ -818,7 +903,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       this.xGridLines = [];
       this.activityRects = [];
       this.pressureTrendSegs = [];
-      this.pressureTrendDots = [];
+      this.pressureMotorDots = [];
+      this.cursorMotorBackground = '';
+      this.cursorMotorTitle = '';
       this.comp1StepPath = '';
       this.comp2StepPath = '';
       this.comp3StepPath = '';
@@ -894,7 +981,6 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     this.pressureAreaPath = `${this.pressurePath} L${lastX.toFixed(2)},${y1} L${firstX.toFixed(2)},${y1} Z`;
 
     this.pressureTrendSegs = [];
-    this.pressureTrendDots = [];
     if (this.chartStylePreset === 'trend' && this.showPressure && pts.length >= 2) {
       const eps = this.pressureDisplayPsi ? 0.04 : 0.0015;
       for (let i = 0; i < pts.length - 1; i++) {
@@ -911,12 +997,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
           trend,
         });
       }
-      for (let i = 0; i < pts.length; i++) {
-        const v = toY(pts[i].pressure_bar);
-        if (!Number.isFinite(v)) continue;
-        this.pressureTrendDots.push({ cx: xAt(pts[i].created_at), cy: yAtVal(v) });
-      }
     }
+    this.rebuildPressureMotorDots(pts, xAt, yAtVal);
 
     this.tempPath = '';
     this.superheatPath = '';
@@ -1300,6 +1382,14 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       y = (this.plot.y0 + this.plot.y1) / 2;
     }
     this.cursorY = Math.max(this.plot.y0, Math.min(this.plot.y1, y));
+    if (this.showPressure) {
+      const m = this.motorStatesFromRow(best);
+      this.cursorMotorBackground = Pr500ChartComponent.motorConicGradient(m.c1, m.c2, m.c3);
+      this.cursorMotorTitle = Pr500ChartComponent.motorDotTitle(m.c1, m.c2, m.c3);
+    } else {
+      this.cursorMotorBackground = '';
+      this.cursorMotorTitle = '';
+    }
     this.cursorTimeLabel = new Date(best.created_at).toLocaleString('es-AR', {
       day: '2-digit',
       month: '2-digit',
