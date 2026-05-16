@@ -30,6 +30,25 @@ export interface Pr500ReadingRow {
   superheat_ok?: boolean | null;
 }
 
+/** Estadísticas de marcha ON reconstruidas entre lecturas (misma convención que el escalón / barras). */
+export interface Pr500MotorLaneStats {
+  label: 'C1' | 'C2' | 'C3';
+  /** Suma de (t[i+1]−t[i]) cuando en la muestra i el compresor está ON. */
+  onMs: number;
+  /** Cantidad de flancos OFF→ON entre lecturas consecutivas. */
+  starts: number;
+  /** Cantidad de flancos ON→OFF entre lecturas consecutivas. */
+  stops: number;
+  /** Media de `pressure_bar` en la primera lectura donde ya figura ON (tras OFF→ON). */
+  avgStartPressureBar: number | null;
+  /** Media de `pressure_bar` en la primera lectura donde ya figura OFF (tras ON→OFF). */
+  avgStopPressureBar: number | null;
+  lastStartIso: string | null;
+  lastStartPressureBar: number | null;
+  lastStopIso: string | null;
+  lastStopPressureBar: number | null;
+}
+
 const MAX_FETCH = 8000;
 const MAX_DRAW_POINTS = 1600;
 
@@ -52,6 +71,12 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   readings: Pr500ReadingRow[] = [];
   displayPoints: Pr500ReadingRow[] = [];
   zoomedPoints: Pr500ReadingRow[] = [];
+  /** Tiempo ON + arranques en todo el rango cargado (todas las filas, hasta el límite de consulta). */
+  motorStatsRange: Pr500MotorLaneStats[] = [];
+  /** Con zoom: mismas métricas filtrando lecturas entre el primer y último instante de la vista. Sin zoom, copia de `motorStatsRange`. */
+  motorStatsVisible: Pr500MotorLaneStats[] = [];
+  /** Mediana del intervalo entre muestras en `readings` (ayuda a interpretar la granularidad). */
+  motorSampleMedianMs: number | null = null;
 
   pressurePath = '';
   /** Polígono bajo la curva (relleno suave en el SVG). */
@@ -435,6 +460,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
         }
         this.readings = [];
         this.displayPoints = [];
+        this.motorStatsRange = Pr500ChartComponent.emptyMotorStats();
+        this.motorStatsVisible = Pr500ChartComponent.emptyMotorStats();
+        this.motorSampleMedianMs = null;
         return;
       }
       this.readings = (rows ?? []) as Pr500ReadingRow[];
@@ -525,6 +553,171 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   /** Última lectura del rango cargado (para cabecera del gráfico). */
   get latestReading(): Pr500ReadingRow | null {
     return this.readings.length ? this.readings[this.readings.length - 1] : null;
+  }
+
+  private static emptyMotorStats(): Pr500MotorLaneStats[] {
+    const base = (label: 'C1' | 'C2' | 'C3'): Pr500MotorLaneStats => ({
+      label,
+      onMs: 0,
+      starts: 0,
+      stops: 0,
+      avgStartPressureBar: null,
+      avgStopPressureBar: null,
+      lastStartIso: null,
+      lastStartPressureBar: null,
+      lastStopIso: null,
+      lastStopPressureBar: null,
+    });
+    return [base('C1'), base('C2'), base('C3')];
+  }
+
+  /** Misma convención que `buildActivityRects`; presión de transición = `pressure_bar` de la primera muestra con el nuevo estado. */
+  private static computeMotorStats(rows: Pr500ReadingRow[]): Pr500MotorLaneStats[] {
+    if (rows.length < 2) return Pr500ChartComponent.emptyMotorStats();
+
+    type Acc = {
+      label: 'C1' | 'C2' | 'C3';
+      onMs: number;
+      starts: number;
+      stops: number;
+      sumStart: number;
+      nStart: number;
+      sumStop: number;
+      nStop: number;
+      lastStartIso: string | null;
+      lastStartBar: number | null;
+      lastStopIso: string | null;
+      lastStopBar: number | null;
+    };
+    const accs: Acc[] = [
+      { label: 'C1', onMs: 0, starts: 0, stops: 0, sumStart: 0, nStart: 0, sumStop: 0, nStop: 0, lastStartIso: null, lastStartBar: null, lastStopIso: null, lastStopBar: null },
+      { label: 'C2', onMs: 0, starts: 0, stops: 0, sumStart: 0, nStart: 0, sumStop: 0, nStop: 0, lastStartIso: null, lastStartBar: null, lastStopIso: null, lastStopBar: null },
+      { label: 'C3', onMs: 0, starts: 0, stops: 0, sumStart: 0, nStart: 0, sumStop: 0, nStop: 0, lastStartIso: null, lastStartBar: null, lastStopIso: null, lastStopBar: null },
+    ];
+    const getOn = (r: Pr500ReadingRow, k: number): boolean =>
+      k === 0 ? !!r.comp1_on : k === 1 ? !!r.comp2_on : !!r.comp3_on;
+
+    for (let i = 0; i < rows.length - 1; i++) {
+      const tA = new Date(rows[i].created_at).getTime();
+      const tB = new Date(rows[i + 1].created_at).getTime();
+      const dt = tB - tA;
+      if ((dt > 0) && Number.isFinite(dt)) {
+        for (let k = 0; k < 3; k++) {
+          if (getOn(rows[i], k)) accs[k].onMs += dt;
+        }
+      }
+      const next = rows[i + 1];
+      const p = next.pressure_bar;
+      const pOk = Number.isFinite(p);
+      for (let k = 0; k < 3; k++) {
+        const a = getOn(rows[i], k);
+        const b = getOn(next, k);
+        if (!a && b) {
+          accs[k].starts++;
+          if (pOk) {
+            accs[k].sumStart += p;
+            accs[k].nStart++;
+          }
+          accs[k].lastStartIso = next.created_at;
+          accs[k].lastStartBar = pOk ? p : null;
+        }
+        if (a && !b) {
+          accs[k].stops++;
+          if (pOk) {
+            accs[k].sumStop += p;
+            accs[k].nStop++;
+          }
+          accs[k].lastStopIso = next.created_at;
+          accs[k].lastStopBar = pOk ? p : null;
+        }
+      }
+    }
+
+    return accs.map((a) => ({
+      label: a.label,
+      onMs: a.onMs,
+      starts: a.starts,
+      stops: a.stops,
+      avgStartPressureBar: a.nStart > 0 ? a.sumStart / a.nStart : null,
+      avgStopPressureBar: a.nStop > 0 ? a.sumStop / a.nStop : null,
+      lastStartIso: a.lastStartIso,
+      lastStartPressureBar: a.lastStartBar,
+      lastStopIso: a.lastStopIso,
+      lastStopPressureBar: a.lastStopBar,
+    }));
+  }
+
+  private computeMedianSampleGapMs(rows: Pr500ReadingRow[]): number | null {
+    if (rows.length < 3) return null;
+    const gaps: number[] = [];
+    for (let i = 1; i < rows.length; i++) {
+      const d = new Date(rows[i].created_at).getTime() - new Date(rows[i - 1].created_at).getTime();
+      if (d > 0 && d < 86400000) gaps.push(d);
+    }
+    if (!gaps.length) return null;
+    gaps.sort((a, b) => a - b);
+    return gaps[Math.floor(gaps.length / 2)];
+  }
+
+  private updateMotorTimeSummaries(zoomedDisplayPts: Pr500ReadingRow[]): void {
+    this.motorSampleMedianMs = this.computeMedianSampleGapMs(this.readings);
+    this.motorStatsRange = Pr500ChartComponent.computeMotorStats(this.readings);
+    if (!this.chartZoomIsActive || zoomedDisplayPts.length < 1) {
+      this.motorStatsVisible = this.motorStatsRange.map((s) => ({ ...s }));
+      return;
+    }
+    const tWin0 = new Date(zoomedDisplayPts[0].created_at).getTime();
+    const tWin1 = new Date(zoomedDisplayPts[zoomedDisplayPts.length - 1].created_at).getTime();
+    const win = this.readings.filter((r) => {
+      const tx = new Date(r.created_at).getTime();
+      return tx >= tWin0 && tx <= tWin1;
+    });
+    this.motorStatsVisible =
+      win.length >= 2
+        ? Pr500ChartComponent.computeMotorStats(win)
+        : Pr500ChartComponent.computeMotorStats(zoomedDisplayPts);
+  }
+
+  /** Texto legible para duraciones (resumen de motores y muestreo). */
+  formatMotorDuration(ms: number): string {
+    if (!(ms > 0) || !Number.isFinite(ms)) return '0 s';
+    const sec = Math.round(ms / 1000);
+    if (sec < 120) return `${sec} s`;
+    const mins = Math.round(ms / 60000);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h >= 48) {
+      const d = Math.floor(h / 24);
+      const hr = h % 24;
+      if (d > 0) return m > 0 ? `${d} d ${hr} h ${m} min` : `${d} d ${hr} h`;
+      return `${h} h ${m} min`;
+    }
+    if (h > 0) return `${h} h ${m} min`;
+    return `${m} min`;
+  }
+
+  motorStartsLabel(n: number): string {
+    if (n === 1) return '1 arranque detectado';
+    return `${n} arranques detectados`;
+  }
+
+  motorStopsLabel(n: number): string {
+    if (n === 1) return '1 parada detectada';
+    return `${n} paradas detectadas`;
+  }
+
+  /** `pressure_bar` de la telemetría en la unidad del eje (bar o psi según F15). */
+  formatPressureBarReading(bar: number | null | undefined): string {
+    if (bar == null || !Number.isFinite(bar)) return '—';
+    const v = this.pressureDisplayPsi ? pr500BarToPsi(bar) : bar;
+    return `${this.formatYAxisValue(v)} ${this.pressureYUnit}`;
+  }
+
+  formatMotorEventLocal(iso: string | null): string {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
 
   formatYAxisValue(v: number): string {
@@ -631,6 +824,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       this.comp3StepPath = '';
       this.alarmStepPath = '';
       this.cursorActive = false;
+      this.motorStatsRange = Pr500ChartComponent.emptyMotorStats();
+      this.motorStatsVisible = Pr500ChartComponent.emptyMotorStats();
+      this.motorSampleMedianMs = null;
       return;
     }
     const t0 = new Date(pts[0].created_at).getTime();
@@ -882,6 +1078,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     if (this.cursorActive) {
       this.updateCursorForX(this.cursorX);
     }
+    this.updateMotorTimeSummaries(pts);
   }
 
   private buildActivityRects(pts: Pr500ReadingRow[], xAt: (iso: string) => number): { lane: number; x0: number; x1: number; on: boolean }[] {

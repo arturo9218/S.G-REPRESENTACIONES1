@@ -1,7 +1,7 @@
 /**
- * Parámetros F01–F28 — PR500 para **central frigorífica**: control por presión de proceso (setpoint, diferenciales,
+ * Parámetros F01–F34 — PR500 para **central frigorífica**: control por presión de proceso (setpoint, diferenciales,
  * etapas de máquinas, alarmas). El punto físico del sensor (succión, descarga, etc.) lo define la instalación.
- * Valores por defecto orientativos; el firmware ESP32 sincroniza el mismo JSON.
+ * Valores por defecto orientativos; el firmware Stage3 (`esp32_pr500_stage3_app.ino`) y Supabase `fetch-pr500-params` usan el mismo JSON.
  *
  * F01: armado general — 0 = máquinas OFF (relés), 1 = habilitado.
  *
@@ -43,7 +43,7 @@ export const PR500_DEFAULTS = {
   F17: 0,
   F18: 0,
   F19: 0,
-  F20: 1,
+  F20: 3,
   F21: 0,
   F22: 0,
   F23: 10,
@@ -128,24 +128,27 @@ export function clampPr500F03(value: number, f15: number): number {
   return Math.round(v * 100) / 100;
 }
 
-export function mergePr500Params(db: unknown): Pr500FormModel {
-  const base: Pr500FormModel = { ...PR500_DEFAULTS };
-  if (!db || typeof db !== 'object') return base;
-  const o = db as Record<string, unknown>;
-  for (const k of KEYS) {
-    if (!(k in o)) continue;
-    const v = o[k as string];
-    const n = typeof v === 'number' ? v : Number(v);
-    if (!Number.isFinite(n)) continue;
-    base[k] =
-      k === 'F01' || k === 'F22' || k === 'F28' || k === 'F29' || k === 'F32'
-        ? normalizePr500F01(n)
-        : k === 'F15'
-          ? normalizePr500F15(n)
-          : n;
-  }
+/** F04 separación entre etapas: evita valores enormes que dejan C2/C3 siempre ON con F22=1. */
+export function clampPr500F04(value: number, f03: number, f15: number): number {
+  const psi = f15 >= 0.5;
+  let v = Number.isFinite(value) ? value : psi ? 0.4 * PR500_PSI_PER_BAR : 0.4;
+  if (v < 0) v = 0;
+  let cap = f03 * 0.25;
+  const absMax = psi ? 0.5 * PR500_PSI_PER_BAR : 0.5;
+  if (cap < 0.05) cap = 0.05;
+  if (cap > absMax) cap = absMax;
+  if (v > cap) v = cap;
+  return Math.round(v * 100) / 100;
+}
+
+/**
+ * Acota el modelo a los mismos límites que el firmware Stage3 tras cargar/merge (coherencia app ↔ ESP ↔ Supabase).
+ */
+export function finalizePr500Params(base: Pr500FormModel): void {
   base.F01 = normalizePr500F01(base.F01);
   base.F15 = normalizePr500F15(base.F15);
+  base.F16 = normalizePr500F01(base.F16);
+  base.F21 = normalizePr500F01(base.F21);
   base.F22 = normalizePr500F01(base.F22);
   base.F28 = normalizePr500F01(base.F28);
   base.F29 = normalizePr500F01(base.F29);
@@ -157,6 +160,7 @@ export function mergePr500Params(db: unknown): Pr500FormModel {
   if (base.F34 < base.F33 + 0.5) base.F34 = base.F33 + 0.5;
   base.F02 = clampPr500F02(base.F02, base.F15);
   base.F03 = clampPr500F03(base.F03, base.F15);
+  base.F04 = clampPr500F04(base.F04, base.F03, base.F15);
   let f23 = Math.round(Number(base.F23));
   if (!Number.isFinite(f23)) f23 = PR500_DEFAULTS.F23;
   if (f23 < 0) f23 = 0;
@@ -171,20 +175,56 @@ export function mergePr500Params(db: unknown): Pr500FormModel {
   base.F24 = clampSeg(base.F24, 10, 7200, PR500_DEFAULTS.F24);
   base.F25 = clampSeg(base.F25, 10, 7200, PR500_DEFAULTS.F25);
   clampPr500F26F27(base);
+  let f09 = Math.round(Number(base.F09));
+  if (!Number.isFinite(f09)) f09 = PR500_DEFAULTS.F09;
+  base.F09 = Math.min(3, Math.max(1, f09));
+  let f08 = Math.round(Number(base.F08));
+  if (!Number.isFinite(f08)) f08 = PR500_DEFAULTS.F08;
+  base.F08 = Math.min(8760, Math.max(0, f08));
+  base.F12 = clampSeg(base.F12, 1, 3600, PR500_DEFAULTS.F12);
+  base.F13 = clampSeg(base.F13, 1, 3600, PR500_DEFAULTS.F13);
+  let f20 = Math.round(Number(base.F20));
+  if (!Number.isFinite(f20)) f20 = PR500_DEFAULTS.F20;
+  base.F20 = Math.min(999, Math.max(0, f20));
+}
+
+export function mergePr500Params(db: unknown): Pr500FormModel {
+  const base: Pr500FormModel = { ...PR500_DEFAULTS };
+  if (!db || typeof db !== 'object') {
+    finalizePr500Params(base);
+    return base;
+  }
+  const o = db as Record<string, unknown>;
+  for (const k of KEYS) {
+    if (!(k in o)) continue;
+    const v = o[k as string];
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n)) continue;
+    base[k] =
+      k === 'F01' || k === 'F16' || k === 'F21' || k === 'F22' || k === 'F28' || k === 'F29' || k === 'F32'
+        ? normalizePr500F01(n)
+        : k === 'F15'
+          ? normalizePr500F15(n)
+          : n;
+  }
+  finalizePr500Params(base);
   return base;
 }
 
 export function pr500ToJsonBlob(m: Pr500FormModel): Record<string, number> {
+  const snap: Pr500FormModel = { ...m };
+  finalizePr500Params(snap);
   const out: Record<string, number> = {};
-  const f15 = normalizePr500F15(m.F15);
+  const f15 = normalizePr500F15(snap.F15);
   for (const k of KEYS) {
-    const v = m[k];
-    if ((k === 'F01' || k === 'F22' || k === 'F28' || k === 'F29' || k === 'F32') && typeof v === 'number') {
+    const v = snap[k];
+    if ((k === 'F01' || k === 'F16' || k === 'F21' || k === 'F22' || k === 'F28' || k === 'F29' || k === 'F32') && typeof v === 'number') {
       out[k as string] = normalizePr500F01(v);
     }
     else if (k === 'F15' && typeof v === 'number') out[k as string] = f15;
     else if (k === 'F02' && typeof v === 'number') out[k as string] = clampPr500F02(v, f15);
     else if (k === 'F03' && typeof v === 'number') out[k as string] = clampPr500F03(v, f15);
+    else if (k === 'F04' && typeof v === 'number') out[k as string] = clampPr500F04(v, snap.F03, f15);
     else out[k as string] = v as number;
   }
   return out;
@@ -214,4 +254,5 @@ export function convertPr500PressureParamsForF15(
   }
   model.F02 = clampPr500F02(model.F02, nextF15);
   model.F03 = clampPr500F03(model.F03, nextF15);
+  model.F04 = clampPr500F04(model.F04, model.F03, nextF15);
 }

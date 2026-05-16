@@ -84,6 +84,17 @@ static float clampF02AllowZero(float v, int f15) {
   return clampF02(v, f15);
 }
 
+/** F04: separación entre etapas (F22=1 → C2 OFF en F02−F04). Valores enormes dejan C2/C3 siempre ON al llegar al set. */
+static float clampF04(float v, float f03, int f15) {
+  if (v < 0.f) v = 0.f;
+  float cap = f03 * 0.25f;
+  const float absMax = (f15 != 0) ? (0.5f * PSI_PER_BAR) : 0.5f;
+  if (cap < 0.05f) cap = 0.05f;
+  if (cap > absMax) cap = absMax;
+  if (v > cap) v = cap;
+  return roundf(v * 100.f) / 100.f;
+}
+
 // ====== Pins ======
 static const int PIN_ADC = 36;
 /** DS18B20 OneWire: usar **3.3 V** en VCC y pull-up 4,7 kΩ entre DATA y **3.3 V** (no 5 V en DATA: el ESP32 no es tolerante a 5 V). */
@@ -238,13 +249,18 @@ static const char *DEFAULT_PARAMS_JSON =
     "\"F21\":0,\"F22\":0,\"F23\":10,\"F24\":300,\"F25\":300,\"F26\":0.08,\"F27\":3.22,\"F28\":0,"
     "\"F29\":0,\"F30\":0,\"F31\":0,\"F32\":0,\"F33\":4,\"F34\":12}";
 
-static constexpr uint32_t CLOUD_CLIENT_TIMEOUT_MS = 6000;
+static constexpr uint32_t CLOUD_CLIENT_TIMEOUT_MS = 3000;
+/** Pull: cuerpo JSON completo (~1–2 KB); stream+timeout corto → InvalidInput en ESP32. */
+static constexpr uint32_t CLOUD_PULL_TIMEOUT_MS = 8000;
+static constexpr size_t CLOUD_PULL_BODY_MAX = 6144;
 static constexpr uint32_t CLOUD_COOLDOWN_MS = 15000;
 /** F06/F07/F05 en 0 permitían ON/OFF cada ~60 ms (chasquido) → con motores por relé suele haber EMI/reinicios. Pisos solo acotan por debajo; si F06≥5 s se respeta. */
 static constexpr uint32_t RELAY_FLOOR_MIN_OFF_MS = 5000;
 static constexpr uint32_t RELAY_FLOOR_MIN_ON_MS = 5000;
 static constexpr uint32_t RELAY_FLOOR_START_GAP_MS = 3000;
-/** Si no hay WiFi o falla autoConnect, el portal PR500-Setup no bloquea para siempre: tras estos segundos sigue el `loop` con control local. */
+/** Arranque offline-first: intenta WiFi guardado poco tiempo y luego controla local; el portal solo se abre forzado. */
+static constexpr uint32_t WIFI_STARTUP_CONNECT_TIMEOUT_MS = 5000;
+/** Portal PR500-Setup: se usa solo con GPIO14 a GND al arranque o comando serie `portal`. */
 static constexpr uint32_t WIFI_CONFIG_PORTAL_TIMEOUT_SEC = 300;
 
 /** Evita encadenar bloqueos HTTP cuando Internet está caído pero WiFi sigue "conectado". */
@@ -343,6 +359,7 @@ static void loadDefaults() {
   if (P.F24 > 7200) P.F24 = 7200;
   if (P.F25 < 10) P.F25 = 10;
   if (P.F25 > 7200) P.F25 = 7200;
+  P.F04 = clampF04(P.F04, P.F03, P.F15);
   clampAdcThresholds();
 }
 
@@ -472,7 +489,7 @@ static bool loadParams() {
   if (P.F24 > 7200) P.F24 = 7200;
   if (P.F25 < 10) P.F25 = 10;
   if (P.F25 > 7200) P.F25 = 7200;
-  if (P.F04 < 0.f) P.F04 = 0.f;
+  P.F04 = clampF04(P.F04, P.F03, P.F15);
   clampAdcThresholds();
   return true;
 }
@@ -715,6 +732,7 @@ static void convertLocalParamsForF15(int prev, int next) {
   P.F14 *= mul;
   P.F02 = clampF02(P.F02, next);
   P.F03 = clampF03(P.F03, next);
+  P.F04 = clampF04(P.F04, P.F03, next);
   P.F10 = clampF02AllowZero(P.F10, next);
   P.F11 = clampF02AllowZero(P.F11, next);
 }
@@ -1203,6 +1221,18 @@ static void flushPortalSaveIfNeeded() {
   g_portalSaveRequested = false;
 }
 
+static bool connectSavedWifiAtBoot() {
+  Serial.printf("[WiFi] Intentando WiFi guardado (máx. %lu s). Si no conecta, sigue control local.\n",
+                (unsigned long)(WIFI_STARTUP_CONNECT_TIMEOUT_MS / 1000UL));
+  WiFi.begin();
+  const unsigned long startMs = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - startMs) < WIFI_STARTUP_CONNECT_TIMEOUT_MS) {
+    delay(250);
+    yield();
+  }
+  return WiFi.status() == WL_CONNECTED;
+}
+
 /** Hotspots / routers con DNS roto → TCP a Supabase “connection refused”. Forzar DNS públicos en lwIP. */
 static void applyPublicDnsIfStaUp() {
   if (WiFi.status() != WL_CONNECTED) return;
@@ -1231,13 +1261,12 @@ static void setupWifi() {
   wm.addParameter(&p_anon);
   wm.addParameter(&p_url);
   Serial.println(
-      F("[WiFi] Si abre el portal PR500-Setup, puede tardar hasta ~5 min; al cerrar sigue el control local."));
+      F("[WiFi] Arranque offline-first: el portal PR500-Setup solo abre con GPIO14 a GND o comando serie `portal`."));
   bool forcePortal = digitalRead(PIN_FORCE_PORTAL) == LOW;
   if (forcePortal) {
     runConfigPortalStable();
-  } else if (!wm.autoConnect(AP_NAME)) {
-    // autoConnect ya intentó STA y, si hacía falta, abrió el portal hasta timeout o guardado.
-    Serial.println(F("[WiFi] autoConnect sin STA: se sigue con control local (sin segunda sesión de portal)."));
+  } else if (!connectSavedWifiAtBoot()) {
+    Serial.println(F("[WiFi] No conectó rápido: control local inmediato; reintenta WiFi cada 20 s."));
   }
   flushPortalSaveIfNeeded();
   applyPublicDnsIfStaUp();
@@ -1310,7 +1339,7 @@ static void discardHttpResponseBody(HTTPClient &http, int maxBytes) {
   if (!s || maxBytes <= 0) return;
   int n = 0;
   const unsigned long t0 = millis();
-  while (n < maxBytes && (millis() - t0 < 8000UL)) {
+  while (n < maxBytes && (millis() - t0 < 2000UL)) {
     if (s->available() > 0) {
       const int c = s->read();
       if (c < 0) break;
@@ -1558,9 +1587,12 @@ static bool applyCloudParams(JsonObject src) {
       ch = true;
     }
   }
-  if (P.F04 < 0.f) {
-    P.F04 = 0.f;
-    ch = true;
+  {
+    const float c4 = clampF04(P.F04, P.F03, P.F15);
+    if (c4 != P.F04) {
+      P.F04 = c4;
+      ch = true;
+    }
   }
   if (P.F08 < 0) {
     P.F08 = 0;
@@ -1707,14 +1739,15 @@ static void tryPullParamsFromCloud() {
   if (!buildFetchParamsUrl(url, sizeof(url))) return;
   WiFiClientSecure client;
   client.setInsecure();
-  client.setTimeout(CLOUD_CLIENT_TIMEOUT_MS);
+  client.setTimeout(CLOUD_PULL_TIMEOUT_MS);
   HTTPClient http;
-  http.setTimeout(CLOUD_CLIENT_TIMEOUT_MS);
+  http.setTimeout(CLOUD_PULL_TIMEOUT_MS);
   if (!http.begin(client, url)) {
     http.end();
     return;
   }
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("Accept", "application/json");
   if (strlen(g_cfg.anonKey) > 10) {
     http.addHeader("apikey", g_cfg.anonKey);
     http.addHeader("Authorization", String("Bearer ") + g_cfg.anonKey);
@@ -1751,15 +1784,37 @@ static void tryPullParamsFromCloud() {
     return;
   }
 
-  StaticJsonDocument<4096> doc;
-  const DeserializationError jerr = deserializeJson(doc, http.getStream());
-  discardHttpResponseBody(http, 8192);
+  const int contentLen = http.getSize();
+  String resp = http.getString();
   http.end();
+
+  if (resp.length() == 0) {
+    if (g_lastPullErrLogMs == 0 || (now - g_lastPullErrLogMs > 60000UL)) {
+      g_lastPullErrLogMs = now;
+      Serial.printf("[PULL] cuerpo vacio (Content-Length=%d)\n", contentLen);
+    }
+    return;
+  }
+  if (resp.length() > CLOUD_PULL_BODY_MAX) {
+    if (g_lastPullErrLogMs == 0 || (now - g_lastPullErrLogMs > 60000UL)) {
+      g_lastPullErrLogMs = now;
+      Serial.printf("[PULL] respuesta demasiado grande (%u bytes)\n", (unsigned)resp.length());
+    }
+    return;
+  }
+
+  StaticJsonDocument<4096> doc;
+  const DeserializationError jerr = deserializeJson(doc, resp);
 
   if (jerr) {
     if (g_lastPullErrLogMs == 0 || (now - g_lastPullErrLogMs > 60000UL)) {
       g_lastPullErrLogMs = now;
-      Serial.printf("[PULL] JSON err %s\n", jerr.c_str());
+      Serial.printf("[PULL] JSON err %s len=%u ct=%d\n", jerr.c_str(), (unsigned)resp.length(), contentLen);
+      char peek[200];
+      const size_t n = resp.length() < sizeof(peek) - 1 ? resp.length() : sizeof(peek) - 1;
+      memcpy(peek, resp.c_str(), n);
+      peek[n] = 0;
+      Serial.printf("[PULL] inicio: %s\n", peek);
     }
     return;
   }
@@ -1790,6 +1845,12 @@ static void tryPullParamsFromCloud() {
 static void printParams() {
   Serial.printf("[PRM] F01=%d F15=%d F22=%d F02=%.2f F03=%.2f F04=%.2f F05=%d F06=%d F07=%d F08=%d F09=%d F28=%d\n", P.F01,
                 P.F15, P.F22, P.F02, P.F03, P.F04, P.F05, P.F06, P.F07, P.F08, P.F09, P.F28);
+  if (P.F22 != 0) {
+    const float d = (P.F03 < 0.05f) ? 0.05f : P.F03;
+    const float ds = P.F04;
+    Serial.printf("[PRM] F22=1 umbrales: C1 ON>=%.2f OFF<=%.2f | C2 ON>=%.2f OFF<=%.2f | C3 ON>=%.2f OFF<=%.2f\n",
+                  P.F02 + d, P.F02, P.F02 + d - ds, P.F02 - ds, P.F02 + d - 2.f * ds, P.F02 - 2.f * ds);
+  }
   Serial.printf("[PRM] F10=%.2f F11=%.2f F12=%d F13=%d F14=%.3f F16=%d F20=%d F21=%d rot=%d almL=%d almH=%d almS=%d\n",
                 P.F10, P.F11, P.F12, P.F13, P.F14, P.F16, P.F20, P.F21, g_stageRot, (int)g_alarmLow, (int)g_alarmHigh,
                 (int)g_alarmSensor);
@@ -1833,7 +1894,7 @@ static void tryHandleSetLine(const String &raw) {
   if (key == "f01") P.F01 = normalizeF01FromFloat(v);
   else if (key == "f02") P.F02 = clampF02(v, P.F15);
   else if (key == "f03") P.F03 = clampF03(v, P.F15);
-  else if (key == "f04") P.F04 = (v < 0.f) ? 0.f : v;
+  else if (key == "f04") P.F04 = clampF04((v < 0.f) ? 0.f : v, P.F03, P.F15);
   else if (key == "f05") P.F05 = (int)v;
   else if (key == "f06") P.F06 = (int)v;
   else if (key == "f07") P.F07 = (int)v;

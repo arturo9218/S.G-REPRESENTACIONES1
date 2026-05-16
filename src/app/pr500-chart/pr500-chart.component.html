@@ -521,6 +521,107 @@
         </div>
       </div>
 
+      <div class="pr5-motor-stats" *ngIf="displayPoints.length">
+        <ng-container *ngIf="readings.length >= 2; else pr5MotorNeedTwo">
+          <h3 class="pr5-motor-stats__title">Tiempo ON por compresor (estimado)</h3>
+          <p class="pr5-motor-stats__lead">
+            Se suma el tiempo entre <strong>lecturas consecutivas</strong> cuando en la primera muestra el compresor figura
+            <strong>ON</strong> (misma regla que el gráfico escalón / barras). Ciclos más cortos que el intervalo de telemetría
+            pueden no verse.
+            <strong>Presión al prender / parar</strong>: se usa la <strong>primera lectura</strong> donde ya figura el nuevo estado
+            (la nube guarda siempre bar; acá se muestra en la misma unidad que el eje de presión).
+            <span *ngIf="motorSampleMedianMs != null">
+              Intervalo típico entre muestras en este rango: ~{{ formatMotorDuration(motorSampleMedianMs) }}.
+            </span>
+            Los valores <strong>horómetro</strong> en la leyenda (<code>comp*_run_ms</code>) son acumulados de toda la vida del
+            equipo, no «solo este gráfico».
+          </p>
+          <div class="pr5-motor-stats__cols">
+            <div class="pr5-motor-stats__col">
+              <h4 class="pr5-motor-stats__col-title">Rango cargado ({{ readings.length }} lecturas)</h4>
+              <ul class="pr5-motor-stats__list">
+                <li *ngFor="let s of motorStatsRange" class="pr5-motor-stats__item">
+                  <div class="pr5-motor-stats__row1">
+                    <span class="pr5-motor-stats__lane">{{ s.label }}</span>
+                    <span class="pr5-motor-stats__on">{{ formatMotorDuration(s.onMs) }} ON</span>
+                    <span class="pr5-motor-stats__starts">· {{ motorStartsLabel(s.starts) }}</span>
+                    <span class="pr5-motor-stats__starts">· {{ motorStopsLabel(s.stops) }}</span>
+                  </div>
+                  <div class="pr5-motor-stats__row2" *ngIf="s.starts > 0 || s.stops > 0">
+                    <span *ngIf="s.starts > 0" class="pr5-motor-stats__pres">
+                      Media al <strong>prender</strong>:
+                      {{
+                        s.avgStartPressureBar != null
+                          ? formatPressureBarReading(s.avgStartPressureBar)
+                          : 'sin lectura de presión válida'
+                      }}
+                    </span>
+                    <span *ngIf="s.starts > 0 && s.stops > 0" class="pr5-motor-stats__sep"> · </span>
+                    <span *ngIf="s.stops > 0" class="pr5-motor-stats__pres">
+                      Media al <strong>parar</strong>:
+                      {{
+                        s.avgStopPressureBar != null ? formatPressureBarReading(s.avgStopPressureBar) : 'sin lectura de presión válida'
+                      }}
+                    </span>
+                  </div>
+                  <div class="pr5-motor-stats__row3" *ngIf="s.lastStartIso || s.lastStopIso">
+                    <span *ngIf="s.lastStartIso" class="pr5-motor-stats__last">
+                      Último prender: {{ formatMotorEventLocal(s.lastStartIso) }} → {{ formatPressureBarReading(s.lastStartPressureBar) }}
+                    </span>
+                    <span *ngIf="s.lastStartIso && s.lastStopIso" class="pr5-motor-stats__sep"> · </span>
+                    <span *ngIf="s.lastStopIso" class="pr5-motor-stats__last">
+                      Último parar: {{ formatMotorEventLocal(s.lastStopIso) }} → {{ formatPressureBarReading(s.lastStopPressureBar) }}
+                    </span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+            <div class="pr5-motor-stats__col" *ngIf="chartZoomIsActive">
+              <h4 class="pr5-motor-stats__col-title">Vista con zoom (lecturas filtradas por tiempo visible)</h4>
+              <ul class="pr5-motor-stats__list">
+                <li *ngFor="let s of motorStatsVisible" class="pr5-motor-stats__item">
+                  <div class="pr5-motor-stats__row1">
+                    <span class="pr5-motor-stats__lane">{{ s.label }}</span>
+                    <span class="pr5-motor-stats__on">{{ formatMotorDuration(s.onMs) }} ON</span>
+                    <span class="pr5-motor-stats__starts">· {{ motorStartsLabel(s.starts) }}</span>
+                    <span class="pr5-motor-stats__starts">· {{ motorStopsLabel(s.stops) }}</span>
+                  </div>
+                  <div class="pr5-motor-stats__row2" *ngIf="s.starts > 0 || s.stops > 0">
+                    <span *ngIf="s.starts > 0" class="pr5-motor-stats__pres">
+                      Media al <strong>prender</strong>:
+                      {{
+                        s.avgStartPressureBar != null
+                          ? formatPressureBarReading(s.avgStartPressureBar)
+                          : 'sin lectura de presión válida'
+                      }}
+                    </span>
+                    <span *ngIf="s.starts > 0 && s.stops > 0" class="pr5-motor-stats__sep"> · </span>
+                    <span *ngIf="s.stops > 0" class="pr5-motor-stats__pres">
+                      Media al <strong>parar</strong>:
+                      {{
+                        s.avgStopPressureBar != null ? formatPressureBarReading(s.avgStopPressureBar) : 'sin lectura de presión válida'
+                      }}
+                    </span>
+                  </div>
+                  <div class="pr5-motor-stats__row3" *ngIf="s.lastStartIso || s.lastStopIso">
+                    <span *ngIf="s.lastStartIso" class="pr5-motor-stats__last">
+                      Último prender: {{ formatMotorEventLocal(s.lastStartIso) }} → {{ formatPressureBarReading(s.lastStartPressureBar) }}
+                    </span>
+                    <span *ngIf="s.lastStartIso && s.lastStopIso" class="pr5-motor-stats__sep"> · </span>
+                    <span *ngIf="s.lastStopIso" class="pr5-motor-stats__last">
+                      Último parar: {{ formatMotorEventLocal(s.lastStopIso) }} → {{ formatPressureBarReading(s.lastStopPressureBar) }}
+                    </span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </ng-container>
+        <ng-template #pr5MotorNeedTwo>
+          <p class="pr5-motor-stats__need-two">Para estimar tiempo ON hacen falta al menos dos lecturas en el rango.</p>
+        </ng-template>
+      </div>
+
       <p class="pr5-footnote" *ngIf="displayPoints.length">{{ lastRowSummary() }}</p>
       <p class="pr5-empty" *ngIf="!displayPoints.length && !loading">No hay lecturas en este rango.</p>
     </section>

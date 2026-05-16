@@ -122,8 +122,8 @@
               (ngModelChange)="onFieldChange(f.key, $event)"
               [name]="'pr5-' + sec.id + '-' + (f.key + '')"
               [step]="f.step != null ? f.step : 1"
-              [attr.min]="f.key === 'F01' || f.key === 'F22' || f.key === 'F28' || f.key === 'F29' || f.key === 'F32' ? 0 : f.key === 'F02' ? f02InputMin(m) : f.key === 'F03' ? f03InputMin(m) : null"
-              [attr.max]="f.key === 'F01' || f.key === 'F22' || f.key === 'F28' || f.key === 'F29' || f.key === 'F32' ? 1 : f.key === 'F02' ? f02InputMax(m) : f.key === 'F03' ? f03InputMax(m) : null"
+              [attr.min]="f.key === 'F01' || f.key === 'F16' || f.key === 'F21' || f.key === 'F22' || f.key === 'F28' || f.key === 'F29' || f.key === 'F32' ? 0 : f.key === 'F02' ? f02InputMin(m) : f.key === 'F03' ? f03InputMin(m) : null"
+              [attr.max]="f.key === 'F01' || f.key === 'F16' || f.key === 'F21' || f.key === 'F22' || f.key === 'F28' || f.key === 'F29' || f.key === 'F32' ? 1 : f.key === 'F02' ? f02InputMax(m) : f.key === 'F03' ? f03InputMax(m) : null"
             />
           </label>
         </div>
