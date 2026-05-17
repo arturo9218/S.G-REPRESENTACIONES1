@@ -72,7 +72,7 @@ export class RegisterComponent {
           return;
         }
         if (data.session) {
-          void this.router.navigate(['/dashboard']);
+          void this.router.navigate(['/inicio']);
           return;
         }
         this.successMessage =

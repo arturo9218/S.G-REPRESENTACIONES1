@@ -23,6 +23,7 @@ import {
 import { environment } from '../../environments/environment';
 import { ingestFunctionUrl } from '../core/supabase-config';
 import { pr500BarToPsi } from '../pr500/pr500-params.defaults';
+import type { InicioFleetRow } from '../inicio/inicio-page.component';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
 import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 import {
@@ -186,7 +187,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
    * Vista según la URL: panel principal, dispositivos, alertas o configuración.
    * Sidebar y barra móvil reflejan este valor (sincronizado en `syncShellRoute`).
    */
-  shellRoute: 'dashboard' | 'devices' | 'equipment' | 'alerts' | 'settings' = 'dashboard';
+  shellRoute: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'settings' = 'inicio';
+  /** Preset al alta: PRO400 (1 sonda), PRO300 (2 sondas) o panel genérico. */
+  deviceAddPreset: 'pro400' | 'pro300' | 'generic' | null = null;
 
   /** Ficha técnica / trabajo realizado (solo nube + UUID). */
   equipmentLoading = false;
@@ -544,8 +547,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.scheduleAlarmHistoryIfVisible();
       return;
     }
-    if (path === '/dashboard') {
-      this.shellRoute = 'dashboard';
+    if (path === '/inicio') {
+      this.shellRoute = 'inicio';
+      return;
     }
     this.scheduleAlarmHistoryIfVisible();
   }
@@ -553,7 +557,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private scheduleAlarmHistoryIfVisible(): void {
     if (
       !this.deviceStore.isCloudSyncActive() ||
-      (this.shellRoute !== 'dashboard' && this.shellRoute !== 'alerts')
+      (this.shellRoute !== 'devices' && this.shellRoute !== 'alerts')
     ) {
       return;
     }
@@ -563,7 +567,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private maybeRefreshAlarmHistoryThrottled(): void {
     if (
       !this.deviceStore.isCloudSyncActive() ||
-      (this.shellRoute !== 'dashboard' && this.shellRoute !== 'alerts')
+      (this.shellRoute !== 'devices' && this.shellRoute !== 'alerts')
     ) {
       return;
     }
@@ -629,12 +633,59 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   /** Muestra el panel principal si hay equipos de lectura y/o combistatos en nube. */
   get hasShellContent(): boolean {
+    if (this.shellRoute === 'inicio') return true;
     return (
       this.hasDevices ||
       (this.environment.deviceCloudSync === true &&
         this.deviceStore.isCloudSyncActive() &&
         (this.combistatos.length > 0 || this.pr500s.length > 0))
     );
+  }
+
+  /** Filas resumidas para la página de inicio (alertas y offline primero). */
+  get inicioFleetRows(): InicioFleetRow[] {
+    const deviceHasAlert = (deviceId: string, deviceName: string): boolean =>
+      this.activeAlerts.some((a) => a.id.startsWith(`${deviceId}-`) || a.deviceName === deviceName);
+
+    const rows: InicioFleetRow[] = [];
+    for (const d of this.devices) {
+      const t1 = d.temperatureC;
+      const tempBit = t1 != null ? `${t1.toFixed(1)} °C` : 'Sin temp.';
+      rows.push({
+        id: `d-${d.id}`,
+        kind: 'sensor',
+        name: d.name,
+        detail: `${tempBit} · ${d.updatedAtLabel}`,
+        online: d.online,
+        hasAlert: deviceHasAlert(d.id, d.name),
+      });
+    }
+    for (const p of this.pr500s) {
+      const pres =
+        p.lastPressureBar != null
+          ? `${this.pr500PressureDisplayValue(p)?.toFixed(1) ?? '—'} ${this.pr500PressureDisplayUnit(p)}`
+          : 'Sin presión';
+      rows.push({
+        id: `p-${p.id}`,
+        kind: 'pr500',
+        name: p.name,
+        detail: `${pres} · ${p.lastSeenLabel || p.updatedAtLabel}`,
+        online: p.online,
+        hasAlert: !!p.lastAlarmOn || !p.online,
+      });
+    }
+    for (const c of this.combistatos) {
+      rows.push({
+        id: `c-${c.id}`,
+        kind: 'combistato',
+        name: c.name,
+        detail: c.lastSeenLabel || c.updatedAtLabel,
+        online: c.online,
+        hasAlert: !c.online,
+      });
+    }
+    const score = (r: InicioFleetRow) => (r.hasAlert ? 0 : r.online ? 2 : 1);
+    return rows.sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name, 'es'));
   }
 
   /** Última marca de tiempo entre todas las lecturas cargadas (referencia de frescura). */
@@ -1878,9 +1929,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   /** Navegación lateral / móvil: cada ítem va a su ruta dedicada. */
-  scrollToSection(section: 'dashboard' | 'devices' | 'equipment' | 'alerts' | 'settings'): void {
+  scrollToSection(section: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'settings'): void {
     const paths: Record<typeof section, string> = {
-      dashboard: '/dashboard',
+      inicio: '/inicio',
       devices: '/dispositivos',
       equipment: '/ficha-equipo',
       alerts: '/alertas',
@@ -1931,7 +1982,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       void this.loadEquipmentPage();
     }
     if (syncQueryToUrl) {
-      const shellPaths = ['/dashboard', '/dispositivos', '/ficha-equipo', '/alertas', '/configuracion'];
+      const shellPaths = ['/inicio', '/dispositivos', '/ficha-equipo', '/alertas', '/configuracion'];
       if (shellPaths.includes(path)) {
         this.skipQueryParamDeviceSync = true;
         const queryParams =
@@ -2659,7 +2710,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.pr500s.find((p) => p.id === this.editingPr500Id) ?? null;
   }
 
-  openAddDeviceModal(): void {
+  openAddDeviceModal(preset: 'pro400' | 'pro300' | 'generic' = 'generic'): void {
     this.combistatoProvisioningOpen = false;
     this.combistatoProvisioningCredentials = null;
     this.pr500ProvisioningOpen = false;
@@ -2668,13 +2719,41 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.provisioningCredentials = null;
     this.deviceModalMode = 'add';
     this.editingDeviceId = null;
+    this.deviceAddPreset = preset;
+    const defaultName =
+      preset === 'pro400' ? 'PRO400 ' : preset === 'pro300' ? 'PRO300 ' : '';
     this.deviceForm.reset({
-      name: '',
+      name: defaultName,
       location: '',
       moduleId: '',
       espLocalIp: '',
       manualTemp: '',
     });
+  }
+
+  openAddEquipment(kind: 'pr500' | 'pro400' | 'pro300'): void {
+    if (kind === 'pr500') {
+      this.openAddPr500Modal();
+      return;
+    }
+    this.openAddDeviceModal(kind);
+  }
+
+  deviceModalAddTitle(): string {
+    if (this.deviceModalMode !== 'add') return 'Dispositivo';
+    if (this.deviceAddPreset === 'pro400') return 'PRO400 — 1 sonda de temperatura';
+    if (this.deviceAddPreset === 'pro300') return 'PRO300 — 2 sondas de temperatura';
+    return 'Panel de temperatura';
+  }
+
+  deviceModalAddIntro(): string {
+    if (this.deviceAddPreset === 'pro400') {
+      return 'Controlador con una sonda. Tras guardar, configurá module_id y api_key en el portal del equipo.';
+    }
+    if (this.deviceAddPreset === 'pro300') {
+      return 'Controlador con dos sondas (canal 1 y 2). Los umbrales se configuran por sensor en el panel del dispositivo.';
+    }
+    return 'Nuevo panel de lectura. Si dejás vacío el ID módulo, se genera uno para el portal del equipo.';
   }
 
   openEditDeviceModal(d: DashboardDevice): void {
@@ -2692,6 +2771,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   closeDeviceModal(): void {
     this.deviceModalMode = null;
     this.editingDeviceId = null;
+    this.deviceAddPreset = null;
     this.addDeviceSubmitting = false;
   }
 
@@ -2721,11 +2801,29 @@ export class DashboardComponent implements OnInit, OnDestroy {
         if (manualTemp != null && !Number.isNaN(manualTemp)) {
           this.deviceStore.recordTemperatureReading(result.id, manualTemp);
         }
+        const preset = this.deviceAddPreset;
+        if (preset === 'pro400') {
+          await this.deviceStore.updateDeviceSensorLabels(result.id, 'Sonda', '—');
+          await this.deviceStore.updateDeviceNotificationConfig(result.id, {
+            alertsEnabled: true,
+            tempLowC: 2,
+            tempHighC: 8,
+            temp2LowC: null,
+            temp2HighC: null,
+            currentMaxA: null,
+            nominalVoltageV: 220,
+            tempPushCooldownMs: 15 * 60 * 1000,
+            offlinePushCooldownMs: 15 * 60 * 1000,
+          });
+        } else if (preset === 'pro300') {
+          await this.deviceStore.updateDeviceSensorLabels(result.id, 'Sonda 1', 'Sonda 2');
+        }
         this.closeDeviceModal();
         if (result.credentials) {
           this.provisioningCredentials = result.credentials;
           this.provisioningOpen = true;
         }
+        void this.scrollToSection('devices');
       } finally {
         this.addDeviceSubmitting = false;
       }

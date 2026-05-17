@@ -152,7 +152,7 @@
         <span class="pr5-legend__runhours" *ngIf="runHoursSummaryLine(L) as rs">{{ rs }}</span>
         <span
           class="pr5-legend__dot-hint"
-          *ngIf="showPressure && (showComp1 || showComp2 || showComp3)"
+          *ngIf="showPressure && chartStylePreset === 'trend' && (showComp1 || showComp2 || showComp3)"
         >
           Puntos:
           <span class="pr5-legend__dot-swatch pr5-legend__dot-swatch--c1" *ngIf="showComp1">C1</span>
@@ -365,7 +365,7 @@
               [attr.y2]="plot.y1"
             />
             <circle
-              *ngIf="cursorActive && (hasTempAxis && !showPressure)"
+              *ngIf="cursorActive && (showPressure || hasTempAxis) && !(showPressure && chartStylePreset === 'trend' && cursorMotorBackground)"
               class="pr5-cursor-dot"
               [attr.cx]="cursorX"
               [attr.cy]="cursorY"
@@ -428,7 +428,7 @@
               {{ lb.text }}
             </text>
           </svg>
-          <div class="pr5-motor-dots-overlay" *ngIf="showPressure">
+          <div class="pr5-motor-dots-overlay" *ngIf="chartStylePreset === 'trend' && showPressure">
             <span
               *ngFor="let m of pressureMotorDots"
               class="pr5-motor-dot-html"

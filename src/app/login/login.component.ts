@@ -62,7 +62,7 @@ export class LoginComponent implements OnInit {
           this.errorMessage = mapSignInError(error.message);
           return;
         }
-        void this.router.navigate(['/dashboard']);
+        void this.router.navigate(['/inicio']);
       })
       .catch(() => {
         this.submitting = false;

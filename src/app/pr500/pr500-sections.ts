@@ -15,7 +15,8 @@ export const PR500_SECTIONS: Pr500Section[] = [
   {
     id: 'f01-f08',
     title: 'Bloque 1 · Marcha, presión y tiempos',
-    intro: 'Códigos AR01–AR08 y AR28 (reparto entre compresores): orden de uso habitual para ajuste diario.',
+    intro:
+      'Códigos AR01–AR08 y AR28. AR08 (rotación de mapeo) y AR28 (balanceo) definen qué borne usa cada etapa; ver ayuda larga de AR08.',
     fields: [
       {
         key: 'F01',
@@ -69,8 +70,9 @@ export const PR500_SECTIONS: Pr500Section[] = [
       {
         key: 'F08',
         code: 'AR08',
-        label: 'Rotación cada tantas horas',
-        help: '0 = no rota. Si ponés horas, con el tiempo cambia qué compresor actúa como el primero, cuando ninguno está en marcha.',
+        label: 'Rotación cada X horas (AR08)',
+        help:
+          'Solo si AR28=0. Cada X horas, con todos los contactores apagados, cambia cómo reparte entre C1/C2/C3. 0=no cambia. No es “turnarse”: pueden quedar dos ON. Dos motores en C1 y C2: AR28=1 y AR08=0.',
         step: 1,
       },
       {
@@ -85,13 +87,15 @@ export const PR500_SECTIONS: Pr500Section[] = [
   {
     id: 'f09-f16',
     title: 'Bloque 2 · Etapas, alarmas y unidad',
-    intro: 'AR09–AR16: cantidad de máquinas, umbrales de alarma, corrección del sensor y unidad bar/psi.',
+    intro:
+      'AR09–AR16: etapas lógicas de presión (AR09), alarmas, corrección del sensor y unidad bar/psi. AR09 no es “cuántos cables hay”; ver ayuda larga.',
     fields: [
       {
         key: 'F09',
         code: 'AR09',
-        label: 'Cantidad de compresores',
-        help: '1, 2 o 3. Solo esas etapas entran en el automático.',
+        label: 'Etapas de demanda por presión',
+        help:
+          '1, 2 o 3: cuántas etapas lógicas puede activar el control a la vez (no qué borne R1/R2/R3 usa). Con 2 compresores en C1/C2: AR09=2 y AR28=1. Con AR28=0 la rotación (AR08) puede encender C3 aunque no haya tercera máquina.',
         step: 1,
       },
       {

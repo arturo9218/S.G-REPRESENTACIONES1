@@ -31,14 +31,6 @@ export interface Pr500ReadingRow {
   superheat_ok?: boolean | null;
 }
 
-/** Punto motor en capa HTML (% del viewBox 0–100) para que siga redondo con el SVG estirado. */
-export interface Pr500MotorDotMarker {
-  xPct: number;
-  yPct: number;
-  background: string;
-  title: string;
-}
-
 /** Estadísticas de marcha ON reconstruidas entre lecturas (misma convención que el escalón / barras). */
 export interface Pr500MotorLaneStats {
   label: 'C1' | 'C2' | 'C3';
@@ -100,7 +92,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     { value: 'technical', label: 'Técnico (rejilla)' },
     { value: 'trend', label: 'Tendencia (color por subida/bajada)' },
   ];
-  /** Modo tendencia: tramos de presión coloreados + puntos. */
+  /** Modo tendencia: tramos rojo/azul/gris por subida o bajada de presión. */
   pressureTrendSegs: Array<{
     x1: number;
     y1: number;
@@ -108,8 +100,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     y2: number;
     trend: 'up' | 'down' | 'flat';
   }> = [];
-  /** Puntos sobre la curva de presión: color por compresores ON (todos los estilos). */
-  pressureMotorDots: Pr500MotorDotMarker[] = [];
+  /** Puntos sobre la curva: color por compresor(es) ON (capa HTML, estilo tendencia). */
+  pressureMotorDots: Array<{ xPct: number; yPct: number; background: string; title: string }> = [];
   cursorMotorBackground = '';
   cursorMotorTitle = '';
   readonly chartTrendGridXs = [20, 35, 50, 65, 80];
@@ -272,7 +264,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   }
 
   backToApp(): void {
-    void this.router.navigate(['/dashboard']);
+    void this.router.navigate(['/dispositivos']);
   }
 
   private initDefaultRange(): void {
@@ -737,23 +729,22 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     return v.toFixed(2);
   }
 
-  /** Igual que `.pr5-step-line--c1|c2|c3` del gráfico de motores inferior. */
-  private static readonly MOTOR_DOT_COLORS = {
-    c1: '#4ade80',
-    c2: '#22d3ee',
-    c3: '#a78bfa',
+  /** C1 azul · C2 rojo · C3 verde (puntos de presión y escalón de motores). */
+  private static readonly MOTOR_COLORS = {
+    c1: '#3b82f6',
+    c2: '#ef4444',
+    c3: '#22c55e',
     none: '#64748b',
   } as const;
 
   private static readonly MOTOR_DOT_MAX = 360;
 
-  /** Círculo liso o conic-gradient: 2 ON = mitades, 3 ON = tercios (orden C1→C2→C3). */
   static motorConicGradient(c1: boolean, c2: boolean, c3: boolean): string {
     const colors: string[] = [];
-    if (c1) colors.push(Pr500ChartComponent.MOTOR_DOT_COLORS.c1);
-    if (c2) colors.push(Pr500ChartComponent.MOTOR_DOT_COLORS.c2);
-    if (c3) colors.push(Pr500ChartComponent.MOTOR_DOT_COLORS.c3);
-    if (colors.length === 0) return Pr500ChartComponent.MOTOR_DOT_COLORS.none;
+    if (c1) colors.push(Pr500ChartComponent.MOTOR_COLORS.c1);
+    if (c2) colors.push(Pr500ChartComponent.MOTOR_COLORS.c2);
+    if (c3) colors.push(Pr500ChartComponent.MOTOR_COLORS.c3);
+    if (colors.length === 0) return Pr500ChartComponent.MOTOR_COLORS.none;
     if (colors.length === 1) return colors[0];
     const step = 360 / colors.length;
     const stops: string[] = [];
@@ -787,7 +778,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     yAtVal: (val: number) => number
   ): void {
     this.pressureMotorDots = [];
-    if (!this.showPressure || pts.length === 0) return;
+    if (this.chartStylePreset !== 'trend' || !this.showPressure || pts.length === 0) return;
     const dotStep =
       pts.length > Pr500ChartComponent.MOTOR_DOT_MAX
         ? Math.ceil(pts.length / Pr500ChartComponent.MOTOR_DOT_MAX)
@@ -1382,7 +1373,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       y = (this.plot.y0 + this.plot.y1) / 2;
     }
     this.cursorY = Math.max(this.plot.y0, Math.min(this.plot.y1, y));
-    if (this.showPressure) {
+    if (this.showPressure && this.chartStylePreset === 'trend') {
       const m = this.motorStatesFromRow(best);
       this.cursorMotorBackground = Pr500ChartComponent.motorConicGradient(m.c1, m.c2, m.c3);
       this.cursorMotorTitle = Pr500ChartComponent.motorDotTitle(m.c1, m.c2, m.c3);

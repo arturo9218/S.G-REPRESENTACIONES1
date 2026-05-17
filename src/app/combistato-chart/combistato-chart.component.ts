@@ -561,7 +561,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   }
 
   backToApp(): void {
-    void this.router.navigate(['/dashboard']);
+    void this.router.navigate(['/dispositivos']);
   }
 
   rectW(r: { x0: number; x1: number }): number {

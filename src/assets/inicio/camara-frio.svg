@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260" fill="none">
+  <rect width="400" height="260" fill="#0f172a"/>
+  <rect x="40" y="50" width="320" height="170" rx="8" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/>
+  <rect x="60" y="70" width="120" height="130" rx="4" fill="#0c4a6e" opacity="0.6"/>
+  <rect x="200" y="70" width="140" height="60" rx="4" fill="#164e63" opacity="0.5"/>
+  <rect x="200" y="140" width="140" height="60" rx="4" fill="#164e63" opacity="0.4"/>
+  <circle cx="330" cy="95" r="18" fill="#22d3ee" opacity="0.35"/>
+  <path d="M80 200h240" stroke="#64748b" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="200" y="235" text-anchor="middle" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="14">C�mara de fr�o</text>
+</svg>

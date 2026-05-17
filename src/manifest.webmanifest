@@ -3,7 +3,7 @@
   "short_name": "AR Monitor",
   "description": "Monitoreo de temperatura y alertas. En el móvil: menú del navegador → Instalar app o Añadir a pantalla de inicio.",
   "display": "standalone",
-  "start_url": "/dashboard",
+  "start_url": "/inicio",
   "scope": "/",
   "background_color": "#f0f4f8",
   "theme_color": "#1d4ed8",

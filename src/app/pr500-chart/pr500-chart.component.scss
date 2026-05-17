@@ -6,10 +6,10 @@ $muted: #94a3b8;
 $accent: #38bdf8;
 $line: #3b82f6;
 $grid: rgba(148, 163, 184, 0.12);
-/** Mismos tonos que el gráfico escalón C1/C2/C3 de abajo. */
-$motor-c1: #4ade80;
-$motor-c2: #22d3ee;
-$motor-c3: #a78bfa;
+/** C1 azul · C2 rojo · C3 verde (puntos de presión y escalón de motores). */
+$motor-c1: #3b82f6;
+$motor-c2: #ef4444;
+$motor-c3: #22c55e;
 $motor-none: #64748b;
 
 .page--dark.pr5-page {

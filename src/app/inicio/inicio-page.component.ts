@@ -1,0 +1,129 @@
+import { Component, EventEmitter, Input, Output } from '@angular/core';
+import type { DashboardAlert } from '../core/models/dashboard.models';
+import { INICIO_DEVICE_MANUALS, type InicioDeviceManual } from './inicio-device-manual';
+import { downloadInicioManualPdf } from './inicio-manual-pdf';
+
+export type InicioEquipmentKind = 'pr500' | 'pro400' | 'pro300';
+
+export interface InicioGalleryItem {
+  title: string;
+  caption: string;
+  image: string;
+}
+
+export interface InicioFleetRow {
+  id: string;
+  kind: 'sensor' | 'pr500' | 'combistato';
+  name: string;
+  detail: string;
+  online: boolean;
+  hasAlert: boolean;
+}
+
+@Component({
+  selector: 'app-inicio-page',
+  templateUrl: './inicio-page.component.html',
+  styleUrls: ['./inicio-page.component.scss'],
+})
+export class InicioPageComponent {
+  @Input() userEmail: string | null = null;
+  @Input() userInitial = '?';
+  @Input() deviceCount = 0;
+  @Input() combistatoCount = 0;
+  @Input() pr500Count = 0;
+  @Input() activeAlerts = 0;
+  @Input() accumulatedAlerts = 0;
+  @Input() cloudSyncActive = false;
+  @Input() lastDataLabel = '';
+  @Input() attentionAlerts: DashboardAlert[] = [];
+  @Input() fleetRows: InicioFleetRow[] = [];
+
+  @Output() goDevices = new EventEmitter<void>();
+  @Output() goAlerts = new EventEmitter<void>();
+  @Output() goSettings = new EventEmitter<void>();
+  @Output() addEquipment = new EventEmitter<InicioEquipmentKind>();
+
+  readonly deviceManuals: InicioDeviceManual[] = INICIO_DEVICE_MANUALS;
+  manualPdfBusy = false;
+
+  readonly equipmentOptions: {
+    kind: InicioEquipmentKind;
+    title: string;
+    desc: string;
+    badge: string;
+  }[] = [
+    {
+      kind: 'pr500',
+      title: 'PR500',
+      desc: 'Central frigorífica: presión, compresores y superheat.',
+      badge: 'Presión',
+    },
+    {
+      kind: 'pro400',
+      title: 'PRO400',
+      desc: 'Controlador con una sonda de temperatura.',
+      badge: '1 sonda',
+    },
+    {
+      kind: 'pro300',
+      title: 'PRO300',
+      desc: 'Controlador con dos sondas de temperatura.',
+      badge: '2 sondas',
+    },
+  ];
+
+  readonly gallery: InicioGalleryItem[] = [
+    {
+      title: 'Cámara de frío',
+      caption: 'Monitoreo de temperatura, alarmas e historial en plantas de frío industrial.',
+      image: 'assets/inicio/camara-frio.svg',
+    },
+    {
+      title: 'Sala de máquinas',
+      caption: 'Controladores PR500: presión, compresores ON/OFF y superheat en un solo panel.',
+      image: 'assets/inicio/compresores.svg',
+    },
+    {
+      title: 'Vitrinas y comercio',
+      caption: 'Sondas y paneles para mantener la cadena de frío en exhibición.',
+      image: 'assets/inicio/vitrina.svg',
+    },
+  ];
+
+  get totalEquipos(): number {
+    return this.deviceCount + this.combistatoCount + this.pr500Count;
+  }
+
+  get attentionTop(): DashboardAlert[] {
+    return this.attentionAlerts.slice(0, 8);
+  }
+
+  get fleetTop(): InicioFleetRow[] {
+    return this.fleetRows.slice(0, 10);
+  }
+
+  get greeting(): string {
+    const h = new Date().getHours();
+    if (h < 12) return 'Buenos días';
+    if (h < 19) return 'Buenas tardes';
+    return 'Buenas noches';
+  }
+
+  pickEquipment(kind: InicioEquipmentKind): void {
+    this.addEquipment.emit(kind);
+  }
+
+  async downloadManualPdf(manual: InicioDeviceManual): Promise<void> {
+    if (this.manualPdfBusy) return;
+    this.manualPdfBusy = true;
+    try {
+      await downloadInicioManualPdf(manual);
+    } catch (err) {
+      console.error('Error al generar PDF del manual', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`No se pudo generar el PDF: ${msg}`);
+    } finally {
+      this.manualPdfBusy = false;
+    }
+  }
+}

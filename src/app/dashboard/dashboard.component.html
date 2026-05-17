@@ -8,15 +8,15 @@
       <button
         type="button"
         class="shell__nav-item"
-        [class.shell__nav-item--active]="shellRoute === 'dashboard'"
-        [attr.aria-current]="shellRoute === 'dashboard' ? 'page' : null"
-        (click)="scrollToSection('dashboard')"
+        [class.shell__nav-item--active]="shellRoute === 'inicio'"
+        [attr.aria-current]="shellRoute === 'inicio' ? 'page' : null"
+        (click)="scrollToSection('inicio')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
           <polyline points="9 22 9 12 15 12 15 22" />
         </svg>
-        <span>Dashboard</span>
+        <span>Inicio</span>
       </button>
       <button
         type="button"
@@ -113,35 +113,6 @@
         />
       </div>
       <div class="topbar__right">
-        <button
-          type="button"
-          class="btn btn--ghost"
-          *ngIf="
-            (shellRoute === 'dashboard' || shellRoute === 'devices' || shellRoute === 'settings') &&
-            environment.deviceCloudSync &&
-            deviceStore.isCloudSyncActive()
-          "
-          aria-label="Agregar combistato"
-          (click)="openAddCombistatoModal()"
-        >
-          + Combistato
-        </button>
-        <button
-          type="button"
-          class="btn btn--ghost"
-          *ngIf="
-            (shellRoute === 'dashboard' || shellRoute === 'devices' || shellRoute === 'settings') &&
-            environment.deviceCloudSync &&
-            deviceStore.isCloudSyncActive()
-          "
-          aria-label="Agregar controlador PR500"
-          (click)="openAddPr500Modal()"
-        >
-          + PR500
-        </button>
-        <button type="button" class="btn btn--primary" aria-label="Agregar dispositivo" (click)="openAddDeviceModal()">
-          + Dispositivo
-        </button>
         <button type="button" class="btn btn--ghost" aria-label="Cerrar sesión" (click)="logout()">Cerrar sesión</button>
         <button
           type="button"
@@ -163,14 +134,33 @@
       </div>
     </header>
 
-    <div class="topbar-sub" *ngIf="hasDevices && lastDataRefreshLabel" role="status">
+    <div class="topbar-sub" *ngIf="shellRoute !== 'inicio' && hasDevices && lastDataRefreshLabel" role="status">
       <span class="topbar-sub__text">
         Última lectura en datos: <strong>{{ lastDataRefreshLabel }}</strong>
       </span>
     </div>
 
     <div class="shell__content" *ngIf="hasShellContent; else emptyState">
-      <ng-container *ngIf="shellRoute !== 'settings' && shellRoute !== 'equipment'">
+      <app-inicio-page
+        *ngIf="shellRoute === 'inicio'"
+        [userEmail]="email"
+        [userInitial]="userInitial"
+        [deviceCount]="devices.length"
+        [combistatoCount]="combistatos.length"
+        [pr500Count]="pr500s.length"
+        [activeAlerts]="summaryAlerts"
+        [accumulatedAlerts]="summaryAlarmEvents"
+        [cloudSyncActive]="deviceStore.isCloudSyncActive()"
+        [lastDataLabel]="lastDataRefreshLabel"
+        [attentionAlerts]="activeAlerts"
+        [fleetRows]="inicioFleetRows"
+        (goDevices)="scrollToSection('devices')"
+        (goAlerts)="scrollToSection('alerts')"
+        (goSettings)="scrollToSection('settings')"
+        (addEquipment)="openAddEquipment($event)"
+      ></app-inicio-page>
+
+      <ng-container *ngIf="shellRoute !== 'inicio' && shellRoute !== 'settings' && shellRoute !== 'equipment'">
       <section id="section-kpi" class="kpi-row" aria-label="Resumen">
         <article class="kpi-card">
           <div class="kpi-card__icon kpi-card__icon--slate">
@@ -220,7 +210,7 @@
       </section>
 
       <div class="grid-main" [class.grid-main--alerts-only]="shellRoute === 'alerts'">
-        <div class="grid-main__left" *ngIf="shellRoute === 'dashboard' || shellRoute === 'devices'">
+        <div class="grid-main__left" *ngIf="shellRoute === 'devices'">
           <article
             id="section-chart"
             class="card card--chart"
@@ -727,7 +717,7 @@
             id="section-combistatos-cards"
             class="device-section"
             *ngIf="
-              (shellRoute === 'dashboard' || shellRoute === 'devices') &&
+              (shellRoute === 'devices') &&
               environment.deviceCloudSync &&
               deviceStore.isCloudSyncActive()
             "
@@ -818,7 +808,7 @@
               </article>
             </div>
             <p class="card__hint card__hint--tight" *ngIf="!combistatos.length">
-              No hay combistatos. Usá <strong>+ Combistato</strong> en la barra superior.
+              No hay combistatos. Agregá equipos desde <strong>Inicio</strong> (por ahora solo PR500, PRO400 y PRO300 en el alta).
             </p>
           </div>
 
@@ -826,7 +816,7 @@
             id="section-pr500-cards"
             class="device-section"
             *ngIf="
-              (shellRoute === 'dashboard' || shellRoute === 'devices') &&
+              (shellRoute === 'devices') &&
               environment.deviceCloudSync &&
               deviceStore.isCloudSyncActive()
             "
@@ -967,7 +957,7 @@
               </article>
             </div>
             <p class="card__hint card__hint--tight" *ngIf="!pr500s.length">
-              No hay controladores PR500. Usá <strong>+ PR500</strong> en la barra superior.
+              No hay controladores PR500. Agregá uno desde <strong>Inicio → Agregar equipo → PR500</strong>.
             </p>
           </div>
 
@@ -979,7 +969,7 @@
             class="card card--alerts-panel"
             role="region"
             aria-labelledby="alerts-active-heading"
-            *ngIf="shellRoute === 'dashboard' || shellRoute === 'alerts'"
+            *ngIf="shellRoute === 'devices' || shellRoute === 'alerts'"
           >
             <h2 id="alerts-active-heading" class="card__title card__title--sm">Alertas activas</h2>
             <ul
@@ -1015,7 +1005,7 @@
             class="card card--alarm-history"
             role="region"
             aria-labelledby="alarm-history-heading"
-            *ngIf="(shellRoute === 'dashboard' || shellRoute === 'alerts') && deviceStore.isCloudSyncActive()"
+            *ngIf="(shellRoute === 'devices' || shellRoute === 'alerts') && deviceStore.isCloudSyncActive()"
           >
             <div class="card__title-row">
               <h2 id="alarm-history-heading" class="card__title card__title--sm">Historial de alarmas (nube)</h2>
@@ -1128,7 +1118,7 @@
 
           <article
             class="card card--summary-24h"
-            *ngIf="(shellRoute === 'dashboard' || shellRoute === 'alerts') && selectedDeviceId"
+            *ngIf="(shellRoute === 'devices' || shellRoute === 'alerts') && selectedDeviceId"
           >
             <h2 class="card__title card__title--sm">Resumen últimas 24 h</h2>
             <p class="card__hint card__hint--tight">
@@ -1173,7 +1163,7 @@
             </p>
           </article>
 
-          <article class="card" *ngIf="shellRoute === 'dashboard' || shellRoute === 'alerts'">
+          <article class="card" *ngIf="shellRoute === 'devices' || shellRoute === 'alerts'">
             <h2 class="card__title card__title--sm">Actividad reciente</h2>
             <ul class="activity-list">
               <li class="activity-item" *ngFor="let a of activities">
@@ -1261,8 +1251,7 @@
               guardar.
             </p>
             <p class="card__empty" *ngIf="!devices.length && !combistatos.length && !pr500s.length">
-              No hay paneles, combistatos ni PR500. Usá <strong>+ Dispositivo</strong>, <strong>+ Combistato</strong> o
-              <strong>+ PR500</strong> en la barra superior.
+              No hay equipos cargados. Andá a <strong>Inicio</strong> y usá <strong>Agregar equipo</strong>.
             </p>
             <ng-container *ngIf="devices.length">
               <h3 class="settings-hub__group-title">Paneles de medición</h3>
@@ -1381,7 +1370,7 @@
           <div *ngIf="!equipmentSheetAvailable()" class="card card--ficha-section">
             <p class="card__empty">
               La ficha en la nube solo está disponible para dispositivos con ID de panel UUID y con sincronización
-              activa. Agregá un equipo desde “+ Dispositivo” con cuenta en Supabase.
+              activa. Agregá un equipo desde <strong>Inicio → Agregar equipo</strong> con cuenta en Supabase.
             </p>
           </div>
 
@@ -2950,23 +2939,7 @@
             cerrá sesión y volvé a entrar.
           </p>
           <div class="empty__actions">
-            <button type="button" class="btn btn--primary" (click)="openAddDeviceModal()">+ Dispositivo</button>
-            <button
-              type="button"
-              class="btn btn--ghost"
-              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
-              (click)="openAddCombistatoModal()"
-            >
-              + Combistato
-            </button>
-            <button
-              type="button"
-              class="btn btn--ghost"
-              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
-              (click)="openAddPr500Modal()"
-            >
-              + PR500
-            </button>
+            <button type="button" class="btn btn--primary" (click)="scrollToSection('inicio')">Agregar equipo en Inicio</button>
             <button *ngIf="isDev" type="button" class="btn btn--ghost" (click)="loadDemoDevices()">Demo</button>
           </div>
           <p *ngIf="isDev" class="empty__hint">Demo solo en desarrollo.</p>
@@ -2978,8 +2951,8 @@
       <button
         type="button"
         class="mobile-nav__btn"
-        [class.mobile-nav__btn--active]="shellRoute === 'dashboard'"
-        (click)="scrollToSection('dashboard')"
+        [class.mobile-nav__btn--active]="shellRoute === 'inicio'"
+        (click)="scrollToSection('inicio')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -3051,10 +3024,10 @@
 >
   <div class="modal" (click)="$event.stopPropagation()">
     <div class="modal__head">
-      <h2 id="device-modal-title" class="modal__title">Dispositivo</h2>
+      <h2 id="device-modal-title" class="modal__title">{{ deviceModalMode === 'add' ? deviceModalAddTitle() : 'Dispositivo' }}</h2>
       <button type="button" class="modal__close" (click)="closeDeviceModal()" aria-label="Cerrar">×</button>
     </div>
-    <p class="modal__intro" *ngIf="deviceModalMode === 'add'">Nuevo dispositivo. Si dejás vacío el ID módulo, se genera uno para cargarlo en el portal de configuración del equipo.</p>
+    <p class="modal__intro" *ngIf="deviceModalMode === 'add'">{{ deviceModalAddIntro() }}</p>
     <p class="modal__intro" *ngIf="deviceModalMode === 'edit'">Editar dispositivo. Podés registrar una lectura manual abajo.</p>
     <form class="modal__form" [formGroup]="deviceForm" (ngSubmit)="submitDeviceForm()">
       <label class="modal__field">

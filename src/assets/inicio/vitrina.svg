@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260" fill="none">
+  <rect width="400" height="260" fill="#0f172a"/>
+  <rect x="60" y="60" width="280" height="150" rx="6" fill="#1e293b" stroke="#7dd3fc" stroke-width="2"/>
+  <rect x="75" y="75" width="250" height="100" rx="2" fill="#0c4a6e" opacity="0.45"/>
+  <line x1="200" y1="75" x2="200" y2="175" stroke="#334155" stroke-width="2"/>
+  <rect x="75" y="185" width="250" height="15" fill="#334155"/>
+  <circle cx="120" cy="120" r="12" fill="#38bdf8" opacity="0.3"/>
+  <circle cx="280" cy="130" r="10" fill="#38bdf8" opacity="0.25"/>
+  <text x="200" y="235" text-anchor="middle" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="14">Vitrinas y exhibici�n</text>
+</svg>

@@ -1196,7 +1196,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   backToDashboard(): void {
-    void this.router.navigate(['/dashboard']);
+    void this.router.navigate(['/dispositivos']);
   }
 
   async saveSensorLabels(): Promise<void> {
