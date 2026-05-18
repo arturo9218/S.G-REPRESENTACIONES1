@@ -12,7 +12,10 @@ export interface InicioGalleryItem {
 }
 
 export interface InicioFleetRow {
+  /** Clave única para la lista (puede llevar prefijo d-/p-/c-). */
   id: string;
+  /** ID real del equipo en la base (UUID). */
+  entityId: string;
   kind: 'sensor' | 'pr500' | 'combistato';
   name: string;
   detail: string;
@@ -42,6 +45,8 @@ export class InicioPageComponent {
   @Output() goAlerts = new EventEmitter<void>();
   @Output() goSettings = new EventEmitter<void>();
   @Output() addEquipment = new EventEmitter<InicioEquipmentKind>();
+  /** Clic en una fila de «Tus equipos»: ir a Dispositivos y mostrar esa tarjeta. */
+  @Output() openFleetRow = new EventEmitter<InicioFleetRow>();
 
   readonly deviceManuals: InicioDeviceManual[] = INICIO_DEVICE_MANUALS;
   manualPdfBusy = false;

@@ -188,6 +188,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
    * Sidebar y barra móvil reflejan este valor (sincronizado en `syncShellRoute`).
    */
   shellRoute: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'settings' = 'inicio';
+  /** Desde Inicio: mostrar solo la tarjeta del equipo elegido en Dispositivos. */
+  deviceSoloFocus: { kind: 'sensor' | 'pr500' | 'combistato'; entityId: string } | null = null;
   /** Preset al alta: PRO400 (1 sonda), PRO300 (2 sondas) o panel genérico. */
   deviceAddPreset: 'pro400' | 'pro300' | 'generic' | null = null;
 
@@ -451,13 +453,52 @@ export class DashboardComponent implements OnInit, OnDestroy {
         }
       }
 
+      if (path === '/dispositivos') {
+        const solo = params.get('solo') === '1';
+        if (!solo) {
+          this.deviceSoloFocus = null;
+        }
+        if (pid && prList.some((p) => p.id === pid)) {
+          if (solo) {
+            this.deviceSoloFocus = { kind: 'pr500', entityId: pid };
+          }
+          if (this.selectedPr500Id !== pid || this.selectedDeviceId || this.selectedCombistatoId) {
+            this.selectDevice(null, false);
+            this.selectCombistato(null);
+            this.selectPr500(pid);
+          }
+          return;
+        }
+        if (cid && combList.some((c) => c.id === cid)) {
+          if (solo) {
+            this.deviceSoloFocus = { kind: 'combistato', entityId: cid };
+          }
+          if (this.selectedCombistatoId !== cid || this.selectedDeviceId || this.selectedPr500Id) {
+            this.selectDevice(null, false);
+            this.selectPr500(null);
+            this.selectCombistato(cid);
+          }
+          return;
+        }
+        if (did && list.some((d) => d.id === did)) {
+          if (solo) {
+            this.deviceSoloFocus = { kind: 'sensor', entityId: did };
+          }
+          if (this.selectedDeviceId !== did || this.selectedPr500Id || this.selectedCombistatoId) {
+            this.selectPr500(null);
+            this.selectCombistato(null);
+            this.selectDevice(did, false);
+          }
+          return;
+        }
+      }
+
       if (did && list.some((d) => d.id === did)) {
         if (this.selectedDeviceId !== did) {
           this.selectDevice(did, false);
         }
-      } else if (!this.selectedDeviceId && list.length > 0) {
-        const hubSinDevice =
-          path === '/configuracion' && !did;
+      } else if (!this.selectedDeviceId && !pid && !cid && list.length > 0) {
+        const hubSinDevice = path === '/configuracion' && !did;
         if (!hubSinDevice) {
           this.selectDevice(list[0].id, false);
         }
@@ -653,6 +694,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const tempBit = t1 != null ? `${t1.toFixed(1)} °C` : 'Sin temp.';
       rows.push({
         id: `d-${d.id}`,
+        entityId: d.id,
         kind: 'sensor',
         name: d.name,
         detail: `${tempBit} · ${d.updatedAtLabel}`,
@@ -667,6 +709,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           : 'Sin presión';
       rows.push({
         id: `p-${p.id}`,
+        entityId: p.id,
         kind: 'pr500',
         name: p.name,
         detail: `${pres} · ${p.lastSeenLabel || p.updatedAtLabel}`,
@@ -677,6 +720,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     for (const c of this.combistatos) {
       rows.push({
         id: `c-${c.id}`,
+        entityId: c.id,
         kind: 'combistato',
         name: c.name,
         detail: c.lastSeenLabel || c.updatedAtLabel,
@@ -703,6 +747,69 @@ export class DashboardComponent implements OnInit, OnDestroy {
       hour: '2-digit',
       minute: '2-digit',
     });
+  }
+
+  get isDeviceSoloView(): boolean {
+    return this.shellRoute === 'devices' && this.deviceSoloFocus != null;
+  }
+
+  get showDevicesChartInView(): boolean {
+    if (!this.isDeviceSoloView) return true;
+    return this.deviceSoloFocus!.kind === 'sensor';
+  }
+
+  get showDevicePanelsInView(): boolean {
+    if (!this.isDeviceSoloView) return true;
+    return this.deviceSoloFocus!.kind === 'sensor';
+  }
+
+  get showCombistatoSectionInView(): boolean {
+    if (!this.isDeviceSoloView) return true;
+    return this.deviceSoloFocus!.kind === 'combistato';
+  }
+
+  get showPr500SectionInView(): boolean {
+    if (!this.isDeviceSoloView) return true;
+    return this.deviceSoloFocus!.kind === 'pr500';
+  }
+
+  get deviceSoloFocusLabel(): string {
+    const f = this.deviceSoloFocus;
+    if (!f) return '';
+    if (f.kind === 'pr500') {
+      return this.pr500s.find((p) => p.id === f.entityId)?.name ?? 'PR500';
+    }
+    if (f.kind === 'combistato') {
+      return this.combistatos.find((c) => c.id === f.entityId)?.name ?? 'Combistato';
+    }
+    return this.devices.find((d) => d.id === f.entityId)?.name ?? 'Panel';
+  }
+
+  get devicesForView(): DashboardDevice[] {
+    const f = this.deviceSoloFocus;
+    if (f?.kind === 'sensor') {
+      return this.devices.filter((d) => d.id === f.entityId);
+    }
+    if (this.isDeviceSoloView) return [];
+    return this.filteredDevices;
+  }
+
+  get combistatosForView(): DashboardCombistato[] {
+    const f = this.deviceSoloFocus;
+    if (f?.kind === 'combistato') {
+      return this.combistatos.filter((c) => c.id === f.entityId);
+    }
+    if (this.isDeviceSoloView) return [];
+    return this.combistatos;
+  }
+
+  get pr500sForView(): DashboardPr500[] {
+    const f = this.deviceSoloFocus;
+    if (f?.kind === 'pr500') {
+      return this.pr500s.filter((p) => p.id === f.entityId);
+    }
+    if (this.isDeviceSoloView) return [];
+    return this.pr500s;
   }
 
   get filteredDevices(): DashboardDevice[] {
@@ -1929,6 +2036,73 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   /** Navegación lateral / móvil: cada ítem va a su ruta dedicada. */
+  /** Desde Inicio: ir a Dispositivos y mostrar solo la tarjeta del equipo elegido. */
+  openInicioFleetRow(row: InicioFleetRow): void {
+    const id = row.entityId?.trim();
+    if (!id) {
+      this.scrollToSection('devices');
+      return;
+    }
+
+    this.deviceSoloFocus = { kind: row.kind, entityId: id };
+    this.skipQueryParamDeviceSync = true;
+    let queryParams: {
+      deviceId: string | null;
+      combistatoId: string | null;
+      pr500Id: string | null;
+      solo: string | null;
+    };
+
+    if (row.kind === 'pr500') {
+      this.selectDevice(null, false);
+      this.selectCombistato(null);
+      this.selectPr500(id);
+      queryParams = { deviceId: null, combistatoId: null, pr500Id: id, solo: '1' };
+    } else if (row.kind === 'combistato') {
+      this.selectDevice(null, false);
+      this.selectPr500(null);
+      this.selectCombistato(id);
+      queryParams = { deviceId: null, combistatoId: id, pr500Id: null, solo: '1' };
+    } else {
+      this.selectPr500(null);
+      this.selectCombistato(null);
+      this.selectDevice(id, false);
+      queryParams = { deviceId: id, combistatoId: null, pr500Id: null, solo: '1' };
+    }
+
+    void this.router
+      .navigate(['/dispositivos'], { queryParams })
+      .finally(() => {
+        this.skipQueryParamDeviceSync = false;
+        this.scrollToFleetCard(row.kind, id);
+      });
+  }
+
+  clearDeviceSoloView(): void {
+    this.deviceSoloFocus = null;
+    this.skipQueryParamDeviceSync = true;
+    void this.router
+      .navigate(['/dispositivos'], {
+        queryParams: { deviceId: null, combistatoId: null, pr500Id: null, solo: null },
+        replaceUrl: true,
+      })
+      .finally(() => {
+        this.skipQueryParamDeviceSync = false;
+      });
+  }
+
+  private scrollToFleetCard(kind: InicioFleetRow['kind'], entityId: string): void {
+    const prefix = kind === 'pr500' ? 'pr500' : kind === 'combistato' ? 'combistato' : 'device';
+    const scroll = (): void => {
+      document.getElementById(`fleet-card-${prefix}-${entityId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    };
+    scroll();
+    setTimeout(scroll, 350);
+  }
+
   scrollToSection(section: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'settings'): void {
     const paths: Record<typeof section, string> = {
       inicio: '/inicio',
@@ -1947,8 +2121,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (this.isAdminView) void this.loadAdminEmails();
       return;
     }
+    this.deviceSoloFocus = null;
     void this.router.navigate([path], {
-      queryParams: this.selectedDeviceId ? { deviceId: this.selectedDeviceId } : { deviceId: null },
+      queryParams: {
+        deviceId: this.selectedDeviceId ? this.selectedDeviceId : null,
+        combistatoId: null,
+        pr500Id: null,
+        solo: null,
+      },
       replaceUrl: true,
     });
   }

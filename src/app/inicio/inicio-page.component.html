@@ -145,9 +145,11 @@
         *ngFor="let row of fleetTop"
         [class.inicio-fleet__row--off]="!row.online"
         [class.inicio-fleet__row--alert]="row.hasAlert"
-        (click)="goDevices.emit()"
+        (click)="openFleetRow.emit(row)"
+        (keydown.enter)="openFleetRow.emit(row)"
         role="button"
         tabindex="0"
+        [attr.aria-label]="'Abrir ' + row.name"
       >
         <span class="inicio-fleet__kind">{{ row.kind === 'pr500' ? 'PR500' : row.kind === 'combistato' ? 'Comb.' : 'Panel' }}</span>
         <span class="inicio-fleet__name">{{ row.name }}</span>

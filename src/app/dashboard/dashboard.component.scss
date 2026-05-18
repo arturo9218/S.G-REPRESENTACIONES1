@@ -539,6 +539,95 @@ $border: rgba(148, 163, 184, 0.18);
   max-width: 100%;
 }
 
+/** Un solo equipo desde Inicio: sin columna lateral, tarjeta ancha centrada. */
+.grid-main--solo-device {
+  grid-template-columns: 1fr;
+  max-width: min(960px, calc(100% - 1.5rem));
+  width: 100%;
+  margin-inline: auto;
+
+  .device-grid,
+  .device-grid--combistatos {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .device-section__head {
+    margin-bottom: 0.35rem;
+  }
+
+  .device-card__head {
+    padding: 1.15rem 1.35rem 0.75rem;
+  }
+
+  .device-card__name {
+    font-size: 1.2rem;
+  }
+
+  .device-card__sensor-value {
+    font-size: clamp(1.75rem, 4vw, 2.55rem);
+  }
+
+  .device-card__sensor-value-num {
+    font-size: inherit;
+  }
+
+  .device-card__temps {
+    padding: 0.85rem 1.35rem 1.15rem;
+  }
+
+  .device-card__foot,
+  .device-card__actions {
+    padding-left: 1.35rem;
+    padding-right: 1.35rem;
+  }
+}
+
+.device-solo-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+}
+
+.device-solo-banner__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.device-solo-banner__label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.device-solo-banner__name {
+  font-size: 1.05rem;
+  color: #f1f5f9;
+}
+
+.device-solo-banner__btn {
+  padding: 0.45rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(30, 41, 59, 0.9);
+  }
+}
+
 .settings-page {
   width: 100%;
   max-width: min(920px, 100%);

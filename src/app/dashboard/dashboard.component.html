@@ -158,10 +158,11 @@
         (goAlerts)="scrollToSection('alerts')"
         (goSettings)="scrollToSection('settings')"
         (addEquipment)="openAddEquipment($event)"
+        (openFleetRow)="openInicioFleetRow($event)"
       ></app-inicio-page>
 
       <ng-container *ngIf="shellRoute !== 'inicio' && shellRoute !== 'settings' && shellRoute !== 'equipment'">
-      <section id="section-kpi" class="kpi-row" aria-label="Resumen">
+      <section id="section-kpi" class="kpi-row" aria-label="Resumen" *ngIf="!isDeviceSoloView">
         <article class="kpi-card">
           <div class="kpi-card__icon kpi-card__icon--slate">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-4"/></svg>
@@ -209,11 +210,21 @@
         </article>
       </section>
 
-      <div class="grid-main" [class.grid-main--alerts-only]="shellRoute === 'alerts'">
+      <div class="grid-main" [class.grid-main--alerts-only]="shellRoute === 'alerts'" [class.grid-main--solo-device]="isDeviceSoloView">
         <div class="grid-main__left" *ngIf="shellRoute === 'devices'">
+          <div class="device-solo-banner" *ngIf="isDeviceSoloView" role="status">
+            <div class="device-solo-banner__text">
+              <span class="device-solo-banner__label">Viendo solo</span>
+              <strong class="device-solo-banner__name">{{ deviceSoloFocusLabel }}</strong>
+            </div>
+            <button type="button" class="device-solo-banner__btn" (click)="clearDeviceSoloView()">
+              Ver todos los equipos
+            </button>
+          </div>
           <article
             id="section-chart"
             class="card card--chart"
+            *ngIf="showDevicesChartInView"
             [class.card--chart-expanded]="chartExpanded"
             [class.card--chart-style-line]="chartStylePreset === 'line'"
             [class.card--chart-style-minimal]="chartStylePreset === 'minimal'"
@@ -488,10 +499,11 @@
             </ng-template>
           </article>
 
-          <div id="section-devices" class="device-grid">
+          <div id="section-devices" class="device-grid" *ngIf="showDevicePanelsInView && devicesForView.length">
             <article
               class="device-card"
-              *ngFor="let d of filteredDevices; trackBy: trackByDeviceId"
+              *ngFor="let d of devicesForView; trackBy: trackByDeviceId"
+              [attr.id]="'fleet-card-device-' + d.id"
               [class.device-card--selected]="d.id === selectedDeviceId"
               (click)="selectDevice(d.id)"
             >
@@ -717,6 +729,7 @@
             id="section-combistatos-cards"
             class="device-section"
             *ngIf="
+              showCombistatoSectionInView &&
               (shellRoute === 'devices') &&
               environment.deviceCloudSync &&
               deviceStore.isCloudSyncActive()
@@ -732,10 +745,11 @@
                 </p>
               </div>
             </div>
-            <div class="device-grid device-grid--combistatos" *ngIf="combistatos.length">
+            <div class="device-grid device-grid--combistatos" *ngIf="combistatosForView.length">
               <article
                 class="device-card device-card--combistato"
-                *ngFor="let c of combistatos; trackBy: trackByCombistatoId"
+                *ngFor="let c of combistatosForView; trackBy: trackByCombistatoId"
+                [attr.id]="'fleet-card-combistato-' + c.id"
                 [class.device-card--selected]="c.id === selectedCombistatoId"
                 (click)="selectCombistato(c.id)"
               >
@@ -816,6 +830,7 @@
             id="section-pr500-cards"
             class="device-section"
             *ngIf="
+              showPr500SectionInView &&
               (shellRoute === 'devices') &&
               environment.deviceCloudSync &&
               deviceStore.isCloudSyncActive()
@@ -832,10 +847,11 @@
                 </p>
               </div>
             </div>
-            <div class="device-grid device-grid--combistatos" *ngIf="pr500s.length">
+            <div class="device-grid device-grid--combistatos" *ngIf="pr500sForView.length">
               <article
                 class="device-card device-card--combistato"
-                *ngFor="let p of pr500s; trackBy: trackByPr500Id"
+                *ngFor="let p of pr500sForView; trackBy: trackByPr500Id"
+                [attr.id]="'fleet-card-pr500-' + p.id"
                 [class.device-card--selected]="p.id === selectedPr500Id"
                 (click)="selectPr500(p.id)"
               >
@@ -963,13 +979,13 @@
 
         </div>
 
-        <aside class="grid-main__right">
+        <aside class="grid-main__right" *ngIf="!isDeviceSoloView">
           <article
             id="section-alerts"
             class="card card--alerts-panel"
             role="region"
             aria-labelledby="alerts-active-heading"
-            *ngIf="shellRoute === 'devices' || shellRoute === 'alerts'"
+            *ngIf="(shellRoute === 'devices' || shellRoute === 'alerts') && !isDeviceSoloView"
           >
             <h2 id="alerts-active-heading" class="card__title card__title--sm">Alertas activas</h2>
             <ul
