@@ -1,79 +1,72 @@
 /**
- * S.G Representación — Plaqueta "Mini PRO300 con control" (ESP32 + 2x CD4094)
- * ----------------------------------------------------------------------------
+ * S.G Representación — Plaqueta "PRO300 con control" (ESP32 + 2x CD4094)
+ * ----------------------------------------------------------------------
+ * Fase B: el ESP32 baja los 48 parámetros AR01–AR48 desde Supabase
+ *         (Edge Function `fetch-pro300-params`, tabla `combistatos.params`).
  *
- * Hardware (deducido del prototipo del usuario):
- *   - ESP32 (DOIT DevKit / NodeMCU-32S)
- *   - 2 NTC 10k beta 3950: NTC1 GPIO34 (cámara), NTC2 GPIO35 (evaporador).
+ * Hardware:
+ *   - ESP32 (DOIT DevKit / NodeMCU-32S).
+ *   - 2 NTC 10k beta 3950: NTC1 GPIO34 (cámara/ambiente), NTC2 GPIO35 (evaporador).
  *     Divisor a 3.3V con R_fixed=10k (NTC arriba, R a GND).
- *   - 2x CD4094 en cascada via SPI:
- *       4094 #1 = byte de SEGMENTOS (a,b,c,d,e,f,g,dp) — display 7-seg común ánodo (activo LOW)
- *       4094 #2 = bit 0..4 = COM1..COM5 (4 dígitos + fila de 3 luces)
- *                 bit 5    = relay COMPRESOR  (activo LOW)
- *                 bit 6    = relay DESHIELO   (activo LOW)
- *                 bit 7    = relay VENTILADOR (activo LOW)
- *   - Pines SPI hacia los 4094:  DATA=23 (MOSI), CLOCK=18 (SCK), STROBE=5 (latch)
+ *   - 2x CD4094 en cascada por SPI:
+ *       4094 #1 = byte SEGMENTOS (a..g + dp), 7-seg activo en LOW.
+ *       4094 #2 = bit 0..4 COM1..COM5 (4 dígitos + fila luces)
+ *                 bit 5 RELAY COMPRESOR  (activo LOW)
+ *                 bit 6 RELAY DESHIELO   (activo LOW)
+ *                 bit 7 RELAY VENTILADOR (activo LOW)
+ *   - SPI:  DATA=23 (MOSI), CLOCK=18 (SCK), STROBE=5 (latch).
+ *   - DOOR_PIN: opcional. Si tu plaqueta tiene microswitch de puerta cableado
+ *               a un GPIO, cambiá `DOOR_PIN` y se activa toda la lógica AR35–AR41.
+ *               Con -1 (default) los parámetros se guardan pero no se accionan.
  *
- * Qué hace:
- *   - Lee 2 NTC con promedio y detecta sonda abierta/corto (muestra "E1"/"E2").
- *   - Termostato con histéresis + tiempos mínimos del compresor (anti-cortocircuito).
- *   - Deshielo programado por tiempo (cada N horas) + drenaje (drip).
- *   - Multiplexado de 4 dígitos + fila de 3 LEDs de estado, sin parpadeo.
- *   - Comandos por puerto serie para configurar y forzar modos.
- *   - WiFi + POST cada 30 s a la Edge Function `ingest-reading` de Supabase.
- *   - Persistencia de configuración en NVS (Preferences).
- *   - Watchdog de tarea (15 s) para reinicio ante cuelgues.
+ * Provisión: portal cautivo WiFiManager con campos para Supabase.
+ *   1) Primer arranque (sin config) → AP "PRO300-Setup" abierto por 5 min.
+ *   2) GPIO0 (botón BOOT) a GND al energizar → fuerza portal.
+ *   3) Comando serie `portal` → abre portal en caliente.
  *
- * En la app:
- *   Esta plaqueta se da de alta como **PRO300** (2 sondas).
- *   Después de la migración 043_device_readings_relays.sql + redeploy de
- *   `ingest-reading`, además guarda en la base `comp_on / fan_on / defrost_on`
- *   por lectura. La UI mostrará esos estados en la próxima fase.
- *   Si querés ver YA los relés en la app (UI vieja de combistato), cambiar
- *   `KIND_COMBISTATO` a `true` y dar de alta el equipo como combistato.
+ *   Campos del portal:
+ *     - WiFi SSID / Pass         (lo pone WiFiManager solo)
+ *     - module_id                (alta del PRO300 en la app S.G)
+ *     - api_key                  (token de 6 dígitos del alta)
+ *     - api_url                  (https://<proyecto>.functions.supabase.co/functions/v1/ingest-reading)
  *
- * Provisionado (una sola vez por placa, por el Monitor Serie a 115200 baud):
+ *   Todo se guarda en LittleFS:
+ *     - `/config.json` → credenciales + URL ingest (raro que cambien)
+ *     - `/params.json` → últimos AR01–AR48 sincronizados desde la nube
  *
- *     setssid  <NOMBRE_WIFI>
- *     setpass  <PASSWORD_WIFI>
- *     setid    <moduleId del modal de alta>
- *     settoken <deviceToken del modal de alta>
- *     seturl   <ingestUrl del modal de alta>
- *     setpoint -18
- *     hist     2
- *     config             ← verifica lo guardado
- *     reboot             ← aplica WiFi
+ * Comandos por puerto serie (115200, Newline):
+ *     portal         → re-abre portal cautivo
+ *     reset          → borra config y reinicia (vuelve a primer arranque)
+ *     config         → muestra config + parámetros AR vigentes
+ *     pull           → fuerza un pull de AR desde la nube
+ *     temp           → display en modo temperatura
+ *     off            → apaga compresor/vent/deshielo y muestra "OFF"
+ *     defrost        → fuerza un ciclo de deshielo ahora
+ *     <texto libre>  → marquesina en el display
  *
- *  Comandos manuales útiles:
- *     temp              → vuelve a mostrar temperatura
- *     off               → apaga compresor/vent/deshielo, muestra "OFF"
- *     defrost           → fuerza ciclo de deshielo ahora
- *     <cualquier texto> → marquesina en el display
- *
- *  Dependencias:
- *     Arduino core ESP32 (Espressif). Sin librerías externas: usa WiFi,
- *     HTTPClient, Preferences, esp_task_wdt, SPI (todas vienen con el core).
+ * Dependencias (Arduino Library Manager):
+ *   - WiFiManager   (tzapu)
+ *   - ArduinoJson   (Benoit Blanchon, v6)
+ *   El resto (WiFi, HTTPClient, LittleFS, esp_task_wdt, SPI) viene con el core ESP32.
  */
 
 #include <WiFi.h>
+#include <WiFiManager.h>
 #include <HTTPClient.h>
-#include <Preferences.h>
+#include <LittleFS.h>
+#include <ArduinoJson.h>
 #include <esp_task_wdt.h>
 #include <SPI.h>
 #include <math.h>
 
-// ============== MODO EN LA APP ==============
-// false → se registra como dispositivo PRO300 (la app muestra T1, T2; los relés se
-//         guardan en device_readings pero la UI los muestra en una fase futura).
-// true  → se registra como combistato (la UI ya muestra comp/vent/deshielo).
-#define KIND_COMBISTATO false
-
 // ============== PINES =======================
-#define DATA_PIN   23
-#define CLOCK_PIN  18
-#define STROBE_PIN 5
-#define NTC1_PIN   34   // sonda cámara
-#define NTC2_PIN   35   // sonda evaporador
+#define DATA_PIN          23
+#define CLOCK_PIN         18
+#define STROBE_PIN        5
+#define NTC1_PIN          34   // sonda cámara / ambiente
+#define NTC2_PIN          35   // sonda evaporador
+#define PIN_FORCE_PORTAL  0    // BOOT button: a GND al arranque → fuerza portal
+#define DOOR_PIN         -1    // -1 = sin sensor de puerta; cambialo a un GPIO si lo cableaste
 
 // ============== NTC =========================
 static constexpr float R_FIXED = 10000.0f;
@@ -92,45 +85,136 @@ static constexpr float TEMP_ERR_VALUE = -127.0f;
 #define BIT_DEF  6
 #define BIT_FAN  7
 
-// ============== CONFIG DE CONTROL ===========
+// ============== CONFIG ======================
+static constexpr const char *CFG_PATH       = "/config.json";
+static constexpr const char *PARAMS_PATH    = "/params.json";
+static constexpr const char *AP_NAME        = "PRO300-Setup";
+static constexpr unsigned long PORTAL_TIMEOUT_SEC   = 5UL * 60UL;
+static constexpr unsigned long WIFI_BOOT_CONNECT_MS = 20000UL;
+static constexpr unsigned long TELEMETRY_DEFAULT_MS = 30000UL;
+static constexpr unsigned long PARAMS_PULL_MS       = 2UL * 60UL * 1000UL;  // 2 min
+
 struct Cfg {
-  float    setC          = -18.0f;          // setpoint cámara
-  float    histC         = 2.0f;            // diferencial (enciende a set+hist, apaga a set)
-  uint32_t compMinOnMs   = 60UL * 1000;     // 1 min mínimo encendido
-  uint32_t compMinOffMs  = 180UL * 1000;    // 3 min mínimo apagado (anti-cortocircuito)
-  uint32_t defEverySec   = 6UL * 3600;      // deshielo cada 6 h
-  uint32_t defDurMs      = 20UL * 60 * 1000; // 20 min duración deshielo
-  uint32_t dripMs        = 90UL * 1000;     // 90 s drenaje post-deshielo (fan off)
-  uint32_t telemetryMs   = 30UL * 1000;     // POST a Supabase cada 30 s
-};
-Cfg cfg;
+  char apiUrl[200]   = "https://fohbhymulrmdsgrubtlo.supabase.co/functions/v1/ingest-reading";
+  char moduleId[64]  = "";
+  char apiKey[48]    = "";
+  uint32_t intervalMs = TELEMETRY_DEFAULT_MS;
+} g_cfg;
+
+/**
+ * Parámetros AR01–AR48 (claves F01–F55 + F52t alineadas con la app `combistato-params.defaults.ts`).
+ * Defaults idénticos a la app: si el dispositivo arranca sin /params.json y no logra contactar
+ * con la nube todavía, queda con los mismos valores que muestra el formulario en la UI.
+ */
+struct Params {
+  // Termostato
+  float F01 = -18.0f;   // AR01 setpoint °C
+  float F02 = 3.0f;     // AR02 histéresis °C
+  float F03 = 0.0f;     // AR03 corrección S1 (sumar al leído)
+  float F04 = 0.0f;     // AR04 corrección S2
+  float F49 = 0.0f;     // AR05 modo: 0=frío, 1=calor
+  float F50 = 0.0f;     // AR06 inversión de relés: 0=activo LOW (default), 1=activo HIGH
+  float F53 = 0.0f;     // AR07 sonda que controla termostato: 0=S1, 1=S2
+  float F54 = 4.0f;     // AR08 muestras promedio ADC (4–32)
+
+  // Deshielo
+  float F05 = 0.0f;     // AR09 tipo de deshielo (0=eléctrico)
+  float F06 = 360.0f;   // AR10 intervalo entre deshielos (min)
+  float F07 = 30.0f;    // AR11 tiempo máx deshielo (min)
+  float F08 = 8.0f;     // AR12 temp fin deshielo (S2, °C)
+  float F09 = 0.0f;     // AR13 deshielo al encender (0/1)
+  float F38 = 30.0f;    // AR14 retardo al encender (s)
+  float F39 = 3.0f;     // AR15 tiempo de goteo (min)
+  float F45 = 10.0f;    // AR16 bloqueo deshielo desde encendido (min)
+  float F46 = 1440.0f;  // AR17 máx sin deshielo → forzar (min)
+  float F52 = 0.0f;     // AR18 habilitar deshielo por temperatura (0/1)
+  float F52t = -28.0f;  // AR19 umbral de hielo en evaporador (°C)
+
+  // Ventilador
+  float F10 = 0.0f;     // AR20 ventilador durante deshielo (0/1)
+  float F11 = 2.0f;     // AR21 retardo vent post-deshielo (min)
+  float F12 = -5.0f;    // AR22 temp evap para arrancar vent post-deshielo (°C)
+  float F51 = 0.0f;     // AR23 ventilador continuo (0=solo con compresor, 1=siempre)
+
+  // Alarmas
+  float F13 = 10.0f;    // AR24 alarma temp alta (°C)
+  float F14 = -30.0f;   // AR25 alarma temp baja (°C)
+  float F15 = 5.0f;     // AR26 retardo alarma térmica (min)
+  float F16 = 1.0f;     // AR27 alarma por sonda falla (0/1)
+  float F47 = 1.0f;     // AR28 histéresis de alarma (°C)
+  float F48 = 5.0f;     // AR29 retardo alarmas al encender (min)
+
+  // Compresor (tiempos de protección)
+  float F17 = 60.0f;    // AR30 tmin OFF compresor (s)
+  float F18 = 30.0f;    // AR31 tmin ON compresor  (s)
+  float F19 = 300.0f;   // AR32 emergencia ON  (s, con sonda fallada)
+  float F20 = 300.0f;   // AR33 emergencia OFF (s, con sonda fallada)
+  float F55 = 1.0f;     // AR34 acción ante falla de sonda (0=apaga / 1=emergencia)
+
+  // Puerta (requiere hardware DOOR_PIN configurado)
+  float F25 = 0.0f;     // AR35 habilitar entrada de puerta (0/1)
+  float F26 = 1.0f;     // AR36 contacto puerta (0=NC, 1=NO)
+  float F27 = 120.0f;   // AR37 retardo alarma puerta abierta (s)
+  float F28 = 1.0f;     // AR38 apagar vent con puerta abierta
+  float F29 = 0.0f;     // AR39 bloquear alarmas térmicas con puerta abierta
+  float F30 = 0.0f;     // AR40 registrar evento puerta por Serial
+  float F40 = 0.0f;     // AR41 apagar compresor con puerta abierta
+
+  // Comandos manuales por serie (los gestiona leerSerial)
+  float F31 = 0.0f;     // AR42 permitir compresor manual por Serial
+  float F32 = 30.0f;    // AR43 tiempo máx compresor manual (min)
+  float F33 = 0.0f;     // AR44 permitir ventilador manual por Serial
+  float F34 = 30.0f;    // AR45 tiempo máx ventilador manual (min)
+  float F35 = 0.0f;     // AR46 permitir deshielo manual por Serial
+  float F36 = 30.0f;    // AR47 tiempo mínimo entre deshielos manuales (min)
+  float F37 = 0.0f;     // AR48 deshielo inmediato cuando se pide (0/1)
+} P;
+
+static String g_paramsUpdatedAt = "";    // marca devuelta por la nube; permite saber cuándo cambió
 
 // ============== ESTADO ======================
-static bool compresor = false, ventilador = false, deshielo = false, dripping = false;
-static unsigned long compChangedAt = 0;
-static unsigned long defStartedAt  = 0;
-static unsigned long dripStartedAt = 0;
-static unsigned long lastDefrostAt = 0;
-static unsigned long lastTelemetryAt = 0;
-static unsigned long lastReadAt = 0;
-static unsigned long lastDisplaySwitchAt = 0;
-static bool showSensorCam = true;
+enum WifiState { WFS_BOOT, WFS_PORTAL, WFS_RUNNING };
+static WifiState g_wifiState = WFS_BOOT;
+
+static bool compresor=false, ventilador=false, deshielo=false, dripping=false;
+static unsigned long compChangedAt=0, defStartedAt=0, dripStartedAt=0;
+static unsigned long lastDefrostAt=0, lastTelemetryAt=0, lastReadAt=0;
+static unsigned long lastParamsPullAt=0, lastDisplaySwitchAt=0, bootAtMs=0;
+static bool   bootDelayDone = false;   // F38 retardo al encender consumido
+static bool   defrostOnStartDone = false; // F09: ya disparado el deshielo de arranque
+
+// Alarmas locales (espejo de lo que también podría calcular el backend)
+static bool   alarmHigh=false, alarmLow=false, alarmProbe=false;
+static unsigned long alarmHighSinceMs=0, alarmLowSinceMs=0;
+
+// Puerta (solo activo si DOOR_PIN != -1)
+static bool  doorOpen=false;
+static unsigned long doorChangedAt=0;
+static bool  doorAlarm=false;
+
+// Emergencia (sonda fallada, F19/F20)
+static unsigned long emergencyChangedAt=0;
+static bool          emergencyComp=false;
 
 static float tCam  = TEMP_ERR_VALUE;
 static float tEvap = TEMP_ERR_VALUE;
-static bool  fault1 = true, fault2 = true;
+static bool  fault1=true, fault2=true;
 
 static bool   modoTexto = true;
-static String texto = "INIT";
+static String texto = "BOOT";
 static int    scrollPos = 0;
 
 static byte bufferDisplay[4] = {0xFF, 0xFF, 0xFF, 0xFF};
 static int  digitNow = 0;
-static unsigned long lastRefresh = 0, lastScroll = 0;
+static unsigned long lastRefresh=0, lastScroll=0, lastWifiRetryMs=0;
 
-// ============== NVS =========================
-Preferences prefs;
-String wifiSsid, wifiPass, moduleId, deviceToken, ingestUrl;
+// ============== WiFiManager + portal ========
+static WiFiManager wm;
+static bool g_portalSaveRequested = false;
+static unsigned long g_portalStartedAt = 0;
+static WiFiManagerParameter p_module("module_id", "Module ID (alta PRO300)", "", 47);
+static WiFiManagerParameter p_token("api_key", "Device Token (6+ chars)", "", 47);
+static WiFiManagerParameter p_url("api_url", "Ingest URL", "", 199);
 
 // ============== TABLAS 7-seg ================
 static const byte num7seg[10] = {
@@ -164,11 +248,21 @@ static byte mapaChar(char c) {
 }
 
 // ============== HELPERS 4094 ================
+/**
+ * AR06 (F50): si vale 1, los relays son activos HIGH en vez de activos LOW.
+ * Por compatibilidad, la salida del 4094 es activa LOW por hardware; lo único
+ * que cambia es la condición que activa cada bit (la electrónica suele tener
+ * un transistor inversor o no).
+ */
 static byte relayMask() {
   byte b = 0;
-  if (compresor)  b |= (1 << BIT_COMP);
-  if (deshielo)   b |= (1 << BIT_DEF);
-  if (ventilador) b |= (1 << BIT_FAN);
+  bool invert = P.F50 >= 0.5f;
+  bool cON = invert ? !compresor  : compresor;
+  bool dON = invert ? !deshielo   : deshielo;
+  bool fON = invert ? !ventilador : ventilador;
+  if (cON) b |= (1 << BIT_COMP);
+  if (dON) b |= (1 << BIT_DEF);
+  if (fON) b |= (1 << BIT_FAN);
   return b;
 }
 static byte comunesApagados() { return 0b00011111 | relayMask(); }
@@ -177,7 +271,6 @@ static byte activarCom(int com) {
   b &= ~(1 << com);
   return b;
 }
-
 static void enviar4094(byte cm, byte sg) {
   digitalWrite(STROBE_PIN, LOW);
   SPI.transfer(cm);
@@ -185,11 +278,8 @@ static void enviar4094(byte cm, byte sg) {
   digitalWrite(STROBE_PIN, HIGH);
   digitalWrite(STROBE_PIN, LOW);
 }
-
 static void refrescarDisplay() {
-  // Apaga todos los comunes antes de cambiar de dígito (evita ghosting).
   enviar4094(comunesApagados(), 0xFF);
-
   if (digitNow < 4) {
     enviar4094(activarCom(digitNow), bufferDisplay[digitNow]);
   } else {
@@ -205,10 +295,9 @@ static void refrescarDisplay() {
 // ============== DISPLAY: TEXTO Y TEMP =======
 static String adaptarTexto(String t) {
   t.toUpperCase();
-  t.replace("M", "N");  // la M no se forma bien en 7-seg
+  t.replace("M", "N");
   return t;
 }
-
 static void prepararTexto() {
   String t = "    " + adaptarTexto(texto) + "    ";
   for (int i = 0; i < 4; i++) {
@@ -225,7 +314,6 @@ static void prepararTexto() {
   scrollPos++;
   if (scrollPos > (int)t.length() - 4) scrollPos = 0;
 }
-
 static void mostrarTemperatura(float temp) {
   for (int i = 0; i < 4; i++) bufferDisplay[i] = BLANCO;
   bool neg = temp < 0;
@@ -235,7 +323,7 @@ static void mostrarTemperatura(float temp) {
   int dec    = valor % 10;
   if (neg && entero < 10) {
     bufferDisplay[0] = MENOS;
-    bufferDisplay[1] = num7seg[entero] & 0b01111111;  // enciende DP
+    bufferDisplay[1] = num7seg[entero] & 0b01111111;
     bufferDisplay[2] = num7seg[dec];
   } else if (neg) {
     bufferDisplay[0] = MENOS;
@@ -250,7 +338,6 @@ static void mostrarTemperatura(float temp) {
     bufferDisplay[2] = num7seg[dec];
   }
 }
-
 static void mostrarError(int idx) {
   for (int i = 0; i < 4; i++) bufferDisplay[i] = BLANCO;
   bufferDisplay[1] = mapaChar('E');
@@ -258,237 +345,708 @@ static void mostrarError(int idx) {
 }
 
 // ============== LECTURA NTC =================
-static float leerNTCpromedio(int pin, bool &fault) {
+/**
+ * AR08 (F54) decide cuántas muestras tomamos por lectura (4–32). Aceptamos
+ * más muestras = lectura más estable pero más lenta. Saturamos los extremos
+ * para no quedarnos sin tiempo de loop si llega un valor raro de la nube.
+ */
+static float leerNTCpromedio(int pin, bool &fault, float offset) {
+  int samples = (int)P.F54;
+  if (samples < 4)  samples = 4;
+  if (samples > 32) samples = 32;
   long acc = 0;
   int validas = 0;
-  for (int i = 0; i < 16; i++) {
+  for (int i = 0; i < samples; i++) {
     int v = analogRead(pin);
     if (v > 5 && v < 4090) { acc += v; validas++; }
     delayMicroseconds(200);
   }
-  if (validas < 8) { fault = true; return TEMP_ERR_VALUE; }
+  if (validas < samples / 2) { fault = true; return TEMP_ERR_VALUE; }
   int adc = acc / validas;
   float rNTC = R_FIXED * ((float)adc / (4095.0f - (float)adc));
   float tK = 1.0f / ((1.0f / T0K) + (1.0f / BETA) * log(rNTC / R0));
   float tC = tK - 273.15f;
   if (tC < -45.0f || tC > 80.0f) { fault = true; return TEMP_ERR_VALUE; }
   fault = false;
-  return tC;
+  return tC + offset;
 }
 
-// ============== CONTROL =====================
+// ============== CONTROL helpers =============
+/** AR07 (F53): qué sonda controla el termostato (0=cámara, 1=evaporador). */
+static float controlTemp(bool &controlFault) {
+  if (P.F53 >= 0.5f) { controlFault = fault2; return tEvap; }
+  controlFault = fault1; return tCam;
+}
+
+/** AR05 (F49): comparador frío/calor. */
+static bool needCooling(float t, float setp, float hist) {
+  if (P.F49 >= 0.5f) {
+    // Modo calor: prender cuando temp ≤ setp - hist; apagar al alcanzar setp.
+    return t <= setp - hist;
+  }
+  // Modo frío (default).
+  return t >= setp + hist;
+}
+static bool reachedSetpoint(float t, float setp) {
+  if (P.F49 >= 0.5f) return t >= setp;
+  return t <= setp;
+}
+
+// ============== Puerta (AR35–AR41) ==========
+static void leerPuerta() {
+  if (DOOR_PIN < 0 || P.F25 < 0.5f) { doorOpen = false; doorAlarm = false; return; }
+  int v = digitalRead(DOOR_PIN);
+  bool isOpenRaw = (P.F26 >= 0.5f) ? (v == HIGH) : (v == LOW);   // F26: 1=NO, 0=NC
+  if (isOpenRaw != doorOpen) {
+    doorOpen = isOpenRaw;
+    doorChangedAt = millis();
+    if (P.F30 >= 0.5f) Serial.printf("[PUERTA] %s\n", doorOpen ? "ABIERTA" : "CERRADA");
+  }
+  doorAlarm = doorOpen && (millis() - doorChangedAt) >= (unsigned long)(P.F27 * 1000.0f);
+}
+
+// ============== CONTROL principal ===========
 static void aplicarControl() {
   unsigned long now = millis();
 
-  // Sin sonda cámara → modo seguro: apagar todo.
-  if (fault1) {
+  // F38: retardo al encender — todo OFF hasta cumplir el delay.
+  if (!bootDelayDone) {
+    if (now - bootAtMs < (unsigned long)(P.F38 * 1000.0f)) {
+      compresor = ventilador = deshielo = dripping = false;
+      return;
+    }
+    bootDelayDone = true;
+    compChangedAt = now;
+    lastDefrostAt = now;
+    // F09: deshielo al encender.
+    if (P.F09 >= 0.5f && !defrostOnStartDone) {
+      deshielo = true; defStartedAt = now;
+      defrostOnStartDone = true;
+      return;
+    }
+    defrostOnStartDone = true;
+  }
+
+  // F46: si pasó "máx sin deshielo", forzar ciclo.
+  bool forceDefrost = (P.F46 > 0) && (now - lastDefrostAt) >= (unsigned long)(P.F46 * 60.0f * 1000.0f);
+
+  // F45: bloqueo de deshielo desde encendido (min).
+  bool defrostBlockedByStartup = (now - bootAtMs) < (unsigned long)(P.F45 * 60.0f * 1000.0f);
+
+  // ---- SONDAS FALLADAS ----
+  bool ctrlFault;
+  float tCtrl = controlTemp(ctrlFault);
+  if (ctrlFault) {
+    deshielo = false; dripping = false;
+    if (P.F55 < 0.5f) {
+      // AR34 = 0: apagar todo.
+      if (compresor) { compresor = false; compChangedAt = now; }
+      ventilador = false;
+      return;
+    }
+    // AR34 = 1: ciclo de emergencia F19 ON / F20 OFF (s)
+    unsigned long onMs  = (unsigned long)(P.F19 * 1000.0f);
+    unsigned long offMs = (unsigned long)(P.F20 * 1000.0f);
+    if (emergencyComp) {
+      if (now - emergencyChangedAt >= onMs) {
+        emergencyComp = false; emergencyChangedAt = now;
+      }
+    } else {
+      if (now - emergencyChangedAt >= offMs) {
+        emergencyComp = true; emergencyChangedAt = now;
+      }
+    }
+    compresor = emergencyComp;
+    ventilador = compresor || P.F51 >= 0.5f;
+    return;
+  }
+  emergencyComp = false;
+
+  // ---- DESHIELO ----
+  // Inicio: por tiempo de intervalo (F06) o forzado (F46) o por hielo (F52/F52t)
+  bool defrostByIce = (P.F52 >= 0.5f) && !fault2 && (tEvap <= P.F52t);
+  bool defrostByInterval = (P.F06 > 0) && (now - lastDefrostAt) >= (unsigned long)(P.F06 * 60.0f * 1000.0f);
+  if (!deshielo && !dripping && !defrostBlockedByStartup &&
+      (defrostByInterval || forceDefrost || defrostByIce)) {
+    deshielo = true; defStartedAt = now;
     if (compresor) { compresor = false; compChangedAt = now; }
-    ventilador = false;
+    // AR20 (F10): ventilador durante deshielo (0=apagado, 1=encendido).
+    ventilador = (P.F10 >= 0.5f);
     return;
   }
 
-  // Inicio de deshielo programado (no pisar uno en curso, ni en drenaje).
-  if (!deshielo && !dripping && (now - lastDefrostAt) >= (cfg.defEverySec * 1000UL)) {
-    deshielo = true;
-    defStartedAt = now;
-    if (compresor) { compresor = false; compChangedAt = now; }
-    ventilador = false;
-    return;
-  }
-
-  // En deshielo: termina por tiempo o por sonda evaporador alta.
   if (deshielo) {
-    bool finPorTemp = !fault2 && tEvap >= 10.0f;
-    if ((now - defStartedAt) >= cfg.defDurMs || finPorTemp) {
+    bool finPorTemp = !fault2 && (tEvap >= P.F08);
+    bool finPorTiempo = (now - defStartedAt) >= (unsigned long)(P.F07 * 60.0f * 1000.0f);
+    if (finPorTiempo || finPorTemp) {
       deshielo = false;
       lastDefrostAt = now;
       dripping = true;
       dripStartedAt = now;
+    } else {
+      ventilador = (P.F10 >= 0.5f);
     }
     return;
   }
 
-  // Drenaje: ventilador apagado para no soplar agua.
+  // ---- GOTEO ----
   if (dripping) {
-    ventilador = false;
-    if ((now - dripStartedAt) >= cfg.dripMs) {
+    // Apaga vent durante el goteo (estándar), salvo F51=1 (vent continuo).
+    ventilador = (P.F51 >= 0.5f);
+    if ((now - dripStartedAt) >= (unsigned long)(P.F39 * 60.0f * 1000.0f)) {
       dripping = false;
     } else {
       return;
     }
   }
 
-  // Termostato con histéresis y tiempos mínimos.
-  float onAt  = cfg.setC + cfg.histC;
-  float offAt = cfg.setC;
+  // ---- TERMOSTATO ----
+  float setp = P.F01;
+  float hist = P.F02;
+  unsigned long compMinOnMs  = (unsigned long)(P.F18 * 1000.0f);
+  unsigned long compMinOffMs = (unsigned long)(P.F17 * 1000.0f);
+
+  // Puerta abierta puede apagar compresor (F40) y ventilador (F28)
+  bool doorCutsComp = (DOOR_PIN >= 0) && P.F25 >= 0.5f && P.F40 >= 0.5f && doorOpen;
+  bool doorCutsFan  = (DOOR_PIN >= 0) && P.F25 >= 0.5f && P.F28 >= 0.5f && doorOpen;
 
   if (compresor) {
-    if ((now - compChangedAt) >= cfg.compMinOnMs && tCam <= offAt) {
-      compresor = false;
-      compChangedAt = now;
+    bool wantOff = reachedSetpoint(tCtrl, setp) || doorCutsComp;
+    if (wantOff && (now - compChangedAt) >= compMinOnMs) {
+      compresor = false; compChangedAt = now;
     }
   } else {
-    if ((now - compChangedAt) >= cfg.compMinOffMs && tCam >= onAt) {
-      compresor = true;
-      compChangedAt = now;
+    bool wantOn = needCooling(tCtrl, setp, hist) && !doorCutsComp;
+    if (wantOn && (now - compChangedAt) >= compMinOffMs) {
+      compresor = true; compChangedAt = now;
     }
   }
 
-  // Ventilador encadenado al compresor (típico cámara).
-  ventilador = compresor;
+  // Ventilador: F51 continuo, F11 retardo post-deshielo, F12 umbral evap
+  unsigned long postDefDelayMs = (unsigned long)(P.F11 * 60.0f * 1000.0f);
+  bool postDefGate = (now - lastDefrostAt) >= postDefDelayMs;
+  bool evapOK = fault2 ? true : (tEvap <= P.F12);
+  bool fanLogic = P.F51 >= 0.5f ? true : (compresor && postDefGate && evapOK);
+  if (doorCutsFan) fanLogic = false;
+  ventilador = fanLogic;
 }
 
-// ============== WiFi + TELEMETRÍA ===========
-static void wifiConectar() {
-  if (wifiSsid.length() == 0) return;
-  if (WiFi.status() == WL_CONNECTED) return;
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
-  Serial.print("WiFi -> "); Serial.println(wifiSsid);
+// ============== ALARMAS =====================
+static void evaluarAlarmas() {
+  unsigned long now = millis();
+  bool startupGate = (now - bootAtMs) >= (unsigned long)(P.F48 * 60.0f * 1000.0f);
+  unsigned long delayMs = (unsigned long)(P.F15 * 60.0f * 1000.0f);
+
+  alarmProbe = (P.F16 >= 0.5f) && (fault1 || fault2);
+
+  // Si la puerta está abierta y F29=1, bloquea alarmas térmicas.
+  bool maskThermal = (DOOR_PIN >= 0) && P.F25 >= 0.5f && P.F29 >= 0.5f && doorOpen;
+
+  if (fault1 || maskThermal || !startupGate) {
+    alarmHigh = alarmLow = false;
+    alarmHighSinceMs = alarmLowSinceMs = 0;
+    return;
+  }
+
+  float hi = P.F13, lo = P.F14, hys = P.F47;
+  // Histeresis para evitar parpadeo (F47).
+  if (alarmHigh) {
+    if (tCam < hi - hys) { alarmHigh = false; alarmHighSinceMs = 0; }
+  } else {
+    if (tCam >= hi) {
+      if (alarmHighSinceMs == 0) alarmHighSinceMs = now;
+      if (now - alarmHighSinceMs >= delayMs) alarmHigh = true;
+    } else {
+      alarmHighSinceMs = 0;
+    }
+  }
+  if (alarmLow) {
+    if (tCam > lo + hys) { alarmLow = false; alarmLowSinceMs = 0; }
+  } else {
+    if (tCam <= lo) {
+      if (alarmLowSinceMs == 0) alarmLowSinceMs = now;
+      if (now - alarmLowSinceMs >= delayMs) alarmLow = true;
+    } else {
+      alarmLowSinceMs = 0;
+    }
+  }
 }
 
-static void enviarTelemetria() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  if (moduleId.length() == 0 || deviceToken.length() == 0 || ingestUrl.length() == 0) return;
+// ============== CONFIG: LittleFS ============
+static bool ensureFs() {
+  static bool done = false;
+  if (done) return true;
+  if (!LittleFS.begin(true)) {
+    Serial.println(F("[FS] LittleFS.begin falló."));
+    return false;
+  }
+  done = true;
+  return true;
+}
+static bool loadConfig() {
+  if (!ensureFs()) return false;
+  if (!LittleFS.exists(CFG_PATH)) return false;
+  File f = LittleFS.open(CFG_PATH, "r");
+  if (!f) return false;
+  StaticJsonDocument<512> doc;
+  DeserializationError e = deserializeJson(doc, f);
+  f.close();
+  if (e) {
+    Serial.printf("[CFG] JSON corrupto: %s\n", e.c_str());
+    return false;
+  }
+  const char *u = doc["api_url"] | "";
+  if (strncmp(u, "https://", 8) == 0 && strstr(u, "/functions/v1/")) {
+    strlcpy(g_cfg.apiUrl, u, sizeof(g_cfg.apiUrl));
+  }
+  strlcpy(g_cfg.moduleId, doc["module_id"] | "", sizeof(g_cfg.moduleId));
+  strlcpy(g_cfg.apiKey,   doc["api_key"]   | "", sizeof(g_cfg.apiKey));
+  g_cfg.intervalMs = doc["interval_ms"] | g_cfg.intervalMs;
+  if (g_cfg.intervalMs < 5000) g_cfg.intervalMs = 5000;
+  return true;
+}
+static bool saveConfig() {
+  if (!ensureFs()) return false;
+  StaticJsonDocument<512> doc;
+  doc["api_url"]     = g_cfg.apiUrl;
+  doc["module_id"]   = g_cfg.moduleId;
+  doc["api_key"]     = g_cfg.apiKey;
+  doc["interval_ms"] = g_cfg.intervalMs;
+  File f = LittleFS.open(CFG_PATH, "w");
+  if (!f) return false;
+  serializeJson(doc, f);
+  f.close();
+  return true;
+}
+static void resetConfig() {
+  if (ensureFs()) {
+    if (LittleFS.exists(CFG_PATH))    LittleFS.remove(CFG_PATH);
+    if (LittleFS.exists(PARAMS_PATH)) LittleFS.remove(PARAMS_PATH);
+  }
+  WiFi.disconnect(true, true);
+  delay(200);
+  ESP.restart();
+}
+
+// ============== PARAMS: LittleFS + Cloud =====
+/** Lee P.* desde doc. Solo sobreescribe lo que viene; el resto queda con default. */
+static void applyParamsFromJson(JsonObject obj) {
+  #define ASSIGN(K) do { auto v = obj[#K]; if (!v.isNull()) P.K = v.as<float>(); } while (0)
+  ASSIGN(F01); ASSIGN(F02); ASSIGN(F03); ASSIGN(F04); ASSIGN(F05);
+  ASSIGN(F06); ASSIGN(F07); ASSIGN(F08); ASSIGN(F09); ASSIGN(F10);
+  ASSIGN(F11); ASSIGN(F12); ASSIGN(F13); ASSIGN(F14); ASSIGN(F15);
+  ASSIGN(F16); ASSIGN(F17); ASSIGN(F18); ASSIGN(F19); ASSIGN(F20);
+  ASSIGN(F25); ASSIGN(F26); ASSIGN(F27); ASSIGN(F28); ASSIGN(F29);
+  ASSIGN(F30); ASSIGN(F31); ASSIGN(F32); ASSIGN(F33); ASSIGN(F34);
+  ASSIGN(F35); ASSIGN(F36); ASSIGN(F37); ASSIGN(F38); ASSIGN(F39);
+  ASSIGN(F40); ASSIGN(F45); ASSIGN(F46); ASSIGN(F47); ASSIGN(F48);
+  ASSIGN(F49); ASSIGN(F50); ASSIGN(F51); ASSIGN(F52);
+  { auto v = obj["F52t"]; if (!v.isNull()) P.F52t = v.as<float>(); }
+  ASSIGN(F53); ASSIGN(F54); ASSIGN(F55);
+  #undef ASSIGN
+}
+static bool loadParams() {
+  if (!ensureFs() || !LittleFS.exists(PARAMS_PATH)) return false;
+  File f = LittleFS.open(PARAMS_PATH, "r");
+  if (!f) return false;
+  StaticJsonDocument<4096> doc;
+  DeserializationError e = deserializeJson(doc, f);
+  f.close();
+  if (e) { Serial.printf("[PARAMS] JSON corrupto: %s\n", e.c_str()); return false; }
+  if (doc.containsKey("updated_at")) g_paramsUpdatedAt = String((const char *)(doc["updated_at"] | ""));
+  JsonObject obj = doc.containsKey("params") ? doc["params"].as<JsonObject>() : doc.as<JsonObject>();
+  applyParamsFromJson(obj);
+  return true;
+}
+static bool saveParams(JsonObject obj) {
+  if (!ensureFs()) return false;
+  StaticJsonDocument<4096> doc;
+  doc["updated_at"] = g_paramsUpdatedAt;
+  JsonObject p = doc.createNestedObject("params");
+  for (JsonPair kv : obj) p[kv.key()] = kv.value();
+  File f = LittleFS.open(PARAMS_PATH, "w");
+  if (!f) return false;
+  serializeJson(doc, f);
+  f.close();
+  return true;
+}
+
+/** Deriva la URL de fetch-pro300-params desde la URL de ingest-reading guardada. */
+static String paramsUrl() {
+  String u(g_cfg.apiUrl);
+  int idx = u.lastIndexOf("/ingest-reading");
+  if (idx > 0) {
+    u.remove(idx);
+    u += "/fetch-pro300-params";
+    return u;
+  }
+  // Fallback: si el usuario puso otra URL, intentamos derivar igual.
+  int slash = u.lastIndexOf('/');
+  if (slash > 0) {
+    u.remove(slash);
+    u += "/fetch-pro300-params";
+  }
+  return u;
+}
+
+/**
+ * Hace POST a fetch-pro300-params; si el server devolvió `updated_at` distinto al
+ * que tenemos cacheado, aplica los nuevos AR y persiste a /params.json.
+ */
+static void pullParamsFromCloud() {
+  if (WiFi.status() != WL_CONNECTED) { Serial.println(F("[PULL] sin WiFi, salto.")); return; }
+  if (strlen(g_cfg.moduleId) == 0 || strlen(g_cfg.apiKey) == 0) {
+    Serial.println(F("[PULL] sin moduleId/apiKey, salto."));
+    return;
+  }
+  String url = paramsUrl();
+  if (url.length() == 0) { Serial.println(F("[PULL] no pude derivar URL.")); return; }
+  Serial.printf("[PULL] -> %s\n", url.c_str());
 
   HTTPClient http;
-  http.begin(ingestUrl);
+  http.setTimeout(8000);
+  if (!http.begin(url)) { Serial.println(F("[PULL] http.begin() falló.")); return; }
+  http.addHeader("Content-Type", "application/json");
+
+  StaticJsonDocument<200> req;
+  req["moduleId"]    = g_cfg.moduleId;
+  req["deviceToken"] = g_cfg.apiKey;
+  String body; serializeJson(req, body);
+
+  int code = http.POST(body);
+  String resp = http.getString();
+  http.end();
+
+  Serial.printf("[PULL] HTTP %d (%d bytes)\n", code, (int)resp.length());
+  if (code != 200) {
+    Serial.println(resp);
+    return;
+  }
+
+  StaticJsonDocument<4096> doc;
+  DeserializationError e = deserializeJson(doc, resp);
+  if (e) {
+    Serial.printf("[PULL] JSON error: %s\n", e.c_str());
+    Serial.println(resp);
+    return;
+  }
+  const char *upd = doc["updated_at"] | "";
+  if (upd[0] && g_paramsUpdatedAt == upd) {
+    Serial.printf("[PULL] sin cambios (updated_at=%s).\n", upd);
+    return;
+  }
+
+  // Aceptamos doc["params"] como objeto principal, o doc raíz si la función
+  // ya devuelve solo claves F* (fallback defensivo).
+  JsonVariant pv = doc["params"];
+  JsonObject obj = pv.is<JsonObject>() ? pv.as<JsonObject>() : doc.as<JsonObject>();
+  if (obj.isNull()) {
+    Serial.println(F("[PULL] respuesta sin 'params', no aplico."));
+    Serial.println(resp);
+    return;
+  }
+  if (obj.size() == 0) {
+    Serial.printf("[PULL] 'params' vacío en el server. Setpoint/hist/... siguen en defaults.\n");
+    g_paramsUpdatedAt = String(upd);
+    return;
+  }
+
+  g_paramsUpdatedAt = String(upd);
+  applyParamsFromJson(obj);
+  saveParams(obj);
+  Serial.printf("[PULL] AR actualizados desde la nube (%d claves, updated_at=%s).\n",
+                (int)obj.size(), upd);
+  Serial.printf("       F01=%.1f  F02=%.1f  F06=%.0fmin  F17=%.0fs  F18=%.0fs\n",
+                P.F01, P.F02, P.F06, P.F17, P.F18);
+}
+
+// ============== Portal WiFiManager ==========
+static void copyPortalConfigAndSave() {
+  strlcpy(g_cfg.moduleId, p_module.getValue(), sizeof(g_cfg.moduleId));
+  strlcpy(g_cfg.apiKey,   p_token.getValue(),  sizeof(g_cfg.apiKey));
+  const char *u = p_url.getValue();
+  if (u && strncmp(u, "https://", 8) == 0 && strstr(u, "/functions/v1/")) {
+    strlcpy(g_cfg.apiUrl, u, sizeof(g_cfg.apiUrl));
+  }
+  saveConfig();
+  Serial.println(F("[CFG] Guardado desde portal."));
+}
+/**
+ * Abre el portal en modo no-bloqueante. El loop principal sigue corriendo
+ * (display, watchdog, lectura de sondas, comandos serie), y procesa el portal
+ * con `wm.process()` hasta que dispara la callback de save o se cumple el
+ * timeout local que controlamos nosotros.
+ */
+static void runConfigPortal() {
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.disconnect(true, true);
+  delay(150);
+  wm.setBreakAfterConfig(true);
+  wm.setConfigPortalTimeout(PORTAL_TIMEOUT_SEC);
+  wm.setConfigPortalBlocking(false);
+  wm.startConfigPortal(AP_NAME);
+  g_wifiState = WFS_PORTAL;
+  g_portalStartedAt = millis();
+  modoTexto = true;
+  texto = "CONECTAR A RED PRO300-SETUP   ";
+  scrollPos = 0;
+  prepararTexto();
+  Serial.printf("[WiFi] Portal '%s' abierto (modo no bloqueante, %lu s).\n", AP_NAME, PORTAL_TIMEOUT_SEC);
+  Serial.println(F("[WiFi] Conéctate con el celular al SSID, abrí 192.168.4.1 y completá WiFi + Module ID + Token."));
+}
+
+/** Llamada continua desde loop() mientras g_wifiState == WFS_PORTAL. */
+static void processPortal() {
+  wm.process();
+  if (g_portalSaveRequested) {
+    copyPortalConfigAndSave();
+    g_portalSaveRequested = false;
+    Serial.println(F("[WiFi] Config guardada por el portal. Reiniciando para aplicar..."));
+    delay(800);
+    ESP.restart();
+  }
+  if (millis() - g_portalStartedAt > PORTAL_TIMEOUT_SEC * 1000UL) {
+    Serial.println(F("[WiFi] Portal: timeout sin cambios. Sigo en control local; reintento WiFi cada 30 s."));
+    wm.stopConfigPortal();
+    g_wifiState = WFS_RUNNING;
+    modoTexto = false;
+  }
+}
+static bool connectSavedWifi() {
+  Serial.printf("[WiFi] Probando WiFi guardado (máx. %lu ms)...\n", WIFI_BOOT_CONNECT_MS);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin();
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - t0) < WIFI_BOOT_CONNECT_MS) {
+    delay(200);
+    yield();
+    esp_task_wdt_reset();
+  }
+  return WiFi.status() == WL_CONNECTED;
+}
+static void setupWifi() {
+  WiFi.setSleep(false);
+  WiFi.persistent(true);
+  wm.setConnectTimeout(15);
+  wm.setMinimumSignalQuality(8);
+  wm.setSaveConfigCallback([]() { g_portalSaveRequested = true; });
+  p_module.setValue(g_cfg.moduleId, sizeof(g_cfg.moduleId) - 1);
+  p_token.setValue(g_cfg.apiKey,    sizeof(g_cfg.apiKey)    - 1);
+  p_url.setValue(g_cfg.apiUrl,      sizeof(g_cfg.apiUrl)    - 1);
+  wm.addParameter(&p_module);
+  wm.addParameter(&p_token);
+  wm.addParameter(&p_url);
+
+  bool forcePortal = digitalRead(PIN_FORCE_PORTAL) == LOW;
+  bool noConfig    = strlen(g_cfg.moduleId) == 0 || strlen(g_cfg.apiKey) == 0;
+  if (forcePortal || noConfig) {
+    Serial.println(forcePortal ? F("[WiFi] BOOT a GND → portal forzado.")
+                               : F("[WiFi] Sin config → portal automático."));
+    runConfigPortal();
+    return;
+  }
+  if (!connectSavedWifi()) {
+    Serial.println(F("[WiFi] No conectó en boot. Sigo control local; reintento cada 30 s."));
+  } else {
+    Serial.printf("[WiFi] OK: SSID=%s IP=%s RSSI=%d\n",
+      WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+  }
+  g_wifiState = WFS_RUNNING;
+}
+static void maintainWifi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  unsigned long now = millis();
+  if (lastWifiRetryMs != 0 && now - lastWifiRetryMs < 30000UL) return;
+  lastWifiRetryMs = now;
+  if (WiFi.SSID().length() == 0) return;
+  Serial.println(F("[WiFi] Reintentando..."));
+  WiFi.reconnect();
+}
+
+// ============== Telemetría ==================
+static void enviarTelemetria() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (strlen(g_cfg.moduleId) == 0 || strlen(g_cfg.apiKey) == 0) return;
+  HTTPClient http;
+  http.setTimeout(8000);
+  http.begin(g_cfg.apiUrl);
   http.addHeader("Content-Type", "application/json");
 
   String body = "{";
-  body += "\"moduleId\":\"" + moduleId + "\",";
-  body += "\"deviceToken\":\"" + deviceToken + "\",";
-
-  if (!fault1) body += "\"temp1_c\":" + String(tCam, 2)  + ",";
-  else         body += "\"temp1_c\":null,";
-
-  if (!fault2) body += "\"temp2_c\":" + String(tEvap, 2);
-  else         body += "\"temp2_c\":null";
-
-  // Estado de relés (PRO300 con control / combistato).
+  body += "\"moduleId\":\"";    body += g_cfg.moduleId;  body += "\",";
+  body += "\"deviceToken\":\""; body += g_cfg.apiKey;    body += "\",";
+  if (!fault1) { body += "\"temp1_c\":" + String(tCam, 2)  + ","; }
+  else         { body += "\"temp1_c\":null,"; }
+  if (!fault2) { body += "\"temp2_c\":" + String(tEvap, 2); }
+  else         { body += "\"temp2_c\":null"; }
   body += ",\"comp_on\":"    + String(compresor  ? "true" : "false");
   body += ",\"fan_on\":"     + String(ventilador ? "true" : "false");
   body += ",\"defrost_on\":" + String(deshielo   ? "true" : "false");
-
+  if (DOOR_PIN >= 0 && P.F25 >= 0.5f) {
+    body += ",\"door_open\":" + String(doorOpen ? "true" : "false");
+  }
   body += "}";
 
   int code = http.POST(body);
-  Serial.print("POST "); Serial.print(code);
-  if (code > 0) { Serial.print(" "); Serial.println(http.getString()); }
+  Serial.print(F("[TX] POST ")); Serial.print(code);
+  if (code > 0) { Serial.print(' '); Serial.println(http.getString()); }
   else          { Serial.println(); }
   http.end();
 }
 
-// ============== COMANDOS SERIE ==============
+// ============== Comandos serie ==============
+static void printConfig() {
+  Serial.println(F("---- CONFIG ----"));
+  Serial.printf("WiFi SSID: %s  (status=%d)\n", WiFi.SSID().c_str(), WiFi.status());
+  Serial.printf("api_url:   %s\n", g_cfg.apiUrl);
+  Serial.printf("module_id: %s\n", g_cfg.moduleId);
+  Serial.printf("api_key:   %s\n", g_cfg.apiKey);
+  Serial.printf("interval:  %lu ms\n", (unsigned long)g_cfg.intervalMs);
+  Serial.printf("params updated_at: %s\n", g_paramsUpdatedAt.c_str());
+  Serial.println(F("---- AR vigentes ----"));
+  Serial.printf("AR01 F01 setpoint     = %.1f\n", P.F01);
+  Serial.printf("AR02 F02 hist         = %.1f\n", P.F02);
+  Serial.printf("AR03 F03 offS1        = %.1f\n", P.F03);
+  Serial.printf("AR04 F04 offS2        = %.1f\n", P.F04);
+  Serial.printf("AR05 F49 modo (0fri)  = %.0f\n", P.F49);
+  Serial.printf("AR06 F50 inv. relé    = %.0f\n", P.F50);
+  Serial.printf("AR07 F53 sonda ctrl   = %.0f\n", P.F53);
+  Serial.printf("AR08 F54 muestras     = %.0f\n", P.F54);
+  Serial.printf("AR10 F06 int defrost  = %.0f min\n", P.F06);
+  Serial.printf("AR11 F07 max defrost  = %.0f min\n", P.F07);
+  Serial.printf("AR12 F08 fin defrost  = %.1f\n", P.F08);
+  Serial.printf("AR14 F38 boot delay   = %.0f s\n", P.F38);
+  Serial.printf("AR15 F39 goteo        = %.0f min\n", P.F39);
+  Serial.printf("AR20 F10 fan en def   = %.0f\n", P.F10);
+  Serial.printf("AR21 F11 ret fan post = %.0f min\n", P.F11);
+  Serial.printf("AR23 F51 fan continuo = %.0f\n", P.F51);
+  Serial.printf("AR24 F13 alarma alta  = %.1f\n", P.F13);
+  Serial.printf("AR25 F14 alarma baja  = %.1f\n", P.F14);
+  Serial.printf("AR30 F17 tmin OFF     = %.0f s\n", P.F17);
+  Serial.printf("AR31 F18 tmin ON      = %.0f s\n", P.F18);
+  Serial.printf("AR34 F55 emerg falla  = %.0f\n", P.F55);
+  Serial.println(F("--------------------"));
+}
 static void leerSerial() {
   if (!Serial.available()) return;
   String dato = Serial.readStringUntil('\n');
   dato.trim();
   if (dato.length() == 0) return;
+  String lower = dato; lower.toLowerCase();
 
-  if (dato.startsWith("setssid "))  { wifiSsid    = dato.substring(8);  prefs.putString("ssid",  wifiSsid);    Serial.println("OK"); return; }
-  if (dato.startsWith("setpass "))  { wifiPass    = dato.substring(8);  prefs.putString("pass",  wifiPass);    Serial.println("OK"); return; }
-  if (dato.startsWith("setid "))    { moduleId    = dato.substring(6);  prefs.putString("modid", moduleId);    Serial.println("OK"); return; }
-  if (dato.startsWith("settoken ")) { deviceToken = dato.substring(9);  prefs.putString("tok",   deviceToken); Serial.println("OK"); return; }
-  if (dato.startsWith("seturl "))   { ingestUrl   = dato.substring(7);  prefs.putString("url",   ingestUrl);   Serial.println("OK"); return; }
-  if (dato.startsWith("setpoint ")) { cfg.setC    = dato.substring(9).toFloat();  prefs.putFloat("set",  cfg.setC);  Serial.println("OK"); return; }
-  if (dato.startsWith("hist "))     { cfg.histC   = dato.substring(5).toFloat();  prefs.putFloat("hist", cfg.histC); Serial.println("OK"); return; }
-
-  if (dato == "config") {
-    Serial.printf("SSID=%s\nID=%s\nTOK=%s\nURL=%s\nSET=%.1f HIST=%.1f\n",
-      wifiSsid.c_str(), moduleId.c_str(), deviceToken.c_str(),
-      ingestUrl.c_str(), cfg.setC, cfg.histC);
-    return;
-  }
-  if (dato == "reboot")                          { ESP.restart(); }
-  if (dato == "defrost" || dato == "deshielo")   { lastDefrostAt = 0; Serial.println("Forzando deshielo"); return; }
-  if (dato == "temp")                            { modoTexto = false; return; }
-  if (dato == "off") {
+  if (lower == "portal")  { runConfigPortal(); return; }
+  if (lower == "reset")   { Serial.println(F("Reseteando config...")); resetConfig(); return; }
+  if (lower == "config")  { printConfig(); return; }
+  if (lower == "reboot")  { ESP.restart(); return; }
+  if (lower == "temp")    { modoTexto = false; return; }
+  if (lower == "pull")    { Serial.println(F("[PULL] forzando...")); pullParamsFromCloud(); return; }
+  if (lower == "off") {
     compresor = ventilador = deshielo = false;
     modoTexto = true; texto = "OFF"; scrollPos = 0; prepararTexto();
     return;
   }
-
-  // Texto libre → marquesina.
+  if (lower == "defrost" || lower == "deshielo") {
+    lastDefrostAt = 0;
+    Serial.println(F("Forzando deshielo en próximo tick."));
+    return;
+  }
   modoTexto = true;
-  texto = dato;
-  scrollPos = 0;
-  prepararTexto();
+  texto = dato; scrollPos = 0; prepararTexto();
 }
 
-// ============== SETUP / LOOP ================
+// ============== Setup / Loop ================
 void setup() {
   Serial.begin(115200);
   pinMode(STROBE_PIN, OUTPUT);
   digitalWrite(STROBE_PIN, LOW);
+  pinMode(PIN_FORCE_PORTAL, INPUT_PULLUP);
+  if (DOOR_PIN >= 0) pinMode(DOOR_PIN, INPUT_PULLUP);
   analogReadResolution(12);
 
   SPI.begin(CLOCK_PIN, -1, DATA_PIN, -1);
   SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   enviar4094(comunesApagados(), 0xFF);
 
-  prefs.begin("sg", false);
-  wifiSsid    = prefs.getString("ssid",  "");
-  wifiPass    = prefs.getString("pass",  "");
-  moduleId    = prefs.getString("modid", "");
-  deviceToken = prefs.getString("tok",   "");
-  ingestUrl   = prefs.getString("url",   "");
-  cfg.setC    = prefs.getFloat("set",  cfg.setC);
-  cfg.histC   = prefs.getFloat("hist", cfg.histC);
+  Serial.println();
+  Serial.println(F("S.G PRO300 booteando..."));
+  ensureFs();
+  loadConfig();
+  loadParams();
+  printConfig();
 
-  esp_task_wdt_init(15, true);
+  // Watchdog: 30 s (suficiente para conexiones WiFi lentas + portal).
+#if defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5
+  esp_task_wdt_config_t twdt_cfg = {
+    .timeout_ms     = 30000,
+    .idle_core_mask = 0,
+    .trigger_panic  = true,
+  };
+  if (esp_task_wdt_init(&twdt_cfg) == ESP_ERR_INVALID_STATE) {
+    esp_task_wdt_reconfigure(&twdt_cfg);
+  }
+#else
+  esp_task_wdt_init(30, true);
+#endif
   esp_task_wdt_add(NULL);
 
-  texto = "INIT";
-  prepararTexto();
+  bootAtMs = millis();
+  bootDelayDone = false;
+  defrostOnStartDone = false;
+  emergencyChangedAt = bootAtMs;
+  compChangedAt = bootAtMs;
+  lastDefrostAt = bootAtMs;
 
-  Serial.println();
-  Serial.println("S.G PRO300 booteado.");
-  Serial.println("Comandos: setssid / setpass / setid / settoken / seturl / setpoint / hist / config / reboot / temp / off / defrost");
+  texto = "BOOT"; prepararTexto();
 
-  wifiConectar();
+  setupWifi();
+  if (g_wifiState != WFS_PORTAL) modoTexto = false;
+
+  // Primer pull en cuanto haya WiFi (lo intentamos sin esperar el período).
+  if (WiFi.status() == WL_CONNECTED) {
+    pullParamsFromCloud();
+    lastParamsPullAt = millis();
+  }
 }
 
 void loop() {
   esp_task_wdt_reset();
   leerSerial();
 
-  // Refresh display: 5 dígitos a ~400 Hz cada uno.
+  if (g_wifiState == WFS_PORTAL) processPortal();
+
   if (micros() - lastRefresh >= 500) {
     lastRefresh = micros();
     refrescarDisplay();
   }
 
-  // Lectura NTC + control cada 1 s.
   if (millis() - lastReadAt >= 1000) {
     lastReadAt = millis();
-    tCam  = leerNTCpromedio(NTC1_PIN, fault1);
-    tEvap = leerNTCpromedio(NTC2_PIN, fault2);
+    tCam  = leerNTCpromedio(NTC1_PIN, fault1, P.F03);
+    tEvap = leerNTCpromedio(NTC2_PIN, fault2, P.F04);
+    leerPuerta();
     aplicarControl();
+    evaluarAlarmas();
   }
 
-  // Alternar T1 / T2 cada 3 s (o error en su lugar).
-  if (!modoTexto && millis() - lastDisplaySwitchAt >= 3000) {
-    lastDisplaySwitchAt = millis();
-    if (showSensorCam) { fault1 ? mostrarError(1) : mostrarTemperatura(tCam); }
-    else               { fault2 ? mostrarError(2) : mostrarTemperatura(tEvap); }
-    showSensorCam = !showSensorCam;
-  }
-
-  // Scroll de marquesina.
   if (modoTexto && millis() - lastScroll >= 300) {
     lastScroll = millis();
     prepararTexto();
   }
-
-  // Keepalive WiFi.
-  if (WiFi.status() != WL_CONNECTED) wifiConectar();
-
-  // Telemetría.
-  if (millis() - lastTelemetryAt >= cfg.telemetryMs) {
-    lastTelemetryAt = millis();
-    enviarTelemetria();
+  if (!modoTexto && millis() - lastDisplaySwitchAt >= 1000) {
+    lastDisplaySwitchAt = millis();
+    if (fault1) mostrarError(1);
+    else        mostrarTemperatura(tCam);
   }
 
-  (void)KIND_COMBISTATO;  // reservado para diferenciar payload en futuras versiones
+  if (g_wifiState == WFS_RUNNING) {
+    maintainWifi();
+    if (millis() - lastTelemetryAt >= g_cfg.intervalMs) {
+      lastTelemetryAt = millis();
+      enviarTelemetria();
+    }
+    if (millis() - lastParamsPullAt >= PARAMS_PULL_MS) {
+      lastParamsPullAt = millis();
+      pullParamsFromCloud();
+    }
+  }
 }
