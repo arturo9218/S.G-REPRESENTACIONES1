@@ -3086,9 +3086,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
   formatMinSec(totalS: number | null | undefined): string {
     if (totalS == null || !Number.isFinite(totalS) || totalS < 0) return '—';
     const s = Math.floor(totalS);
+    // Mostramos el formato más compacto según la magnitud: la fase normal
+    // (refrigeración) suele durar horas, así que escalamos a h/m cuando pasa
+    // de los 60 minutos.
+    if (s < 60) return `${s}s`;
     const m = Math.floor(s / 60);
     const sec = s % 60;
-    return `${m}m ${sec.toString().padStart(2, '0')}s`;
+    if (m < 60) return `${m}m ${sec.toString().padStart(2, '0')}s`;
+    const h = Math.floor(m / 60);
+    const min = m % 60;
+    return `${h}h ${min.toString().padStart(2, '0')}m`;
   }
 
   /** Segundos restantes (>=0) de la fase en curso. null si la fase no tiene timeout o no llegó el dato. */
@@ -3108,15 +3115,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
       case 'boot':         return 'Retardo de arranque';
       case 'emerg':        return 'Emergencia · sonda fallada';
       case 'off':          return 'Apagado';
-      case 'normal':       return 'Control normal';
+      case 'normal':       return 'En refrigeración';
       default:             return '';
     }
   }
 
-  /** true si la fase tiene cronómetro visible (transcurrido / faltan). */
+  /** true si la fase tiene cronómetro visible (Transcurrido y, si aplica, Faltan). */
   combistatoPhaseHasTimer(c: DashboardCombistato): boolean {
     if (!c.lastPhase) return false;
-    if (c.lastPhase === 'normal' || c.lastPhase === 'off') return false;
     return (c.lastPhaseTotalS ?? 0) > 0 || (c.lastPhaseElapsedS ?? 0) > 0;
   }
 

@@ -198,7 +198,13 @@ static const char *phaseName(Phase p) {
 }
 
 static void setPhase(Phase p, uint32_t totalS) {
-  if (g_phase == p && totalS == g_phaseTotalS) return;
+  if (g_phase == p) {
+    // Misma fase: solo refrescamos `phase_total_s` por si un parámetro AR
+    // cambió desde la nube (p.ej. AR07 / F03 mientras estamos refrigerando).
+    // El cronómetro de inicio se preserva para no resetear el "Transcurrido".
+    g_phaseTotalS = totalS;
+    return;
+  }
   g_phase = p;
   g_phaseStartedAt = millis();
   g_phaseTotalS = totalS;
@@ -603,11 +609,18 @@ static void aplicarControl() {
   ventilador = fanLogic;
 
   // Fase post-deshielo: dentro del retardo de ventilador (F11) tras un ciclo.
-  // Si no hay retardo o ya pasó, fase normal.
+  // Si no hay retardo o ya pasó, fase normal (refrigeración).
   if (!postDefGate && P.F11 > 0) {
     setPhase(PH_POST_DEFROST, (uint32_t)(P.F11 * 60.0f));
   } else {
-    setPhase(PH_NORMAL, 0);
+    // En "refrigeración" el "Faltan" que muestra la app es el tiempo hasta
+    // el próximo deshielo por intervalo (AR07 / F03). Para que
+    // total - transcurrido dé exactamente ese countdown, anclamos el
+    // cronómetro al instante en que terminó el último deshielo
+    // (lastDefrostAt), no al millis() actual.
+    bool wasNormal = (g_phase == PH_NORMAL);
+    setPhase(PH_NORMAL, (uint32_t)(P.F03 * 60.0f));
+    if (!wasNormal) g_phaseStartedAt = lastDefrostAt;
   }
 }
 

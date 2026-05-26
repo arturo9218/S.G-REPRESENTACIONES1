@@ -834,7 +834,7 @@
                     </div>
                     <div
                       class="device-card__defrost-strip"
-                      *ngIf="c.lastPhase && c.lastPhase !== 'normal' && c.lastPhase !== 'off'"
+                      *ngIf="c.lastPhase"
                       [attr.data-phase]="c.lastPhase"
                     >
                       <span class="device-card__defrost-pill">
