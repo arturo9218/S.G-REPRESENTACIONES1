@@ -613,14 +613,13 @@ static void aplicarControl() {
   if (!postDefGate && P.F11 > 0) {
     setPhase(PH_POST_DEFROST, (uint32_t)(P.F11 * 60.0f));
   } else {
-    // En "refrigeración" el "Faltan" que muestra la app es el tiempo hasta
-    // el próximo deshielo por intervalo (AR10 / F06, en minutos, default
-    // 360 min = 6 h). Para que `total - transcurrido` dé exactamente ese
-    // countdown, anclamos el cronómetro al instante en que terminó el último
-    // deshielo (lastDefrostAt), no al millis() actual.
-    bool wasNormal = (g_phase == PH_NORMAL);
+    // En "refrigeración" queremos que "Transcurrido" arranque en 0 al
+    // entrar a la fase (no que arrastre los minutos del goteo + retardo de
+    // ventilador del ciclo previo). `g_phaseStartedAt` queda en millis() al
+    // momento de la transición; el "Faltan" se calcula en enviarTelemetria()
+    // como F06*60 - (millis() - lastDefrostAt) y se manda en phase_total_s
+    // como elapsed + remaining para que la card lo muestre correcto.
     setPhase(PH_NORMAL, (uint32_t)(P.F06 * 60.0f));
-    if (!wasNormal) g_phaseStartedAt = lastDefrostAt;
   }
 }
 
@@ -971,9 +970,21 @@ static void enviarTelemetria() {
   // Snapshot de fase + cronómetro (para que la card del PRO300 muestre
   // Transcurrido/Faltan/etc. en cualquier bloque, no solo deshielo).
   uint32_t phaseElapsedS = (uint32_t)((millis() - g_phaseStartedAt) / 1000UL);
+  uint32_t phaseTotalS = g_phaseTotalS;
+  if (g_phase == PH_NORMAL) {
+    // El "Faltan" en refrigeración es el tiempo hasta el próximo deshielo
+    // por intervalo (F06 minutos desde lastDefrostAt). Lo calculamos al
+    // vuelo y reportamos `phase_total_s = elapsed + remaining` para que la
+    // app, que hace `remaining = total - elapsed`, dé el countdown real sin
+    // arrastrar al "Transcurrido" los minutos del goteo + retardo previo.
+    uint32_t intervalS    = (uint32_t)(P.F06 * 60.0f);
+    uint32_t sinceLastDef = (uint32_t)((millis() - lastDefrostAt) / 1000UL);
+    uint32_t remainingS   = (intervalS > sinceLastDef) ? (intervalS - sinceLastDef) : 0;
+    phaseTotalS = phaseElapsedS + remainingS;
+  }
   body += ",\"phase\":\"";          body += phaseName(g_phase);  body += "\"";
   body += ",\"phase_elapsed_s\":" + String(phaseElapsedS);
-  body += ",\"phase_total_s\":"   + String(g_phaseTotalS);
+  body += ",\"phase_total_s\":"   + String(phaseTotalS);
   if (DOOR_PIN >= 0 && P.F25 >= 0.5f) {
     body += ",\"door_open\":" + String(doorOpen ? "true" : "false");
   }
