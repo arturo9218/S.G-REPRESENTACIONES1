@@ -244,10 +244,10 @@ struct ManualOverride {
   unsigned long fanEndsAt   = 0;
 };
 static ManualOverride OV;
-static bool   g_manualDefrostRequested = false;
-static bool   g_manualCancelDefrost    = false;
-static String g_lastCmdTs              = "";
-static const unsigned long FORCE_DURATION_MS = 10UL * 60UL * 1000UL;  // 10 min
+static bool          g_manualDefrostRequested = false;
+static bool          g_manualCancelDefrost    = false;
+static String        g_lastCmdTs              = "";
+static unsigned long g_lastManualDefrostAt    = 0;  // anti-spam F36
 
 static float tCam  = TEMP_ERR_VALUE;
 static float tEvap = TEMP_ERR_VALUE;
@@ -491,17 +491,28 @@ static void applyManualOverride() {
   unsigned long now = millis();
   if (OV.compActive && now >= OV.compEndsAt) {
     OV.compActive = false;
-    Serial.println(F("[CMD] forzado de compresor expiró, vuelvo a auto."));
+    Serial.println(F("[OV] forzado de compresor expiró, vuelvo a auto."));
   }
   if (OV.fanActive && now >= OV.fanEndsAt) {
     OV.fanActive = false;
-    Serial.println(F("[CMD] forzado de ventilador expiró, vuelvo a auto."));
+    Serial.println(F("[OV] forzado de ventilador expiró, vuelvo a auto."));
   }
-  if (OV.compActive && compresor != OV.compValue) {
+  // Pisamos SIEMPRE (sin shortcut por igualdad) para que cualquier asignación
+  // que haya hecho aplicarControl() recién quede pisada por el override y el
+  // próximo refresco del display escriba el SR con el estado correcto.
+  if (OV.compActive) {
+    if (compresor != OV.compValue) {
+      Serial.printf("[OV] piso compresor: %d -> %d (auto perdía vs forzado)\n",
+                    compresor ? 1 : 0, OV.compValue ? 1 : 0);
+      compChangedAt = now;
+    }
     compresor = OV.compValue;
-    compChangedAt = now;
   }
   if (OV.fanActive) {
+    if (ventilador != OV.fanValue) {
+      Serial.printf("[OV] piso ventilador: %d -> %d\n",
+                    ventilador ? 1 : 0, OV.fanValue ? 1 : 0);
+    }
     ventilador = OV.fanValue;
   }
 }
@@ -592,16 +603,24 @@ static void aplicarControl() {
   //   1 = gas caliente → relay deshielo ON + compresor ON (válvula 4 vías / inversion)
   //   2 = natural     → compresor OFF, sin resistencia, solo deja descongelar por inercia
   int defrostType = (int)P.F05;
-  // El comando manual `force_defrost` puentea el bloqueo de arranque (F45):
-  // si el usuario pidió un deshielo, lo respetamos siempre y cuando no
-  // estemos ya en deshielo/goteo.
+  // El comando manual `force_defrost` solo puentea el bloqueo de arranque
+  // F45 si AR48 (F37) = 1 ("deshielo inmediato al pedir"). Si está en 0, el
+  // pedido manual respeta el F45 igual que el deshielo por intervalo.
+  bool manualBypassStartup = g_manualDefrostRequested && (P.F37 >= 0.5f);
   bool startDefrost = !deshielo && !dripping &&
-      (g_manualDefrostRequested ||
-       (!defrostBlockedByStartup && (defrostByInterval || forceDefrost || defrostByIce)));
-  if (g_manualDefrostRequested) {
+      (manualBypassStartup ||
+       (!defrostBlockedByStartup &&
+        (defrostByInterval || forceDefrost || defrostByIce || g_manualDefrostRequested)));
+  if (g_manualDefrostRequested && startDefrost) {
     g_manualDefrostRequested = false;
-    if (!startDefrost) Serial.println(F("[CMD] force_defrost ignorado (ya en deshielo o goteo)."));
+  } else if (g_manualDefrostRequested && (deshielo || dripping)) {
+    // Ya hay un ciclo activo, descartamos el pedido manual.
+    g_manualDefrostRequested = false;
+    Serial.println(F("[CMD] force_defrost ignorado (ya en deshielo o goteo)."));
   }
+  // Si llegamos acá con g_manualDefrostRequested aún true significa que F45
+  // está activo y AR48 (F37) = 0: dejamos el flag pendiente y arrancará en
+  // el primer ciclo donde defrostBlockedByStartup deje de bloquear.
   if (startDefrost) {
     deshielo = true; defStartedAt = now;
     if (defrostType == 1) {
@@ -863,37 +882,84 @@ static void saveLastCmdTs() {
  * que aplicarControl() lee en el próximo ciclo.
  */
 static void applyPendingCommand(JsonObject cmd) {
-  if (cmd.isNull()) return;
+  if (cmd.isNull()) { Serial.println(F("[CMD] cmd object null, skip.")); return; }
   const char *ts = cmd["ts"] | "";
-  if (!ts[0]) return;
-  if (g_lastCmdTs == ts) return;  // ya lo aplicamos antes
+  if (!ts[0]) { Serial.println(F("[CMD] sin ts, skip.")); return; }
+  if (g_lastCmdTs == ts) {
+    Serial.printf("[CMD] ts %s ya aplicado antes, skip.\n", ts);
+    return;
+  }
 
   const char *kind = cmd["kind"] | "";
   bool value = cmd["value"] | false;
   Serial.printf("[CMD] kind=%s value=%d ts=%s\n", kind, value ? 1 : 0, ts);
 
+  unsigned long now = millis();
+  bool applied = false;
+
   if (strcmp(kind, "force_comp") == 0) {
-    OV.compActive = true;
-    OV.compValue  = value;
-    OV.compEndsAt = millis() + FORCE_DURATION_MS;
+    // AR42 (F31) = 1 habilita el forzado; AR43 (F32) = minutos de duración.
+    if (P.F31 < 0.5f) {
+      Serial.println(F("[CMD] rechazado: AR42 (F31) = 0, comp manual no habilitado."));
+    } else {
+      uint32_t mins = (uint32_t)max(1.0f, P.F32);
+      OV.compActive = true;
+      OV.compValue  = value;
+      OV.compEndsAt = now + (unsigned long)mins * 60UL * 1000UL;
+      Serial.printf("[OV] comp=FORCE value=%d endsIn=%lus (AR43=%lumin)\n",
+                    value ? 1 : 0, (unsigned long)mins * 60UL, (unsigned long)mins);
+      applied = true;
+    }
   } else if (strcmp(kind, "force_fan") == 0) {
-    OV.fanActive  = true;
-    OV.fanValue   = value;
-    OV.fanEndsAt  = millis() + FORCE_DURATION_MS;
+    // AR44 (F33) habilita; AR45 (F34) = duración.
+    if (P.F33 < 0.5f) {
+      Serial.println(F("[CMD] rechazado: AR44 (F33) = 0, vent manual no habilitado."));
+    } else {
+      uint32_t mins = (uint32_t)max(1.0f, P.F34);
+      OV.fanActive  = true;
+      OV.fanValue   = value;
+      OV.fanEndsAt  = now + (unsigned long)mins * 60UL * 1000UL;
+      Serial.printf("[OV] fan=FORCE value=%d endsIn=%lus (AR45=%lumin)\n",
+                    value ? 1 : 0, (unsigned long)mins * 60UL, (unsigned long)mins);
+      applied = true;
+    }
   } else if (strcmp(kind, "force_defrost") == 0) {
-    g_manualDefrostRequested = true;
+    // AR46 (F35) habilita; AR47 (F36) = anti-spam entre deshielos manuales;
+    // AR48 (F37) = bypass F45 (bloqueo de arranque) si vale 1.
+    if (P.F35 < 0.5f) {
+      Serial.println(F("[CMD] rechazado: AR46 (F35) = 0, deshielo manual no habilitado."));
+    } else if (P.F36 > 0 && g_lastManualDefrostAt > 0 &&
+               (now - g_lastManualDefrostAt) < (unsigned long)(P.F36 * 60.0f * 1000.0f)) {
+      uint32_t restanteS = (uint32_t)(((unsigned long)(P.F36 * 60.0f * 1000.0f) -
+                                       (now - g_lastManualDefrostAt)) / 1000UL);
+      Serial.printf("[CMD] rechazado: AR47 (F36) anti-spam, faltan %us para el próximo deshielo manual.\n",
+                    restanteS);
+    } else {
+      g_manualDefrostRequested = true;
+      g_lastManualDefrostAt    = now;
+      Serial.printf("[OV] defrost=MANUAL_REQUEST (AR48 bypass-F45=%s)\n",
+                    P.F37 >= 0.5f ? "SI" : "NO");
+      applied = true;
+    }
   } else if (strcmp(kind, "cancel_defrost") == 0) {
     g_manualCancelDefrost = true;
+    Serial.println(F("[OV] defrost=MANUAL_CANCEL"));
+    applied = true;
   } else if (strcmp(kind, "cancel_force") == 0) {
     OV.compActive = false;
     OV.fanActive  = false;
+    Serial.println(F("[OV] comp+fan=BACK_TO_AUTO"));
+    applied = true;
   } else {
     Serial.printf("[CMD] kind desconocido: %s\n", kind);
     return;
   }
 
+  // Persistimos el ts SIEMPRE (haya o no entrado en efecto): así un comando
+  // rechazado por gate no se reintenta en loop hasta que la app mande otro.
   g_lastCmdTs = String(ts);
   saveLastCmdTs();
+  if (!applied) Serial.println(F("[CMD] comando registrado pero NO aplicado por permisos."));
 }
 
 /** Deriva la URL de fetch-pro300-params desde la URL de ingest-reading guardada. */
@@ -960,7 +1026,12 @@ static void pullParamsFromCloud() {
   // function pro300-send-command bumpea updated_at solo como side-effect).
   {
     JsonVariant cmdVar = doc["pending_command"];
-    if (cmdVar.is<JsonObject>()) applyPendingCommand(cmdVar.as<JsonObject>());
+    if (cmdVar.is<JsonObject>()) {
+      Serial.println(F("[PULL] respuesta trae pending_command, lo proceso."));
+      applyPendingCommand(cmdVar.as<JsonObject>());
+    } else {
+      Serial.println(F("[PULL] respuesta sin pending_command."));
+    }
   }
 
   const char *upd = doc["updated_at"] | "";
@@ -1311,6 +1382,7 @@ void setup() {
 
   Serial.println();
   Serial.println(F("S.G PRO300 booteando..."));
+  Serial.println(F("[FW] build: comandos manuales (force/cancel comp/fan/def)"));
   ensureFs();
   loadConfig();
   loadParams();
