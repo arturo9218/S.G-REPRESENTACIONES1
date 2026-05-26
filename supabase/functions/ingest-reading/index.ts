@@ -30,6 +30,10 @@ interface IngestPayload {
   fan_on?: unknown;
   defrost_on?: unknown;
   door_open?: unknown;
+  /** PRO300: fase actual del controlador (boot/normal/defrost/drip/post_defrost/emerg/off) + cronómetro. */
+  phase?: unknown;
+  phase_elapsed_s?: unknown;
+  phase_total_s?: unknown;
   /** PR500: presión baja (bar), rama alternativa a temp1_c. */
   pressure_bar?: number | null;
   r1_on?: unknown;
@@ -138,7 +142,7 @@ Deno.serve(async (req) => {
     if (devErr || !device) {
       const { data: combi, error: combiErr } = await supabase
         .from('combistatos')
-        .select('id, device_token_hash')
+        .select('id, device_token_hash, updated_at')
         .eq('module_id', moduleId)
         .maybeSingle();
 
@@ -157,6 +161,19 @@ Deno.serve(async (req) => {
           payload.temp2_c == null || Number.isNaN(payload.temp2_c as number)
             ? null
             : (payload.temp2_c as number);
+        const clampInt = (raw: unknown, max = 86400): number | null => {
+          if (raw === undefined || raw === null) return null;
+          const n = typeof raw === 'number' ? raw : Number(raw);
+          if (!Number.isFinite(n) || n < 0) return null;
+          return Math.min(Math.round(n), max);
+        };
+        const phaseRaw = payload.phase;
+        const phase = (() => {
+          if (typeof phaseRaw !== 'string') return null;
+          const allowed = ['boot', 'normal', 'defrost', 'drip', 'post_defrost', 'emerg', 'off'];
+          const v = phaseRaw.trim().toLowerCase();
+          return allowed.includes(v) ? v : null;
+        })();
         const { error: insCombErr } = await supabase.from('combistato_readings').insert({
           combistato_id: combi.id,
           created_at: sentIso,
@@ -166,6 +183,9 @@ Deno.serve(async (req) => {
           fan_on: ingestBool(payload.fan_on),
           defrost_on: ingestBool(payload.defrost_on),
           door_open: ingestBool(payload.door_open),
+          phase,
+          phase_elapsed_s: clampInt(payload.phase_elapsed_s),
+          phase_total_s: clampInt(payload.phase_total_s),
         });
         if (insCombErr) {
           return new Response(JSON.stringify({ error: insCombErr.message }), {
@@ -183,10 +203,20 @@ Deno.serve(async (req) => {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-        return new Response(JSON.stringify({ ok: true, kind: 'combistato' }), {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        // Devolvemos `params_updated_at` (de combistatos) para que el firmware
+        // pueda detectar cambios sin esperar el pull periódico de 2 min y
+        // disparar un fetch-pro300-params inmediato si difiere del suyo.
+        const paramsUpdatedAt =
+          typeof combi.updated_at === 'string' && combi.updated_at.trim()
+            ? combi.updated_at.trim()
+            : null;
+        return new Response(
+          JSON.stringify({ ok: true, kind: 'combistato', params_updated_at: paramsUpdatedAt }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
       }
 
       const { data: pr5, error: pr5Err } = await supabase

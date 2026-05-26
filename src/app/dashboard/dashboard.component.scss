@@ -2019,6 +2019,116 @@ $border: rgba(148, 163, 184, 0.18);
   border-color: rgba(148, 163, 184, 0.28);
 }
 
+/* Pills de estado de relé en la card del PRO300 (compresor / ventilador / deshielo).
+   Se renderizan apagadas por default (gris) y se prenden con la modificadora --on. */
+.device-card__sensor-foot--relays {
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  justify-content: flex-end;
+}
+
+.device-card__relay-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: rgba(71, 85, 105, 0.55);
+  color: rgba(226, 232, 240, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  text-transform: uppercase;
+  line-height: 1;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.device-card__relay-pill--on {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.55);
+  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.25);
+}
+
+/* Bandita inferior con la info del bloque que está corriendo el controlador.
+   Aparece para deshielo, goteo, post-deshielo, retardo de arranque, emergencia.
+   El color sale del atributo data-phase. */
+.device-card__defrost-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.85rem 0.7rem;
+  margin-top: 0.35rem;
+  border-top: 1px dashed rgba(96, 165, 250, 0.3);
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.08) 0%, rgba(15, 23, 42, 0.0) 100%);
+
+  &[data-phase='drip'] {
+    background: linear-gradient(180deg, rgba(20, 184, 166, 0.1) 0%, rgba(15, 23, 42, 0.0) 100%);
+    border-top-color: rgba(45, 212, 191, 0.4);
+  }
+  &[data-phase='post_defrost'] {
+    background: linear-gradient(180deg, rgba(168, 85, 247, 0.1) 0%, rgba(15, 23, 42, 0.0) 100%);
+    border-top-color: rgba(192, 132, 252, 0.4);
+  }
+  &[data-phase='boot'] {
+    background: linear-gradient(180deg, rgba(148, 163, 184, 0.1) 0%, rgba(15, 23, 42, 0.0) 100%);
+    border-top-color: rgba(148, 163, 184, 0.35);
+  }
+  &[data-phase='emerg'] {
+    background: linear-gradient(180deg, rgba(248, 113, 113, 0.14) 0%, rgba(15, 23, 42, 0.0) 100%);
+    border-top-color: rgba(248, 113, 113, 0.55);
+  }
+}
+
+.device-card__defrost-pill {
+  align-self: flex-start;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+
+  [data-phase='drip'] & {
+    color: #5eead4;
+    background: rgba(45, 212, 191, 0.16);
+    border-color: rgba(45, 212, 191, 0.55);
+  }
+  [data-phase='post_defrost'] & {
+    color: #d8b4fe;
+    background: rgba(192, 132, 252, 0.16);
+    border-color: rgba(192, 132, 252, 0.55);
+  }
+  [data-phase='boot'] & {
+    color: #cbd5e1;
+    background: rgba(148, 163, 184, 0.18);
+    border-color: rgba(148, 163, 184, 0.5);
+  }
+  [data-phase='emerg'] & {
+    color: #fca5a5;
+    background: rgba(248, 113, 113, 0.16);
+    border-color: rgba(248, 113, 113, 0.55);
+  }
+}
+
+.device-card__defrost-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.95rem;
+  font-size: 0.72rem;
+  color: rgba(226, 232, 240, 0.9);
+  font-variant-numeric: tabular-nums;
+
+  strong {
+    color: rgba(148, 163, 184, 0.85);
+    font-weight: 600;
+    margin-right: 0.25rem;
+  }
+}
+
 .device-card__foot {
   display: flex;
   flex-wrap: wrap;

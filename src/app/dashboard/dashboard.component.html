@@ -768,13 +768,101 @@
                   </div>
                 </header>
                 <div class="device-card__head-line" aria-hidden="true"></div>
-                <div class="device-card__temps device-card__temps--pending">
-                  <p class="card__hint card__hint--tight device-card__combistato-blurb">
-                    Último envío al servidor: {{ c.lastSeenLabel }}
-                  </p>
-                  <p class="card__hint card__hint--tight device-card__combistato-blurb device-card__combistato-blurb--muted">
-                    Datos en app (nombre, etc.): {{ c.updatedAtLabel }}
-                  </p>
+                <div
+                  class="device-card__temps"
+                  [class.device-card__temps--pending]="c.lastTemp1C == null && c.lastTemp2C == null"
+                >
+                  <ng-container *ngIf="c.lastTemp1C != null || c.lastTemp2C != null; else combistatoNoTemp">
+                    <div class="device-card__temps-inner">
+                      <div class="device-card__sensor-col">
+                        <span class="device-card__sensor-label">Sonda 1 · ambiente</span>
+                        <span
+                          class="device-card__sensor-value"
+                          [attr.aria-label]="formatTempCard(c.lastTemp1C ?? null)"
+                        >
+                          <span class="device-card__sensor-value-num">{{
+                            formatTempCardValueOnly(c.lastTemp1C ?? null)
+                          }}</span>
+                          <span
+                            *ngIf="formatTempCardValueOnly(c.lastTemp1C ?? null) !== '—'"
+                            class="device-card__sensor-value-unit"
+                            aria-hidden="true"
+                            >°C</span
+                          >
+                        </span>
+                        <div class="device-card__sensor-foot">
+                          <span class="device-card__sensor-time">{{ c.lastSeenLabel }}</span>
+                        </div>
+                      </div>
+                      <div class="device-card__sensor-col">
+                        <span class="device-card__sensor-label">Sonda 2 · evaporador</span>
+                        <span
+                          class="device-card__sensor-value"
+                          [attr.aria-label]="formatTempCard(c.lastTemp2C ?? null)"
+                        >
+                          <span class="device-card__sensor-value-num">{{
+                            formatTempCardValueOnly(c.lastTemp2C ?? null)
+                          }}</span>
+                          <span
+                            *ngIf="formatTempCardValueOnly(c.lastTemp2C ?? null) !== '—'"
+                            class="device-card__sensor-value-unit"
+                            aria-hidden="true"
+                            >°C</span
+                          >
+                        </span>
+                        <div class="device-card__sensor-foot device-card__sensor-foot--relays">
+                          <span
+                            class="device-card__relay-pill"
+                            [class.device-card__relay-pill--on]="c.lastCompOn === true"
+                            title="Compresor"
+                            >COMP</span
+                          >
+                          <span
+                            class="device-card__relay-pill"
+                            [class.device-card__relay-pill--on]="c.lastFanOn === true"
+                            title="Ventilador"
+                            >VENT</span
+                          >
+                          <span
+                            class="device-card__relay-pill"
+                            [class.device-card__relay-pill--on]="c.lastDefrostOn === true"
+                            title="Deshielo"
+                            >DEF</span
+                          >
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      class="device-card__defrost-strip"
+                      *ngIf="c.lastPhase && c.lastPhase !== 'normal' && c.lastPhase !== 'off'"
+                      [attr.data-phase]="c.lastPhase"
+                    >
+                      <span class="device-card__defrost-pill">
+                        {{ combistatoPhaseLabel(c.lastPhase) }}
+                      </span>
+                      <div class="device-card__defrost-info">
+                        <ng-container *ngIf="combistatoPhaseHasTimer(c)">
+                          <span><strong>Transcurrido</strong> {{ formatMinSec(c.lastPhaseElapsedS) }}</span>
+                          <span *ngIf="combistatoPhaseRemainingS(c) != null"
+                            ><strong>Faltan</strong> {{ formatMinSec(combistatoPhaseRemainingS(c)) }}</span
+                          >
+                        </ng-container>
+                        <span *ngIf="c.lastPhase === 'defrost' && c.defrostTargetC != null"
+                          ><strong>Corte ≤</strong> {{ c.defrostTargetC | number: '1.0-1' }}°C</span
+                        >
+                      </div>
+                    </div>
+                  </ng-container>
+                  <ng-template #combistatoNoTemp>
+                    <div class="device-card__temps-inner device-card__temps-inner--empty">
+                      <span class="device-card__sensor-label device-card__sensor-label--muted">
+                        Esperando primera lectura del PRO300
+                      </span>
+                      <span class="device-card__sensor-subline device-card__sensor-subline--hint">
+                        Último envío: {{ c.lastSeenLabel }}
+                      </span>
+                    </div>
+                  </ng-template>
                 </div>
                 <footer class="device-card__foot">
                   <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && c.ownerUserId">

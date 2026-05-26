@@ -175,6 +175,86 @@ export class CombistatoStoreService {
     return Date.now() - atMs <= offlineAfterMs;
   }
 
+  /**
+   * Una consulta por combistato a `combistato_readings` para la última fila.
+   * Vuelve un Map combistatoId → snapshot. Si la tabla no existe (instancias
+   * que aún no corrieron `035_combistato_readings.sql`), devuelve vacío sin
+   * romper la pantalla.
+   */
+  private async fetchLatestCombistatoReadings(ids: string[]): Promise<
+    Map<
+      string,
+      {
+        temp1: number | null;
+        temp2: number | null;
+        comp: boolean | null;
+        fan: boolean | null;
+        defrost: boolean | null;
+        door: boolean | null;
+        phase: string | null;
+        phaseElapsed: number | null;
+        phaseTotal: number | null;
+      }
+    >
+  > {
+    const out = new Map<
+      string,
+      {
+        temp1: number | null;
+        temp2: number | null;
+        comp: boolean | null;
+        fan: boolean | null;
+        defrost: boolean | null;
+        door: boolean | null;
+        phase: string | null;
+        phaseElapsed: number | null;
+        phaseTotal: number | null;
+      }
+    >();
+    if (!ids.length) return out;
+    await Promise.all(
+      ids.map(async (id) => {
+        const { data, error } = await this.auth.client
+          .from('combistato_readings')
+          .select('temp1_c, temp2_c, comp_on, fan_on, defrost_on, door_open, phase, phase_elapsed_s, phase_total_s')
+          .eq('combistato_id', id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error || !data) return;
+        const row = data as {
+          temp1_c: number | null;
+          temp2_c: number | null;
+          comp_on: boolean | null;
+          fan_on: boolean | null;
+          defrost_on: boolean | null;
+          door_open: boolean | null;
+          phase: string | null;
+          phase_elapsed_s: number | null;
+          phase_total_s: number | null;
+        };
+        out.set(id, {
+          temp1: typeof row.temp1_c === 'number' ? row.temp1_c : null,
+          temp2: typeof row.temp2_c === 'number' ? row.temp2_c : null,
+          comp: typeof row.comp_on === 'boolean' ? row.comp_on : null,
+          fan: typeof row.fan_on === 'boolean' ? row.fan_on : null,
+          defrost: typeof row.defrost_on === 'boolean' ? row.defrost_on : null,
+          door: typeof row.door_open === 'boolean' ? row.door_open : null,
+          phase: typeof row.phase === 'string' && row.phase.trim() ? row.phase.trim() : null,
+          phaseElapsed:
+            typeof row.phase_elapsed_s === 'number' && Number.isFinite(row.phase_elapsed_s)
+              ? row.phase_elapsed_s
+              : null,
+          phaseTotal:
+            typeof row.phase_total_s === 'number' && Number.isFinite(row.phase_total_s)
+              ? row.phase_total_s
+              : null,
+        });
+      })
+    );
+    return out;
+  }
+
   async hydrateFromCloud(): Promise<void> {
     if (!this.cloudEnabled()) {
       this.clearCombistatoPoll();
@@ -190,7 +270,7 @@ export class CombistatoStoreService {
     const isAdmin = await this.auth.fetchIsAppAdmin();
     this.userScopeKey = session.user.id;
     const base =
-      'id, owner_user_id, module_id, name, location, device_token_hash, updated_at, last_seen_at';
+      'id, owner_user_id, module_id, name, location, device_token_hash, updated_at, last_seen_at, params';
 
     type Row = {
       id: string;
@@ -201,6 +281,7 @@ export class CombistatoStoreService {
       device_token_hash: string | null;
       updated_at: string;
       last_seen_at?: string | null;
+      params?: unknown;
     };
 
     let rows: Row[] = [];
@@ -234,10 +315,13 @@ export class CombistatoStoreService {
     }
 
     const tokens = this.readTokenMap();
+    const lastById = await this.fetchLatestCombistatoReadings(rows.map((r) => r.id));
     const mapped: DashboardCombistato[] = rows.map((r) => {
       const lastSeenRaw = r.last_seen_at;
       const lastSeenStr =
         lastSeenRaw && typeof lastSeenRaw === 'string' && lastSeenRaw.trim() ? lastSeenRaw.trim() : null;
+      const snap = lastById.get(r.id);
+      const merged = mergeCombistatoParams(r.params ?? null);
       return {
         id: r.id,
         name: r.name,
@@ -248,6 +332,16 @@ export class CombistatoStoreService {
         online: this.combistatoOnlineFromLastSeen(lastSeenStr),
         ownerUserId: r.owner_user_id,
         deviceToken: tokens[r.id] ?? ((r.device_token_hash ?? '').trim() || undefined),
+        lastTemp1C: snap?.temp1 ?? null,
+        lastTemp2C: snap?.temp2 ?? null,
+        lastCompOn: snap?.comp ?? null,
+        lastFanOn: snap?.fan ?? null,
+        lastDefrostOn: snap?.defrost ?? null,
+        lastDoorOpen: snap?.door ?? null,
+        lastPhase: (snap?.phase as DashboardCombistato['lastPhase']) ?? null,
+        lastPhaseElapsedS: snap?.phaseElapsed ?? null,
+        lastPhaseTotalS: snap?.phaseTotal ?? null,
+        defrostTargetC: Number.isFinite(merged.F08) ? merged.F08 : null,
       };
     });
     for (const c of mapped) {

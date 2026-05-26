@@ -3082,6 +3082,44 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return `${sign}${Math.abs(c).toFixed(2)}°C`;
   }
 
+  /** Formato `Xm YYs` para mostrar el cronómetro de deshielo en la card del PRO300. */
+  formatMinSec(totalS: number | null | undefined): string {
+    if (totalS == null || !Number.isFinite(totalS) || totalS < 0) return '—';
+    const s = Math.floor(totalS);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}m ${sec.toString().padStart(2, '0')}s`;
+  }
+
+  /** Segundos restantes (>=0) de la fase en curso. null si la fase no tiene timeout o no llegó el dato. */
+  combistatoPhaseRemainingS(c: DashboardCombistato): number | null {
+    const total = c.lastPhaseTotalS ?? 0;
+    if (!c.lastPhase || total <= 0) return null;
+    const elapsed = c.lastPhaseElapsedS ?? 0;
+    return Math.max(0, total - elapsed);
+  }
+
+  /** Etiqueta humana de cada fase, mostrada en la pill de color de la card. */
+  combistatoPhaseLabel(phase: DashboardCombistato['lastPhase']): string {
+    switch (phase) {
+      case 'defrost':      return 'Deshielo';
+      case 'drip':         return 'Goteo';
+      case 'post_defrost': return 'Espera del ventilador';
+      case 'boot':         return 'Retardo de arranque';
+      case 'emerg':        return 'Emergencia · sonda fallada';
+      case 'off':          return 'Apagado';
+      case 'normal':       return 'Control normal';
+      default:             return '';
+    }
+  }
+
+  /** true si la fase tiene cronómetro visible (transcurrido / faltan). */
+  combistatoPhaseHasTimer(c: DashboardCombistato): boolean {
+    if (!c.lastPhase) return false;
+    if (c.lastPhase === 'normal' || c.lastPhase === 'off') return false;
+    return (c.lastPhaseTotalS ?? 0) > 0 || (c.lastPhaseElapsedS ?? 0) > 0;
+  }
+
   /** Solo el número; signo solo si es negativo; la unidad va en un <span> aparte. */
   formatTempCardValueOnly(c: number | null): string {
     if (c == null || Number.isNaN(c)) return '—';

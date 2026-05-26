@@ -79,7 +79,30 @@ export interface DashboardCombistato {
   ownerUserId?: string;
   /** Código de 6 dígitos (`api_key`) disponible solo en este navegador. */
   deviceToken?: string;
+  /** Última fila de `combistato_readings`; null si aún no hubo telemetría. */
+  lastTemp1C?: number | null;
+  lastTemp2C?: number | null;
+  lastCompOn?: boolean | null;
+  lastFanOn?: boolean | null;
+  lastDefrostOn?: boolean | null;
+  lastDoorOpen?: boolean | null;
+  /** Bloque que está corriendo el controlador (defrost/drip/post_defrost/normal/boot/emerg/off). */
+  lastPhase?: CombistatoPhase | null;
+  lastPhaseElapsedS?: number | null;
+  /** Duración total prevista de la fase (0 si la fase no tiene timeout). */
+  lastPhaseTotalS?: number | null;
+  /** AR12 (F08): temperatura de corte (S2) en °C — se usa cuando la fase es defrost. */
+  defrostTargetC?: number | null;
 }
+
+export type CombistatoPhase =
+  | 'boot'
+  | 'normal'
+  | 'defrost'
+  | 'drip'
+  | 'post_defrost'
+  | 'emerg'
+  | 'off';
 
 /** PR500 — central frigorífica por presión de proceso (`pr500_controllers`); misma idea de conexión que combistatos. */
 export interface DashboardPr500 {

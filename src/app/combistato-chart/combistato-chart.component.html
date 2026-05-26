@@ -3,7 +3,7 @@
     <div>
       <h1 class="cb-title">PRO300 · {{ combistatoName }}</h1>
       <p class="cb-sub">
-        Sonda evaporador (S1 / temp1), sonda ambiente o segunda (S2 / temp2), compresor, forzador, deshielo y puerta.
+        Sonda ambiente (S1 / temp1), sonda evaporador (S2 / temp2), compresor, forzador, deshielo y puerta.
         Los estados requieren firmware reciente que envíe los campos en cada POST.
       </p>
     </div>
@@ -35,11 +35,11 @@
       <h2 class="cb-side__title">Qué graficar</h2>
       <p class="cb-side__hint">Se guarda en este navegador por PRO300.</p>
       <label class="cb-toggle"
-        ><input type="checkbox" [(ngModel)]="showTemp1" (ngModelChange)="persistSeriesPrefs()" /> Sonda evaporador
+        ><input type="checkbox" [(ngModel)]="showTemp1" (ngModelChange)="persistSeriesPrefs()" /> Sonda ambiente
         (temp1)</label
       >
       <label class="cb-toggle"
-        ><input type="checkbox" [(ngModel)]="showTemp2" (ngModelChange)="persistSeriesPrefs()" /> Sonda ambiente / 2ª
+        ><input type="checkbox" [(ngModel)]="showTemp2" (ngModelChange)="persistSeriesPrefs()" /> Sonda evaporador
         (temp2)</label
       >
       <label class="cb-toggle"
@@ -142,8 +142,8 @@
             </text>
           </svg>
           <div class="cb-legend">
-            <span class="cb-legend__i cb-legend__i--1" *ngIf="showTemp1">Sonda evaporador (temp1)</span>
-            <span class="cb-legend__i cb-legend__i--2" *ngIf="showTemp2">Sonda ambiente / 2ª (temp2)</span>
+            <span class="cb-legend__i cb-legend__i--1" *ngIf="showTemp1">Sonda ambiente (temp1)</span>
+            <span class="cb-legend__i cb-legend__i--2" *ngIf="showTemp2">Sonda evaporador (temp2)</span>
           </div>
         </div>
       </article>

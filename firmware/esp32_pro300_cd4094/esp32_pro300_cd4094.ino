@@ -176,10 +176,38 @@ static String g_paramsUpdatedAt = "";    // marca devuelta por la nube; permite 
 enum WifiState { WFS_BOOT, WFS_PORTAL, WFS_RUNNING };
 static WifiState g_wifiState = WFS_BOOT;
 
+// Fase actual del controlador (se reporta en cada telemetría para que la app
+// muestre Transcurrido/Faltan/etc. en la card. Pasa por cada bloque del loop
+// de control y se cambia con setPhase()).
+enum Phase { PH_OFF, PH_BOOT, PH_NORMAL, PH_DEFROST, PH_DRIP, PH_POST_DEFROST, PH_EMERG };
+static Phase g_phase = PH_BOOT;
+static unsigned long g_phaseStartedAt = 0;
+static uint32_t g_phaseTotalS = 0;
+
+static const char *phaseName(Phase p) {
+  switch (p) {
+    case PH_OFF:           return "off";
+    case PH_BOOT:          return "boot";
+    case PH_NORMAL:        return "normal";
+    case PH_DEFROST:       return "defrost";
+    case PH_DRIP:          return "drip";
+    case PH_POST_DEFROST:  return "post_defrost";
+    case PH_EMERG:         return "emerg";
+  }
+  return "normal";
+}
+
+static void setPhase(Phase p, uint32_t totalS) {
+  if (g_phase == p && totalS == g_phaseTotalS) return;
+  g_phase = p;
+  g_phaseStartedAt = millis();
+  g_phaseTotalS = totalS;
+}
+
 static bool compresor=false, ventilador=false, deshielo=false, dripping=false;
 static unsigned long compChangedAt=0, defStartedAt=0, dripStartedAt=0;
-static unsigned long lastDefrostAt=0, lastTelemetryAt=0, lastReadAt=0;
-static unsigned long lastParamsPullAt=0, lastDisplaySwitchAt=0, bootAtMs=0;
+static unsigned long lastDefrostAt=0, lastReadAt=0;
+static unsigned long lastDisplaySwitchAt=0, bootAtMs=0;
 static bool   bootDelayDone = false;   // F38 retardo al encender consumido
 static bool   defrostOnStartDone = false; // F09: ya disparado el deshielo de arranque
 
@@ -206,7 +234,22 @@ static int    scrollPos = 0;
 
 static byte bufferDisplay[4] = {0xFF, 0xFF, 0xFF, 0xFF};
 static int  digitNow = 0;
-static unsigned long lastRefresh=0, lastScroll=0, lastWifiRetryMs=0;
+static unsigned long lastScroll=0;
+
+// Task dedicada a HTTP (telemetría + pull). Corre en core 0 para no bloquear
+// la multiplexación del display (que está en el loopTask = core 1).
+static TaskHandle_t g_netTaskHandle = NULL;
+// Task dedicada exclusivamente al refresco multiplexado del 7-seg. Corre en
+// core 1 con prioridad mayor que el loopTask, así ningún cálculo / log /
+// portal / NTC le roba ciclos al display (causa principal de parpadeo).
+static TaskHandle_t g_displayTaskHandle = NULL;
+static bool         g_pullNowRequested = false;   // pedido desde serie
+// Banderas seteadas desde la network task (core 0) y leídas por el loop (core 1)
+// para mostrar un scroll efímero en el display cuando se envió/actualizó.
+static volatile bool g_flashTelemetrySent = false;
+static volatile bool g_flashParamsUpdated = false;
+static bool          g_flashActive        = false;
+static unsigned long g_flashEndsAt        = 0;
 
 // ============== WiFiManager + portal ========
 static WiFiManager wm;
@@ -295,7 +338,10 @@ static void refrescarDisplay() {
 // ============== DISPLAY: TEXTO Y TEMP =======
 static String adaptarTexto(String t) {
   t.toUpperCase();
+  // El 7-seg no tiene diagonales: la M la mostramos como N y la V como U para que
+  // palabras como "ENVIADOS" se lean (queda "ENUIADOS").
   t.replace("M", "N");
+  t.replace("V", "U");
   return t;
 }
 static void prepararTexto() {
@@ -314,6 +360,11 @@ static void prepararTexto() {
   scrollPos++;
   if (scrollPos > (int)t.length() - 4) scrollPos = 0;
 }
+/**
+ * Layout flush-right: el dígito 3 (más a la derecha) siempre lleva el decimal,
+ * el dígito 2 lleva el punto, los dígitos 1 y 0 las decenas y el signo.
+ * Ejemplos:  5.3 → "   5.3"   -8.5 → "  -8.5"   22.5 → "  22.5"   -22.5 → " -22.5"
+ */
 static void mostrarTemperatura(float temp) {
   for (int i = 0; i < 4; i++) bufferDisplay[i] = BLANCO;
   bool neg = temp < 0;
@@ -321,21 +372,20 @@ static void mostrarTemperatura(float temp) {
   int valor  = (int)round(temp * 10);
   int entero = valor / 10;
   int dec    = valor % 10;
-  if (neg && entero < 10) {
-    bufferDisplay[0] = MENOS;
-    bufferDisplay[1] = num7seg[entero] & 0b01111111;
-    bufferDisplay[2] = num7seg[dec];
-  } else if (neg) {
-    bufferDisplay[0] = MENOS;
+
+  bufferDisplay[3] = num7seg[dec];
+
+  if (entero >= 100) {
+    bufferDisplay[0] = num7seg[(entero / 100) % 10];
     bufferDisplay[1] = num7seg[(entero / 10) % 10];
-    bufferDisplay[2] = num7seg[entero % 10];
-  } else if (entero < 10) {
-    bufferDisplay[1] = num7seg[entero] & 0b01111111;
-    bufferDisplay[2] = num7seg[dec];
+    bufferDisplay[2] = num7seg[entero % 10] & 0b01111111;
+  } else if (entero >= 10) {
+    bufferDisplay[1] = num7seg[entero / 10];
+    bufferDisplay[2] = num7seg[entero % 10] & 0b01111111;
+    if (neg) bufferDisplay[0] = MENOS;
   } else {
-    bufferDisplay[0] = num7seg[entero / 10];
-    bufferDisplay[1] = num7seg[entero % 10] & 0b01111111;
-    bufferDisplay[2] = num7seg[dec];
+    bufferDisplay[2] = num7seg[entero] & 0b01111111;
+    if (neg) bufferDisplay[1] = MENOS;
   }
 }
 static void mostrarError(int idx) {
@@ -413,6 +463,7 @@ static void aplicarControl() {
   if (!bootDelayDone) {
     if (now - bootAtMs < (unsigned long)(P.F38 * 1000.0f)) {
       compresor = ventilador = deshielo = dripping = false;
+      setPhase(PH_BOOT, (uint32_t)P.F38);
       return;
     }
     bootDelayDone = true;
@@ -422,6 +473,7 @@ static void aplicarControl() {
     if (P.F09 >= 0.5f && !defrostOnStartDone) {
       deshielo = true; defStartedAt = now;
       defrostOnStartDone = true;
+      setPhase(PH_DEFROST, (uint32_t)(P.F07 * 60.0f));
       return;
     }
     defrostOnStartDone = true;
@@ -442,9 +494,11 @@ static void aplicarControl() {
       // AR34 = 0: apagar todo.
       if (compresor) { compresor = false; compChangedAt = now; }
       ventilador = false;
+      setPhase(PH_OFF, 0);
       return;
     }
     // AR34 = 1: ciclo de emergencia F19 ON / F20 OFF (s)
+    setPhase(PH_EMERG, 0);
     unsigned long onMs  = (unsigned long)(P.F19 * 1000.0f);
     unsigned long offMs = (unsigned long)(P.F20 * 1000.0f);
     if (emergencyComp) {
@@ -466,12 +520,23 @@ static void aplicarControl() {
   // Inicio: por tiempo de intervalo (F06) o forzado (F46) o por hielo (F52/F52t)
   bool defrostByIce = (P.F52 >= 0.5f) && !fault2 && (tEvap <= P.F52t);
   bool defrostByInterval = (P.F06 > 0) && (now - lastDefrostAt) >= (unsigned long)(P.F06 * 60.0f * 1000.0f);
+  // AR09 (F05): tipo de deshielo
+  //   0 = electrico  → relay deshielo ON, compresor OFF
+  //   1 = gas caliente → relay deshielo ON + compresor ON (válvula 4 vías / inversion)
+  //   2 = natural     → compresor OFF, sin resistencia, solo deja descongelar por inercia
+  int defrostType = (int)P.F05;
   if (!deshielo && !dripping && !defrostBlockedByStartup &&
       (defrostByInterval || forceDefrost || defrostByIce)) {
     deshielo = true; defStartedAt = now;
-    if (compresor) { compresor = false; compChangedAt = now; }
+    if (defrostType == 1) {
+      // Gas caliente: fuerza compresor ON salteando el tmin (es prioritario).
+      if (!compresor) { compresor = true; compChangedAt = now; }
+    } else {
+      if (compresor) { compresor = false; compChangedAt = now; }
+    }
     // AR20 (F10): ventilador durante deshielo (0=apagado, 1=encendido).
     ventilador = (P.F10 >= 0.5f);
+    setPhase(PH_DEFROST, (uint32_t)(P.F07 * 60.0f));
     return;
   }
 
@@ -483,8 +548,14 @@ static void aplicarControl() {
       lastDefrostAt = now;
       dripping = true;
       dripStartedAt = now;
+      // Si veníamos por gas caliente, apagamos compresor al cerrar el ciclo.
+      if (defrostType == 1 && compresor) { compresor = false; compChangedAt = now; }
+      setPhase(PH_DRIP, (uint32_t)(P.F39 * 60.0f));
     } else {
       ventilador = (P.F10 >= 0.5f);
+      // Sostener compresor ON durante todo el deshielo por gas caliente.
+      if (defrostType == 1 && !compresor) { compresor = true; compChangedAt = now; }
+      setPhase(PH_DEFROST, (uint32_t)(P.F07 * 60.0f));
     }
     return;
   }
@@ -496,6 +567,7 @@ static void aplicarControl() {
     if ((now - dripStartedAt) >= (unsigned long)(P.F39 * 60.0f * 1000.0f)) {
       dripping = false;
     } else {
+      setPhase(PH_DRIP, (uint32_t)(P.F39 * 60.0f));
       return;
     }
   }
@@ -529,6 +601,14 @@ static void aplicarControl() {
   bool fanLogic = P.F51 >= 0.5f ? true : (compresor && postDefGate && evapOK);
   if (doorCutsFan) fanLogic = false;
   ventilador = fanLogic;
+
+  // Fase post-deshielo: dentro del retardo de ventilador (F11) tras un ciclo.
+  // Si no hay retardo o ya pasó, fase normal.
+  if (!postDefGate && P.F11 > 0) {
+    setPhase(PH_POST_DEFROST, (uint32_t)(P.F11 * 60.0f));
+  } else {
+    setPhase(PH_NORMAL, 0);
+  }
 }
 
 // ============== ALARMAS =====================
@@ -758,6 +838,7 @@ static void pullParamsFromCloud() {
                 (int)obj.size(), upd);
   Serial.printf("       F01=%.1f  F02=%.1f  F06=%.0fmin  F17=%.0fs  F18=%.0fs\n",
                 P.F01, P.F02, P.F06, P.F17, P.F18);
+  g_flashParamsUpdated = true;
 }
 
 // ============== Portal WiFiManager ==========
@@ -853,15 +934,7 @@ static void setupWifi() {
   }
   g_wifiState = WFS_RUNNING;
 }
-static void maintainWifi() {
-  if (WiFi.status() == WL_CONNECTED) return;
-  unsigned long now = millis();
-  if (lastWifiRetryMs != 0 && now - lastWifiRetryMs < 30000UL) return;
-  lastWifiRetryMs = now;
-  if (WiFi.SSID().length() == 0) return;
-  Serial.println(F("[WiFi] Reintentando..."));
-  WiFi.reconnect();
-}
+// Reintento de WiFi vive ahora en networkTask() (core 0).
 
 // ============== Telemetría ==================
 static void enviarTelemetria() {
@@ -882,16 +955,39 @@ static void enviarTelemetria() {
   body += ",\"comp_on\":"    + String(compresor  ? "true" : "false");
   body += ",\"fan_on\":"     + String(ventilador ? "true" : "false");
   body += ",\"defrost_on\":" + String(deshielo   ? "true" : "false");
+  // Snapshot de fase + cronómetro (para que la card del PRO300 muestre
+  // Transcurrido/Faltan/etc. en cualquier bloque, no solo deshielo).
+  uint32_t phaseElapsedS = (uint32_t)((millis() - g_phaseStartedAt) / 1000UL);
+  body += ",\"phase\":\"";          body += phaseName(g_phase);  body += "\"";
+  body += ",\"phase_elapsed_s\":" + String(phaseElapsedS);
+  body += ",\"phase_total_s\":"   + String(g_phaseTotalS);
   if (DOOR_PIN >= 0 && P.F25 >= 0.5f) {
     body += ",\"door_open\":" + String(doorOpen ? "true" : "false");
   }
   body += "}";
 
   int code = http.POST(body);
+  String resp = http.getString();
   Serial.print(F("[TX] POST ")); Serial.print(code);
-  if (code > 0) { Serial.print(' '); Serial.println(http.getString()); }
+  if (code > 0) { Serial.print(' '); Serial.println(resp); }
   else          { Serial.println(); }
   http.end();
+  if (code != 200) return;
+
+  g_flashTelemetrySent = true;
+
+  // Atajo de propagación: si el server nos cuenta que `params_updated_at` del
+  // combistato es más nuevo que el que tenemos, pedimos un pull inmediato.
+  // Así editás un AR en la app y a los pocos segundos lo aplica el equipo.
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, resp) == DeserializationError::Ok) {
+    const char *pu = doc["params_updated_at"] | "";
+    if (pu[0] && g_paramsUpdatedAt != pu) {
+      Serial.printf("[TX] Detecté params nuevos (%s vs %s) → forzando pull.\n",
+                    g_paramsUpdatedAt.c_str(), pu);
+      g_pullNowRequested = true;
+    }
+  }
 }
 
 // ============== Comandos serie ==============
@@ -939,7 +1035,7 @@ static void leerSerial() {
   if (lower == "config")  { printConfig(); return; }
   if (lower == "reboot")  { ESP.restart(); return; }
   if (lower == "temp")    { modoTexto = false; return; }
-  if (lower == "pull")    { Serial.println(F("[PULL] forzando...")); pullParamsFromCloud(); return; }
+  if (lower == "pull")    { Serial.println(F("[PULL] solicitando pull a la task de red...")); g_pullNowRequested = true; return; }
   if (lower == "off") {
     compresor = ventilador = deshielo = false;
     modoTexto = true; texto = "OFF"; scrollPos = 0; prepararTexto();
@@ -954,6 +1050,70 @@ static void leerSerial() {
   texto = dato; scrollPos = 0; prepararTexto();
 }
 
+// ============== Display task (core 1, prio 2) ==============
+/**
+ * Multiplexa los 5 comunes (4 dígitos + fila de luces) escribiendo cada uno
+ * cada `kPeriodMs` ticks. Como vTaskDelay devuelve el control a FreeRTOS,
+ * cualquier otra task de igual o menor prioridad (loop=1) corre entre cada
+ * refresco. Con prio 2 quedamos por encima del loop y nos garantizamos que
+ * los logs / NTC / SPI ocasionales no le coman ciclos al display.
+ */
+static void displayTask(void *param) {
+  // El bus SPI lo inicializó setup(). beginTransaction asegura que estamos
+  // configurados con MSBFIRST/MODE0/1MHz desde esta task (no liberamos: nadie
+  // más usa el bus).
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  const TickType_t kPeriod = pdMS_TO_TICKS(1);
+  for (;;) {
+    refrescarDisplay();
+    vTaskDelay(kPeriod);
+  }
+}
+
+// ============== Network task (core 0) =======
+/**
+ * Corre en core 0 y se ocupa de:
+ *   - reintento de WiFi cuando se cae,
+ *   - POST de telemetría cada g_cfg.intervalMs,
+ *   - pull periódico de AR desde Supabase (PARAMS_PULL_MS) o on-demand desde Serial.
+ * El loop principal (core 1) queda libre para multiplexar el 7-seg y atender los
+ * cálculos de control sin que un POST HTTP de varios segundos congele el display.
+ */
+static void networkTask(void *param) {
+  esp_task_wdt_add(NULL);
+  unsigned long lastTel = 0;
+  unsigned long lastPull = 0;
+  unsigned long lastRetry = 0;
+  for (;;) {
+    esp_task_wdt_reset();
+
+    if (g_wifiState == WFS_RUNNING) {
+      // Reintentar WiFi si se cayó.
+      if (WiFi.status() != WL_CONNECTED) {
+        if (lastRetry == 0 || (millis() - lastRetry) >= 30000UL) {
+          lastRetry = millis();
+          if (WiFi.SSID().length() > 0) {
+            Serial.println(F("[WiFi] Reintentando (task)..."));
+            WiFi.reconnect();
+          }
+        }
+      } else {
+        if (millis() - lastTel >= g_cfg.intervalMs) {
+          lastTel = millis();
+          enviarTelemetria();
+        }
+        if (g_pullNowRequested || (millis() - lastPull >= PARAMS_PULL_MS)) {
+          lastPull = millis();
+          g_pullNowRequested = false;
+          pullParamsFromCloud();
+        }
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+}
+
 // ============== Setup / Loop ================
 void setup() {
   Serial.begin(115200);
@@ -964,8 +1124,12 @@ void setup() {
   analogReadResolution(12);
 
   SPI.begin(CLOCK_PIN, -1, DATA_PIN, -1);
+  // Inicializa los 4094 con todo apagado. Cerramos la transacción para
+  // liberar el mutex interno del SPI; si no, displayTask se queda esperando
+  // para siempre cuando intenta su propio beginTransaction() → display negro.
   SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   enviar4094(comunesApagados(), 0xFF);
+  SPI.endTransaction();
 
   Serial.println();
   Serial.println(F("S.G PRO300 booteando..."));
@@ -1001,11 +1165,34 @@ void setup() {
   setupWifi();
   if (g_wifiState != WFS_PORTAL) modoTexto = false;
 
-  // Primer pull en cuanto haya WiFi (lo intentamos sin esperar el período).
+  // Si ya está conectado al arrancar, marcamos pull inmediato para que la task
+  // de red lo levante en cuanto comience (no bloqueamos el setup con HTTP).
   if (WiFi.status() == WL_CONNECTED) {
-    pullParamsFromCloud();
-    lastParamsPullAt = millis();
+    g_pullNowRequested = true;
   }
+
+  // Network task en core 0 para que los POST/HTTPS no congelen el display.
+  xTaskCreatePinnedToCore(
+    networkTask,        // función
+    "net",              // nombre
+    8192,               // stack
+    NULL,               // parámetro
+    1,                  // prioridad (loop = 1 por default)
+    &g_netTaskHandle,   // handle
+    0                   // core 0
+  );
+
+  // Display task en core 1 con prioridad mayor que loopTask. Refresca el
+  // multiplex cada 1 ms sin que el resto del firmware le robe ciclos.
+  xTaskCreatePinnedToCore(
+    displayTask,
+    "disp",
+    2048,
+    NULL,
+    2,
+    &g_displayTaskHandle,
+    1                   // core 1, junto al loop pero con prio más alta
+  );
 }
 
 void loop() {
@@ -1014,10 +1201,8 @@ void loop() {
 
   if (g_wifiState == WFS_PORTAL) processPortal();
 
-  if (micros() - lastRefresh >= 500) {
-    lastRefresh = micros();
-    refrescarDisplay();
-  }
+  // Refresco del display vive ahora en displayTask (core 1, prio 2).
+  // El loop solo se ocupa de control, NTC, marquesinas y portal.
 
   if (millis() - lastReadAt >= 1000) {
     lastReadAt = millis();
@@ -1026,6 +1211,33 @@ void loop() {
     leerPuerta();
     aplicarControl();
     evaluarAlarmas();
+  }
+
+  // ---- Mensajes efímeros en marquesina (TX OK / AR actualizados) ----
+  // Se disparan desde networkTask en core 0; el loop arma el scroll y vuelve a
+  // temperatura cuando vence el timeout. No se activan durante el portal.
+  if (g_wifiState != WFS_PORTAL) {
+    if (g_flashTelemetrySent) {
+      g_flashTelemetrySent = false;
+      g_flashActive = true;
+      modoTexto = true;
+      texto = "DATOS ENVIADOS   ";
+      scrollPos = 0;
+      prepararTexto();
+      g_flashEndsAt = millis() + 3500UL;
+    } else if (g_flashParamsUpdated) {
+      g_flashParamsUpdated = false;
+      g_flashActive = true;
+      modoTexto = true;
+      texto = "DATOS CARGADOS   ";
+      scrollPos = 0;
+      prepararTexto();
+      g_flashEndsAt = millis() + 3500UL;
+    }
+  }
+  if (g_flashActive && millis() >= g_flashEndsAt) {
+    g_flashActive = false;
+    modoTexto = false;
   }
 
   if (modoTexto && millis() - lastScroll >= 300) {
@@ -1038,15 +1250,7 @@ void loop() {
     else        mostrarTemperatura(tCam);
   }
 
-  if (g_wifiState == WFS_RUNNING) {
-    maintainWifi();
-    if (millis() - lastTelemetryAt >= g_cfg.intervalMs) {
-      lastTelemetryAt = millis();
-      enviarTelemetria();
-    }
-    if (millis() - lastParamsPullAt >= PARAMS_PULL_MS) {
-      lastParamsPullAt = millis();
-      pullParamsFromCloud();
-    }
-  }
+  // OJO: la telemetría, pull de AR y reintento de WiFi viven ahora en
+  // networkTask() pinneada al core 0. El loop solo se ocupa del display,
+  // sondas, control y portal.
 }
