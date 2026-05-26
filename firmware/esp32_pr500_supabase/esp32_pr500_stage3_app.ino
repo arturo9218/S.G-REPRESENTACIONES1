@@ -135,8 +135,9 @@ struct Cfg {
   char moduleId[48]{};
   char apiKey[24]{};
   char anonKey[400]{};
-  /** Telemetría a ingest-reading (ms). 30 s reduce invocaciones Edge en plan Free. */
-  uint32_t intervalMs = 30000;
+  /** Telemetría a ingest-reading (ms). 60 s reduce invocaciones Edge en plan Free y mantiene
+   *  `device_readings` chiquita (la temperatura de una cámara cambia en minutos, no en segundos). */
+  uint32_t intervalMs = 60000;
   /** Intervalo para traer params desde la app (Supabase fetch-pr500-params). */
   uint32_t paramsPullMs = 120000;
 };
@@ -306,7 +307,7 @@ static bool isValidIngestUrl(const char *u) {
 static void loadDefaults() {
   memset(&g_cfg, 0, sizeof(g_cfg));
   strlcpy(g_cfg.apiUrl, DEFAULT_INGEST_URL, sizeof(g_cfg.apiUrl));
-  g_cfg.intervalMs = 30000;
+  g_cfg.intervalMs = 60000;
   g_cfg.paramsPullMs = 120000;
   /* DEFAULT_PARAMS_JSON tiene muchos Fxx; 256 B de pool ArduinoJson queda corto → defaults rotos. */
   StaticJsonDocument<2048> d;
@@ -382,8 +383,10 @@ static bool loadConfig() {
   strlcpy(g_cfg.moduleId, doc["module_id"] | "", sizeof(g_cfg.moduleId));
   strlcpy(g_cfg.apiKey, doc["api_key"] | "", sizeof(g_cfg.apiKey));
   strlcpy(g_cfg.anonKey, doc["supabase_anon_key"] | "", sizeof(g_cfg.anonKey));
-  g_cfg.intervalMs = (uint32_t)(doc["interval_ms"] | 30000);
-  if (g_cfg.intervalMs < 5000) g_cfg.intervalMs = 5000;
+  g_cfg.intervalMs = (uint32_t)(doc["interval_ms"] | 60000);
+  // Hard floor de 60 s para proteger la cuota Free de Supabase. Migra silenciosamente
+  // configs viejas que tenían 30 s guardados en LittleFS.
+  if (g_cfg.intervalMs < 60000) g_cfg.intervalMs = 60000;
   g_cfg.paramsPullMs = (uint32_t)(doc["params_pull_ms"] | 120000);
   if (g_cfg.paramsPullMs < 15000) g_cfg.paramsPullMs = 15000;
   trimAsciiInPlace(g_cfg.moduleId);

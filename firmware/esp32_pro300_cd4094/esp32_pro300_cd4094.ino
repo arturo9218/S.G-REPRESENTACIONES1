@@ -91,7 +91,10 @@ static constexpr const char *PARAMS_PATH    = "/params.json";
 static constexpr const char *AP_NAME        = "PRO300-Setup";
 static constexpr unsigned long PORTAL_TIMEOUT_SEC   = 5UL * 60UL;
 static constexpr unsigned long WIFI_BOOT_CONNECT_MS = 20000UL;
-static constexpr unsigned long TELEMETRY_DEFAULT_MS = 30000UL;
+// 60 s reduce a la mitad la carga de inserts en `device_readings`/`combistato_readings`
+// y mantiene el Free tier de Supabase con aire. La temperatura de cámara cambia en
+// minutos, no en segundos, así que 1 punto/min sigue siendo de sobra para gráficos.
+static constexpr unsigned long TELEMETRY_DEFAULT_MS = 60000UL;
 static constexpr unsigned long PARAMS_PULL_MS       = 2UL * 60UL * 1000UL;  // 2 min
 
 struct Cfg {
@@ -783,7 +786,9 @@ static bool loadConfig() {
   strlcpy(g_cfg.moduleId, doc["module_id"] | "", sizeof(g_cfg.moduleId));
   strlcpy(g_cfg.apiKey,   doc["api_key"]   | "", sizeof(g_cfg.apiKey));
   g_cfg.intervalMs = doc["interval_ms"] | g_cfg.intervalMs;
-  if (g_cfg.intervalMs < 5000) g_cfg.intervalMs = 5000;
+  // Hard floor de 60 s para proteger el Free de Supabase. Migra configs viejas
+  // que tenían 30 s guardados en LittleFS sin tocar el portal.
+  if (g_cfg.intervalMs < 60000) g_cfg.intervalMs = 60000;
   return true;
 }
 static bool saveConfig() {
