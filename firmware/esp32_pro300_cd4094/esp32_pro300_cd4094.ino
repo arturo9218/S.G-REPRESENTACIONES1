@@ -200,7 +200,7 @@ static const char *phaseName(Phase p) {
 static void setPhase(Phase p, uint32_t totalS) {
   if (g_phase == p) {
     // Misma fase: solo refrescamos `phase_total_s` por si un parámetro AR
-    // cambió desde la nube (p.ej. AR07 / F03 mientras estamos refrigerando).
+    // cambió desde la nube (p.ej. AR10 / F06 mientras estamos refrigerando).
     // El cronómetro de inicio se preserva para no resetear el "Transcurrido".
     g_phaseTotalS = totalS;
     return;
@@ -614,12 +614,12 @@ static void aplicarControl() {
     setPhase(PH_POST_DEFROST, (uint32_t)(P.F11 * 60.0f));
   } else {
     // En "refrigeración" el "Faltan" que muestra la app es el tiempo hasta
-    // el próximo deshielo por intervalo (AR07 / F03). Para que
-    // total - transcurrido dé exactamente ese countdown, anclamos el
-    // cronómetro al instante en que terminó el último deshielo
-    // (lastDefrostAt), no al millis() actual.
+    // el próximo deshielo por intervalo (AR10 / F06, en minutos, default
+    // 360 min = 6 h). Para que `total - transcurrido` dé exactamente ese
+    // countdown, anclamos el cronómetro al instante en que terminó el último
+    // deshielo (lastDefrostAt), no al millis() actual.
     bool wasNormal = (g_phase == PH_NORMAL);
-    setPhase(PH_NORMAL, (uint32_t)(P.F03 * 60.0f));
+    setPhase(PH_NORMAL, (uint32_t)(P.F06 * 60.0f));
     if (!wasNormal) g_phaseStartedAt = lastDefrostAt;
   }
 }
