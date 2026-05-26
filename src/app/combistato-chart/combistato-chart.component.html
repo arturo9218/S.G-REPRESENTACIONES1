@@ -1,7 +1,7 @@
 <div #fullscreenRoot class="cb-page page--dark">
   <header class="cb-head">
     <div>
-      <h1 class="cb-title">Combistato · {{ combistatoName }}</h1>
+      <h1 class="cb-title">PRO300 · {{ combistatoName }}</h1>
       <p class="cb-sub">
         Sonda evaporador (S1 / temp1), sonda ambiente o segunda (S2 / temp2), compresor, forzador, deshielo y puerta.
         Los estados requieren firmware reciente que envíe los campos en cada POST.
@@ -33,7 +33,7 @@
   <div class="cb-layout" *ngIf="combistatoId">
     <aside class="cb-side card">
       <h2 class="cb-side__title">Qué graficar</h2>
-      <p class="cb-side__hint">Se guarda en este navegador por combistato.</p>
+      <p class="cb-side__hint">Se guarda en este navegador por PRO300.</p>
       <label class="cb-toggle"
         ><input type="checkbox" [(ngModel)]="showTemp1" (ngModelChange)="persistSeriesPrefs()" /> Sonda evaporador
         (temp1)</label

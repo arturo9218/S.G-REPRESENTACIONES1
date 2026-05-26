@@ -2916,6 +2916,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.openAddPr500Modal();
       return;
     }
+    if (kind === 'pro300') {
+      this.openAddCombistatoModal();
+      return;
+    }
     this.openAddDeviceModal(kind);
   }
 

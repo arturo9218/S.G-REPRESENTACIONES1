@@ -1,4 +1,5 @@
 import { PR500_SECTIONS } from '../pr500/pr500-sections';
+import { COMBISTATO_SECTIONS } from '../combistato/combistato-sections';
 
 export interface InicioManualItem {
   term: string;
@@ -259,13 +260,33 @@ function buildPr500DeviceManual(): InicioDeviceManual {
   };
 }
 
+function buildPro300DeviceManual(): InicioDeviceManual {
+  const blocks: InicioManualBlock[] = COMBISTATO_SECTIONS.map((section) => ({
+    title: section.title,
+    intro: section.intro,
+    items: section.fields.map((field) => ({
+      term: `${field.code} — ${field.label}`,
+      detail: field.help ?? `Parámetro ${field.code}: ${field.label}.`,
+    })),
+  }));
+
+  return {
+    id: 'pro300',
+    title: 'PRO300 — Manual completo (AR01 a AR48)',
+    subtitle: 'Controlador de cámara: 2 sondas + compresor / ventilador / deshielo',
+    intro:
+      'Controlador de cámara con dos sondas de temperatura y tres relés (compresor, ventilador y deshielo). En la app y en el equipo verás códigos AR01, AR02, … AR48; cada uno es un ajuste concreto. Abajo van en el mismo orden que en Configuración → PRO300. Leé el bloque, ajustá y guardá. La telemetría a la nube muestra T1, T2 y el estado de cada relé.',
+    blocks,
+  };
+}
+
 const PRO400_PRO300_MANUALS: InicioDeviceManual[] = [
   {
     id: 'pro400',
     title: 'PRO400 — Una sonda',
     subtitle: 'Temperatura simple en la nube',
     intro:
-      'Panel con una sonda. En configuración del dispositivo definís nombre, umbrales mínimo/máximo y corrección. No usa códigos AR del PR500.',
+      'Panel con una sonda. En configuración del dispositivo definís nombre, umbrales mínimo/máximo y corrección. No usa códigos AR del PR500 ni del PRO300.',
     blocks: [
       {
         title: 'Uso diario',
@@ -284,24 +305,7 @@ const PRO400_PRO300_MANUALS: InicioDeviceManual[] = [
       },
     ],
   },
-  {
-    id: 'pro300',
-    title: 'PRO300 — Dos sondas',
-    subtitle: 'Dos canales de temperatura',
-    intro: 'Igual que PRO400 pero con Sonda 1 y Sonda 2, cada una con sus umbrales.',
-    blocks: [
-      {
-        title: 'Uso diario',
-        items: [
-          {
-            term: 'Dos lecturas',
-            detail: 'Renombrá las sondas (evaporador / producto) en configuración para entender alertas.',
-            example: 'Sonda 1: −10 a −5 °C. Sonda 2: −20 a −12 °C.',
-          },
-        ],
-      },
-    ],
-  },
+  buildPro300DeviceManual(),
 ];
 
 export const INICIO_DEVICE_MANUALS: InicioDeviceManual[] = [

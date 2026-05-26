@@ -69,6 +69,12 @@ function ingestBool(v: unknown): boolean {
   return false;
 }
 
+/** Banderas opcionales del firmware PRO300 con control: si el campo no viene, se guarda NULL. */
+function ingestOptionalBool(v: unknown): boolean | null {
+  if (v === undefined || v === null) return null;
+  return ingestBool(v);
+}
+
 function ingestOptionalNumber(v: unknown): number | null {
   if (v === undefined || v === null) return null;
   const n = typeof v === 'number' ? v : Number(v);
@@ -318,6 +324,12 @@ Deno.serve(async (req) => {
         : null;
     const pCorr = pRaw != null ? pRaw + oP : null;
 
+    /** Estado de relés (PRO300 con control): opcional, NULL si el firmware no lo manda (PRO400/genéricos). */
+    const compOn    = ingestOptionalBool(payload.comp_on);
+    const fanOn     = ingestOptionalBool(payload.fan_on);
+    const defrostOn = ingestOptionalBool(payload.defrost_on);
+    const doorOpen  = ingestOptionalBool(payload.door_open);
+
     const { error: insErr } = await supabase.from('device_readings').insert({
       device_id: device.id,
       created_at: payload.sentAt ?? new Date().toISOString(),
@@ -339,6 +351,10 @@ Deno.serve(async (req) => {
       power_w: pCorr,
       press1_bar: payload.press1_bar ?? null,
       press2_bar: payload.press2_bar ?? null,
+      comp_on: compOn,
+      fan_on: fanOn,
+      defrost_on: defrostOn,
+      door_open: doorOpen,
     });
 
     if (insErr) {

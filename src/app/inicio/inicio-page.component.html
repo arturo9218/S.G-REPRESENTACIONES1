@@ -28,7 +28,7 @@
       <p class="inicio-stat__value">{{ totalEquipos }}</p>
       <p class="inicio-stat__label">Equipos en cuenta</p>
       <p class="inicio-stat__detail">
-        {{ deviceCount }} paneles · {{ combistatoCount }} combistatos · {{ pr500Count }} PR500
+        {{ deviceCount }} paneles · {{ combistatoCount }} PRO300 · {{ pr500Count }} PR500
       </p>
     </article>
     <article
@@ -151,7 +151,7 @@
         tabindex="0"
         [attr.aria-label]="'Abrir ' + row.name"
       >
-        <span class="inicio-fleet__kind">{{ row.kind === 'pr500' ? 'PR500' : row.kind === 'combistato' ? 'Comb.' : 'Panel' }}</span>
+        <span class="inicio-fleet__kind">{{ row.kind === 'pr500' ? 'PR500' : row.kind === 'combistato' ? 'PRO300' : 'Panel' }}</span>
         <span class="inicio-fleet__name">{{ row.name }}</span>
         <span class="inicio-fleet__detail">{{ row.detail }}</span>
         <span class="inicio-fleet__dot" [class.inicio-fleet__dot--on]="row.online" aria-hidden="true"></span>

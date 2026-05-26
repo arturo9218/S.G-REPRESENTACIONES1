@@ -72,8 +72,8 @@ export class InicioPageComponent {
     {
       kind: 'pro300',
       title: 'PRO300',
-      desc: 'Controlador con dos sondas de temperatura.',
-      badge: '2 sondas',
+      desc: 'Controlador de cámara: 2 sondas, compresor / ventilador / deshielo y parámetros AR01–AR48.',
+      badge: '2 sondas + control',
     },
   ];
 

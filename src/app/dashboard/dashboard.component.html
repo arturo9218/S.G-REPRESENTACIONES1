@@ -737,9 +737,9 @@
           >
             <div class="device-section__head">
               <div class="device-section__titles">
-                <h2 class="device-section__title">Combistatos</h2>
+                <h2 class="device-section__title">PRO300</h2>
                 <p class="device-section__hint">
-                  Tarjetas independientes de los paneles de temperatura. En la app se editan como
+                  Controlador de cámara con dos sondas, compresor / ventilador / deshielo. En la app se edita por
                   <strong>AR01–AR48</strong>. Botón en cada tarjeta →
                   <strong>Configuración</strong>.
                 </p>
@@ -756,7 +756,7 @@
                 <header class="device-card__head">
                   <div class="device-card__head-text">
                     <h3 class="device-card__name">{{ c.name }}</h3>
-                    <span class="device-card__role-pill device-card__role-pill--editor">Combistato</span>
+                    <span class="device-card__role-pill device-card__role-pill--editor">PRO300</span>
                     <span class="device-card__id">ID: {{ c.id }}</span>
                     <span class="device-card__module" *ngIf="c.moduleId">ID módulo: {{ c.moduleId }}</span>
                   </div>
@@ -813,7 +813,7 @@
                   <button
                     type="button"
                     class="device-card__btn device-card__btn--danger"
-                    [attr.aria-label]="'Eliminar combistato ' + c.name"
+                    [attr.aria-label]="'Eliminar PRO300 ' + c.name"
                     (click)="confirmDeleteCombistato(c); $event.stopPropagation()"
                   >
                     Eliminar
@@ -822,7 +822,7 @@
               </article>
             </div>
             <p class="card__hint card__hint--tight" *ngIf="!combistatos.length">
-              No hay combistatos. Agregá equipos desde <strong>Inicio</strong> (por ahora solo PR500, PRO400 y PRO300 en el alta).
+              No hay PRO300. Agregá equipos desde <strong>Inicio</strong> (PR500, PRO400 y PRO300 en el alta).
             </p>
           </div>
 
@@ -843,7 +843,7 @@
                   <strong>Central frigorífica</strong>: presión de proceso, setpoints y etapas. En la app
                   <strong>AR01–AR28</strong>; botón en cada tarjeta →
                   <strong>Configuración</strong>. La telemetría
-                  llega por la misma función de ingesta que paneles y combistatos, con <code>pressure_bar</code> en el POST.
+                  llega por la misma función de ingesta que paneles y PRO300, con <code>pressure_bar</code> en el POST.
                 </p>
               </div>
             </div>
@@ -1262,7 +1262,7 @@
             <h2 class="card__title card__title--sm">Elegí qué configurar</h2>
             <p class="card__hint card__hint--tight">
               Tocá un <strong>panel de medición</strong> para umbrales, nombres de sensores, corrección, compartir, etc.
-              Tocá un <strong>combistato</strong> para editar <strong>AR01–AR48</strong>, o un <strong>PR500</strong> para
+              Tocá un <strong>PRO300</strong> para editar <strong>AR01–AR48</strong>, o un <strong>PR500</strong> para
               <strong>AR01–AR28</strong> (presión / etapas). No hace falta que esté online para
               guardar.
             </p>
@@ -1292,7 +1292,7 @@
               </div>
             </ng-container>
             <ng-container *ngIf="combistatos.length && environment.deviceCloudSync && deviceStore.isCloudSyncActive()">
-              <h3 class="settings-hub__group-title">Combistatos</h3>
+              <h3 class="settings-hub__group-title">PRO300</h3>
               <div class="settings-device-grid">
                 <button
                   type="button"
@@ -1301,7 +1301,7 @@
                   [class.settings-device-tile--active]="settingsConfigKind === 'combistato' && c.id === selectedCombistatoId"
                   (click)="openSettingsCombistatoParams(c.id)"
                 >
-                  <span class="settings-device-tile__kind">Combistato</span>
+                  <span class="settings-device-tile__kind">PRO300</span>
                   <span class="settings-device-tile__name">{{ c.name }}</span>
                   <span
                     class="settings-device-tile__pill"
@@ -2905,11 +2905,11 @@
               *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
             >
               <div class="card__title-row">
-                <h2 class="card__title card__title--sm">Combistato — parámetros AR01–AR48</h2>
-                <button type="button" class="btn btn--ghost btn--sm" (click)="openAddCombistatoModal()">+ Combistato</button>
+                <h2 class="card__title card__title--sm">PRO300 — parámetros AR01–AR48</h2>
+                <button type="button" class="btn btn--ghost btn--sm" (click)="openAddCombistatoModal()">+ PRO300</button>
               </div>
               <p class="card__hint card__hint--tight">
-                Los valores se guardan en la nube por combistato. Para cambiar de equipo, usá <strong>Volver a la lista</strong>.
+                Los valores se guardan en la nube por PRO300. Para cambiar de equipo, usá <strong>Volver a la lista</strong>.
               </p>
               <app-combistato-settings
                 *ngIf="selectedCombistatoId"
@@ -2948,7 +2948,7 @@
         <div class="empty__card">
           <h1 class="empty__title">Sin contenido aún</h1>
           <p class="empty__text">
-            Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, <strong>combistatos</strong> para la
+            Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, <strong>PRO300</strong> para la
             configuración (<strong>AR01–AR48</strong>), o <strong>PR500</strong> para presión de proceso
             (<strong>AR01–AR28</strong>). Son independientes: podés
             tener todos los que necesites de cada tipo. Si ya cargaste datos en otro momento, revisá la conexión o
@@ -3095,14 +3095,14 @@
 >
   <div class="modal" (click)="$event.stopPropagation()">
     <div class="modal__head">
-      <h2 id="combistato-modal-title" class="modal__title">Combistato</h2>
+      <h2 id="combistato-modal-title" class="modal__title">PRO300</h2>
       <button type="button" class="modal__close" (click)="closeCombistatoModal()" aria-label="Cerrar">×</button>
     </div>
     <p class="modal__intro" *ngIf="combistatoModalMode === 'add'">
-      Nuevo combistato. Conecta igual que un dispositivo de mediciones: <code>api_url</code>, <code>module_id</code> y
+      Nuevo PRO300. Conecta igual que un dispositivo de mediciones: <code>api_url</code>, <code>module_id</code> y
       <code>api_key</code>.
     </p>
-    <p class="modal__intro" *ngIf="combistatoModalMode === 'edit'">Editar nombre, ubicación o ID módulo del combistato.</p>
+    <p class="modal__intro" *ngIf="combistatoModalMode === 'edit'">Editar nombre, ubicación o ID módulo del PRO300.</p>
     <form class="modal__form" [formGroup]="combistatoForm" (ngSubmit)="submitCombistatoForm()">
       <label class="modal__field">
         <span class="modal__label">Nombre <span class="modal__req">*</span></span>
@@ -3119,14 +3119,14 @@
         <input type="text" class="modal__input" formControlName="location" autocomplete="off" />
       </label>
       <label class="modal__field">
-        <span class="modal__label">ID módulo (combistato)</span>
+        <span class="modal__label">ID módulo (PRO300)</span>
         <input type="text" class="modal__input" formControlName="moduleId" autocomplete="off" />
         <span class="modal__hint">Opcional al crear. Vacío = se genera automático para el portal del equipo.</span>
       </label>
       <div class="modal__field" *ngIf="combistatoModalMode === 'edit' && editingCombistato?.deviceToken">
         <span class="modal__label">Código API (6 dígitos)</span>
         <input type="text" class="modal__input" readonly [value]="editingCombistato?.deviceToken" />
-        <span class="modal__hint">Token recargado desde la nube para identificar este combistato.</span>
+        <span class="modal__hint">Token recargado desde la nube para identificar este PRO300.</span>
       </div>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" (click)="closeCombistatoModal()">Cancelar</button>
@@ -3148,10 +3148,10 @@
 >
   <div class="modal modal--wide" (click)="$event.stopPropagation()">
     <div class="modal__head">
-      <h2 id="combistato-provision-title" class="modal__title">Configurar el combistato</h2>
+      <h2 id="combistato-provision-title" class="modal__title">Configurar el PRO300</h2>
       <button type="button" class="modal__close" (click)="closeProvisioningModal()" aria-label="Cerrar">×</button>
     </div>
-    <p class="modal__intro">Copiá estos valores en el portal del combistato (mismo método de conexión que dispositivos).</p>
+    <p class="modal__intro">Copiá estos valores en el portal del PRO300 (mismo método de conexión que dispositivos).</p>
     <div class="provision-rows">
       <div class="provision-row">
         <span class="provision-row__label">api_url</span>
