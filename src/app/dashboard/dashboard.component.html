@@ -811,26 +811,51 @@
                           >
                         </span>
                         <div class="device-card__sensor-foot device-card__sensor-foot--relays">
-                          <span
+                          <button
+                            type="button"
                             class="device-card__relay-pill"
                             [class.device-card__relay-pill--on]="c.lastCompOn === true"
-                            title="Compresor"
-                            >COMP</span
+                            [class.device-card__relay-pill--forced]="(c.lastCompForcedRemainingS ?? 0) > 0"
+                            [attr.title]="combistatoRelayTooltip('comp', c)"
+                            (click)="onCombistatoRelayClick('comp', c)"
                           >
-                          <span
+                            COMP<span
+                              class="device-card__relay-pill-timer"
+                              *ngIf="(c.lastCompForcedRemainingS ?? 0) > 0"
+                              >· {{ formatMinSec(c.lastCompForcedRemainingS) }}</span
+                            >
+                          </button>
+                          <button
+                            type="button"
                             class="device-card__relay-pill"
                             [class.device-card__relay-pill--on]="c.lastFanOn === true"
-                            title="Ventilador"
-                            >VENT</span
+                            [class.device-card__relay-pill--forced]="(c.lastFanForcedRemainingS ?? 0) > 0"
+                            [attr.title]="combistatoRelayTooltip('fan', c)"
+                            (click)="onCombistatoRelayClick('fan', c)"
                           >
-                          <span
+                            VENT<span
+                              class="device-card__relay-pill-timer"
+                              *ngIf="(c.lastFanForcedRemainingS ?? 0) > 0"
+                              >· {{ formatMinSec(c.lastFanForcedRemainingS) }}</span
+                            >
+                          </button>
+                          <button
+                            type="button"
                             class="device-card__relay-pill"
                             [class.device-card__relay-pill--on]="c.lastDefrostOn === true"
-                            title="Deshielo"
-                            >DEF</span
+                            [attr.title]="combistatoRelayTooltip('def', c)"
+                            (click)="onCombistatoRelayClick('def', c)"
+                          >
+                            DEF</button
                           >
                         </div>
                       </div>
+                    </div>
+                    <div
+                      class="device-card__cmd-feedback"
+                      *ngIf="combistatoCommandFeedback?.id === c.id"
+                    >
+                      {{ combistatoCommandFeedback?.msg }}
                     </div>
                     <div
                       class="device-card__defrost-strip"

@@ -5,6 +5,10 @@ import { combineLatest, fromEvent, Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { AuthService } from '../core/auth.service';
 import { CombistatoStoreService } from '../core/combistato-store.service';
+import {
+  CombistatoCommandKind,
+  CombistatoCommandService,
+} from '../core/combistato-command.service';
 import { Pr500StoreService } from '../core/pr500-store.service';
 import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
 import {
@@ -390,7 +394,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     readonly combistatoStore: CombistatoStoreService,
     readonly pr500Store: Pr500StoreService,
     private readonly webPush: WebPushService,
-    private readonly equipmentSheet: EquipmentSheetService
+    private readonly equipmentSheet: EquipmentSheetService,
+    private readonly combistatoCommand: CombistatoCommandService
   ) {
     void this.auth.getSession().then((s) => {
       this.email = s?.user.email ?? null;
@@ -3124,6 +3129,102 @@ export class DashboardComponent implements OnInit, OnDestroy {
   combistatoPhaseHasTimer(c: DashboardCombistato): boolean {
     if (!c.lastPhase) return false;
     return (c.lastPhaseTotalS ?? 0) > 0 || (c.lastPhaseElapsedS ?? 0) > 0;
+  }
+
+  /** Tooltip mostrado al pasar el mouse por encima de cada pill (estado + acción). */
+  combistatoRelayTooltip(relay: 'comp' | 'fan' | 'def', c: DashboardCombistato): string {
+    if (relay === 'def') {
+      return c.lastDefrostOn
+        ? 'Deshielo en curso · click para cancelar y volver a refrigerar'
+        : 'Deshielo · click para iniciar manualmente';
+    }
+    const remaining = relay === 'comp' ? c.lastCompForcedRemainingS ?? 0 : c.lastFanForcedRemainingS ?? 0;
+    if (remaining > 0) {
+      const name = relay === 'comp' ? 'Compresor' : 'Ventilador';
+      return `${name} forzado (${this.formatMinSec(remaining)}) · click para cancelar`;
+    }
+    const isOn = relay === 'comp' ? c.lastCompOn === true : c.lastFanOn === true;
+    const name = relay === 'comp' ? 'Compresor' : 'Ventilador';
+    return isOn
+      ? `${name} encendido · click para forzar apagado 10 min`
+      : `${name} apagado · click para forzar encendido 10 min`;
+  }
+
+  /**
+   * Click sobre una pill (COMP / VENT / DEF). Muestra un confirm nativo del
+   * navegador con el wording exacto de la acción y, si el usuario confirma,
+   * dispara el comando al PRO300 vía `pro300-send-command`. El delay
+   * click→equipo es de 5-30 s gracias a la propagación rápida del PR300.
+   */
+  async onCombistatoRelayClick(relay: 'comp' | 'fan' | 'def', c: DashboardCombistato): Promise<void> {
+    if (!c.id) return;
+    let kind: CombistatoCommandKind;
+    let value: boolean | undefined;
+    let question: string;
+
+    if (relay === 'def') {
+      if (c.lastDefrostOn === true) {
+        kind = 'cancel_defrost';
+        question =
+          '¿Cancelar el deshielo en curso? El equipo va a pasar al goteo y después retomará la refrigeración automática.';
+      } else {
+        kind = 'force_defrost';
+        question =
+          '¿Iniciar un deshielo manual ahora? El equipo va a entrar en deshielo durante el tiempo configurado en AR11 (máximo) o hasta que la sonda 2 llegue a AR12.';
+      }
+    } else {
+      const forced = relay === 'comp' ? c.lastCompForcedRemainingS ?? 0 : c.lastFanForcedRemainingS ?? 0;
+      const name = relay === 'comp' ? 'compresor' : 'ventilador';
+      if (forced > 0) {
+        kind = 'cancel_force';
+        question = `¿Cancelar el forzado del ${name} y volver al control automático?`;
+      } else {
+        kind = relay === 'comp' ? 'force_comp' : 'force_fan';
+        const isOn = relay === 'comp' ? c.lastCompOn === true : c.lastFanOn === true;
+        value = !isOn;
+        question = isOn
+          ? `¿Forzar el ${name} APAGADO durante 10 minutos? El termostato no lo va a tocar en ese lapso.`
+          : `¿Forzar el ${name} ENCENDIDO durante 10 minutos? El termostato no lo va a tocar en ese lapso.`;
+      }
+    }
+
+    if (!window.confirm(question)) return;
+    try {
+      await this.combistatoCommand.send(c.id, kind, value);
+      this.showCombistatoCommandFeedback(c.id, this.combistatoCommandSuccessMessage(kind, relay));
+    } catch (e) {
+      window.alert(`No pude enviar el comando: ${(e as Error).message}`);
+    }
+  }
+
+  /** Feedback efímero (3 s) que se renderiza arriba de la card del PRO300 destinatario. */
+  combistatoCommandFeedback: { id: string; msg: string } | null = null;
+  private combistatoCommandFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private showCombistatoCommandFeedback(id: string, msg: string): void {
+    this.combistatoCommandFeedback = { id, msg };
+    if (this.combistatoCommandFeedbackTimer) clearTimeout(this.combistatoCommandFeedbackTimer);
+    this.combistatoCommandFeedbackTimer = setTimeout(() => {
+      this.combistatoCommandFeedback = null;
+    }, 3500);
+  }
+  private combistatoCommandSuccessMessage(
+    kind: CombistatoCommandKind,
+    relay: 'comp' | 'fan' | 'def'
+  ): string {
+    switch (kind) {
+      case 'force_defrost':
+        return 'Pedido de deshielo enviado. El equipo lo recibirá en pocos segundos.';
+      case 'cancel_defrost':
+        return 'Cancelación de deshielo enviada.';
+      case 'cancel_force':
+        return 'Forzado cancelado. El equipo vuelve al control automático.';
+      case 'force_comp':
+      case 'force_fan':
+      default:
+        return relay === 'comp'
+          ? 'Forzado de compresor enviado (10 min).'
+          : 'Forzado de ventilador enviado (10 min).';
+    }
   }
 
   /** Solo el número; signo solo si es negativo; la unidad va en un <span> aparte. */

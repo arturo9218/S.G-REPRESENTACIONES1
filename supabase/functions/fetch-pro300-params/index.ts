@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(url, serviceKey);
     const { data: row, error } = await supabase
       .from('combistatos')
-      .select('params, updated_at, device_token_hash')
+      .select('params, updated_at, device_token_hash, pending_command')
       .eq('module_id', moduleId)
       .maybeSingle();
 
@@ -108,10 +108,35 @@ Deno.serve(async (req) => {
         ? row.updated_at.trim()
         : new Date().toISOString();
 
-    return new Response(JSON.stringify({ ok: true, updated_at: updatedAt, params }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    // Comandos manuales pendientes (escritos por pro300-send-command). Se
+    // filtran si ya expiraron, para que el firmware no agarre comandos viejos
+    // que quedaron por una desconexión.
+    let pendingCommand: Record<string, unknown> | null = null;
+    if (
+      row.pending_command &&
+      typeof row.pending_command === 'object' &&
+      !Array.isArray(row.pending_command)
+    ) {
+      const cmd = row.pending_command as Record<string, unknown>;
+      const expiresRaw = typeof cmd['expiresAt'] === 'string' ? cmd['expiresAt'] : '';
+      const expires = expiresRaw ? Date.parse(expiresRaw) : NaN;
+      if (!Number.isFinite(expires) || expires > Date.now()) {
+        pendingCommand = cmd;
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        updated_at: updatedAt,
+        params,
+        ...(pendingCommand ? { pending_command: pendingCommand } : {}),
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    );
   } catch (e) {
     return new Response(JSON.stringify({ error: (e as Error).message }), {
       status: 500,

@@ -194,6 +194,8 @@ export class CombistatoStoreService {
         phase: string | null;
         phaseElapsed: number | null;
         phaseTotal: number | null;
+        compForcedRemaining: number | null;
+        fanForcedRemaining: number | null;
       }
     >
   > {
@@ -209,6 +211,8 @@ export class CombistatoStoreService {
         phase: string | null;
         phaseElapsed: number | null;
         phaseTotal: number | null;
+        compForcedRemaining: number | null;
+        fanForcedRemaining: number | null;
       }
     >();
     if (!ids.length) return out;
@@ -216,7 +220,9 @@ export class CombistatoStoreService {
       ids.map(async (id) => {
         const { data, error } = await this.auth.client
           .from('combistato_readings')
-          .select('temp1_c, temp2_c, comp_on, fan_on, defrost_on, door_open, phase, phase_elapsed_s, phase_total_s')
+          .select(
+            'temp1_c, temp2_c, comp_on, fan_on, defrost_on, door_open, phase, phase_elapsed_s, phase_total_s, comp_forced_remaining_s, fan_forced_remaining_s'
+          )
           .eq('combistato_id', id)
           .order('created_at', { ascending: false })
           .limit(1)
@@ -232,6 +238,8 @@ export class CombistatoStoreService {
           phase: string | null;
           phase_elapsed_s: number | null;
           phase_total_s: number | null;
+          comp_forced_remaining_s: number | null;
+          fan_forced_remaining_s: number | null;
         };
         out.set(id, {
           temp1: typeof row.temp1_c === 'number' ? row.temp1_c : null,
@@ -248,6 +256,16 @@ export class CombistatoStoreService {
           phaseTotal:
             typeof row.phase_total_s === 'number' && Number.isFinite(row.phase_total_s)
               ? row.phase_total_s
+              : null,
+          compForcedRemaining:
+            typeof row.comp_forced_remaining_s === 'number' &&
+            Number.isFinite(row.comp_forced_remaining_s)
+              ? row.comp_forced_remaining_s
+              : null,
+          fanForcedRemaining:
+            typeof row.fan_forced_remaining_s === 'number' &&
+            Number.isFinite(row.fan_forced_remaining_s)
+              ? row.fan_forced_remaining_s
               : null,
         });
       })
@@ -342,6 +360,8 @@ export class CombistatoStoreService {
         lastPhaseElapsedS: snap?.phaseElapsed ?? null,
         lastPhaseTotalS: snap?.phaseTotal ?? null,
         defrostTargetC: Number.isFinite(merged.F08) ? merged.F08 : null,
+        lastCompForcedRemainingS: snap?.compForcedRemaining ?? null,
+        lastFanForcedRemainingS: snap?.fanForcedRemaining ?? null,
       };
     });
     for (const c of mapped) {

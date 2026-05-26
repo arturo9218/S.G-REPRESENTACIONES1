@@ -34,6 +34,9 @@ interface IngestPayload {
   phase?: unknown;
   phase_elapsed_s?: unknown;
   phase_total_s?: unknown;
+  /** PRO300: segundos restantes del forzado manual (0 si está en automático). */
+  comp_forced_remaining_s?: unknown;
+  fan_forced_remaining_s?: unknown;
   /** PR500: presión baja (bar), rama alternativa a temp1_c. */
   pressure_bar?: number | null;
   r1_on?: unknown;
@@ -186,6 +189,8 @@ Deno.serve(async (req) => {
           phase,
           phase_elapsed_s: clampInt(payload.phase_elapsed_s),
           phase_total_s: clampInt(payload.phase_total_s),
+          comp_forced_remaining_s: clampInt(payload.comp_forced_remaining_s, 3600),
+          fan_forced_remaining_s: clampInt(payload.fan_forced_remaining_s, 3600),
         });
         if (insCombErr) {
           return new Response(JSON.stringify({ error: insCombErr.message }), {

@@ -230,6 +230,25 @@ static bool  doorAlarm=false;
 static unsigned long emergencyChangedAt=0;
 static bool          emergencyComp=false;
 
+// ============== Overrides manuales (comandos desde la app) ==============
+// La app puede forzar el compresor/ventilador por 10 min, o disparar/cancelar
+// un deshielo. El comando viene en la respuesta de fetch-pro300-params con un
+// `ts` único; lo aplicamos una sola vez y persistimos el `ts` en LittleFS
+// para no reaplicarlo tras un reboot.
+struct ManualOverride {
+  bool          compActive  = false;
+  bool          compValue   = false;
+  unsigned long compEndsAt  = 0;
+  bool          fanActive   = false;
+  bool          fanValue    = false;
+  unsigned long fanEndsAt   = 0;
+};
+static ManualOverride OV;
+static bool   g_manualDefrostRequested = false;
+static bool   g_manualCancelDefrost    = false;
+static String g_lastCmdTs              = "";
+static const unsigned long FORCE_DURATION_MS = 10UL * 60UL * 1000UL;  // 10 min
+
 static float tCam  = TEMP_ERR_VALUE;
 static float tEvap = TEMP_ERR_VALUE;
 static bool  fault1=true, fault2=true;
@@ -462,8 +481,50 @@ static void leerPuerta() {
 }
 
 // ============== CONTROL principal ===========
+/**
+ * Pisa los relés según los forzados manuales activos. Se llama después de
+ * aplicarControl() para que tenga precedencia sobre la decisión del
+ * termostato. Cuando el timeout (10 min) expira se desactiva solo y el
+ * próximo ciclo de aplicarControl decide normalmente.
+ */
+static void applyManualOverride() {
+  unsigned long now = millis();
+  if (OV.compActive && now >= OV.compEndsAt) {
+    OV.compActive = false;
+    Serial.println(F("[CMD] forzado de compresor expiró, vuelvo a auto."));
+  }
+  if (OV.fanActive && now >= OV.fanEndsAt) {
+    OV.fanActive = false;
+    Serial.println(F("[CMD] forzado de ventilador expiró, vuelvo a auto."));
+  }
+  if (OV.compActive && compresor != OV.compValue) {
+    compresor = OV.compValue;
+    compChangedAt = now;
+  }
+  if (OV.fanActive) {
+    ventilador = OV.fanValue;
+  }
+}
+
 static void aplicarControl() {
   unsigned long now = millis();
+
+  // Cancelación manual del deshielo (botón DEF de la app durante un ciclo):
+  // termina el deshielo, marca lastDefrostAt y pasa al goteo. Si no había
+  // deshielo activo, el flag se descarta silenciosamente.
+  if (g_manualCancelDefrost) {
+    g_manualCancelDefrost = false;
+    if (deshielo) {
+      deshielo = false;
+      lastDefrostAt = now;
+      dripping = true;
+      dripStartedAt = now;
+      if (compresor) { compresor = false; compChangedAt = now; }
+      setPhase(PH_DRIP, (uint32_t)(P.F39 * 60.0f));
+      Serial.println(F("[CMD] deshielo cancelado por usuario, paso a goteo."));
+      return;
+    }
+  }
 
   // F38: retardo al encender — todo OFF hasta cumplir el delay.
   if (!bootDelayDone) {
@@ -531,8 +592,17 @@ static void aplicarControl() {
   //   1 = gas caliente → relay deshielo ON + compresor ON (válvula 4 vías / inversion)
   //   2 = natural     → compresor OFF, sin resistencia, solo deja descongelar por inercia
   int defrostType = (int)P.F05;
-  if (!deshielo && !dripping && !defrostBlockedByStartup &&
-      (defrostByInterval || forceDefrost || defrostByIce)) {
+  // El comando manual `force_defrost` puentea el bloqueo de arranque (F45):
+  // si el usuario pidió un deshielo, lo respetamos siempre y cuando no
+  // estemos ya en deshielo/goteo.
+  bool startDefrost = !deshielo && !dripping &&
+      (g_manualDefrostRequested ||
+       (!defrostBlockedByStartup && (defrostByInterval || forceDefrost || defrostByIce)));
+  if (g_manualDefrostRequested) {
+    g_manualDefrostRequested = false;
+    if (!startDefrost) Serial.println(F("[CMD] force_defrost ignorado (ya en deshielo o goteo)."));
+  }
+  if (startDefrost) {
     deshielo = true; defStartedAt = now;
     if (defrostType == 1) {
       // Gas caliente: fuerza compresor ON salteando el tmin (es prioritario).
@@ -763,6 +833,69 @@ static bool saveParams(JsonObject obj) {
   return true;
 }
 
+// ============== Comandos manuales (LittleFS) ==============
+// Persistimos el `ts` del último comando aplicado para que un reboot no lo
+// vuelva a ejecutar.
+static const char *CMDTS_PATH = "/cmdts.txt";
+
+static void loadLastCmdTs() {
+  if (!ensureFs() || !LittleFS.exists(CMDTS_PATH)) return;
+  File f = LittleFS.open(CMDTS_PATH, "r");
+  if (!f) return;
+  g_lastCmdTs = f.readString();
+  g_lastCmdTs.trim();
+  f.close();
+}
+
+static void saveLastCmdTs() {
+  if (!ensureFs()) return;
+  File f = LittleFS.open(CMDTS_PATH, "w");
+  if (!f) return;
+  f.print(g_lastCmdTs);
+  f.close();
+}
+
+/**
+ * Aplica un `pending_command` recibido en la respuesta de fetch-pro300-params.
+ * Usa el `ts` como idempotency-key: solo lo procesa si difiere del último que
+ * persistimos. Las acciones concretas (forzar comp/fan, gatillar deshielo,
+ * cancelar deshielo, cancelar forzados) se materializan vía variables globales
+ * que aplicarControl() lee en el próximo ciclo.
+ */
+static void applyPendingCommand(JsonObject cmd) {
+  if (cmd.isNull()) return;
+  const char *ts = cmd["ts"] | "";
+  if (!ts[0]) return;
+  if (g_lastCmdTs == ts) return;  // ya lo aplicamos antes
+
+  const char *kind = cmd["kind"] | "";
+  bool value = cmd["value"] | false;
+  Serial.printf("[CMD] kind=%s value=%d ts=%s\n", kind, value ? 1 : 0, ts);
+
+  if (strcmp(kind, "force_comp") == 0) {
+    OV.compActive = true;
+    OV.compValue  = value;
+    OV.compEndsAt = millis() + FORCE_DURATION_MS;
+  } else if (strcmp(kind, "force_fan") == 0) {
+    OV.fanActive  = true;
+    OV.fanValue   = value;
+    OV.fanEndsAt  = millis() + FORCE_DURATION_MS;
+  } else if (strcmp(kind, "force_defrost") == 0) {
+    g_manualDefrostRequested = true;
+  } else if (strcmp(kind, "cancel_defrost") == 0) {
+    g_manualCancelDefrost = true;
+  } else if (strcmp(kind, "cancel_force") == 0) {
+    OV.compActive = false;
+    OV.fanActive  = false;
+  } else {
+    Serial.printf("[CMD] kind desconocido: %s\n", kind);
+    return;
+  }
+
+  g_lastCmdTs = String(ts);
+  saveLastCmdTs();
+}
+
 /** Deriva la URL de fetch-pro300-params desde la URL de ingest-reading guardada. */
 static String paramsUrl() {
   String u(g_cfg.apiUrl);
@@ -822,6 +955,14 @@ static void pullParamsFromCloud() {
     Serial.println(resp);
     return;
   }
+  // Procesar comandos manuales antes del early return: los comandos llevan
+  // `ts` propio y pueden venir aunque los AR no hayan cambiado (la edge
+  // function pro300-send-command bumpea updated_at solo como side-effect).
+  {
+    JsonVariant cmdVar = doc["pending_command"];
+    if (cmdVar.is<JsonObject>()) applyPendingCommand(cmdVar.as<JsonObject>());
+  }
+
   const char *upd = doc["updated_at"] | "";
   if (upd[0] && g_paramsUpdatedAt == upd) {
     Serial.printf("[PULL] sin cambios (updated_at=%s).\n", upd);
@@ -985,6 +1126,19 @@ static void enviarTelemetria() {
   body += ",\"phase\":\"";          body += phaseName(g_phase);  body += "\"";
   body += ",\"phase_elapsed_s\":" + String(phaseElapsedS);
   body += ",\"phase_total_s\":"   + String(phaseTotalS);
+  // Segundos restantes de cada forzado manual (0 si está en automático).
+  uint32_t compForcedRemS = 0;
+  uint32_t fanForcedRemS  = 0;
+  if (OV.compActive) {
+    unsigned long m = millis();
+    compForcedRemS = (m < OV.compEndsAt) ? (uint32_t)((OV.compEndsAt - m) / 1000UL) : 0;
+  }
+  if (OV.fanActive) {
+    unsigned long m = millis();
+    fanForcedRemS = (m < OV.fanEndsAt) ? (uint32_t)((OV.fanEndsAt - m) / 1000UL) : 0;
+  }
+  body += ",\"comp_forced_remaining_s\":" + String(compForcedRemS);
+  body += ",\"fan_forced_remaining_s\":"  + String(fanForcedRemS);
   if (DOOR_PIN >= 0 && P.F25 >= 0.5f) {
     body += ",\"door_open\":" + String(doorOpen ? "true" : "false");
   }
@@ -1160,6 +1314,7 @@ void setup() {
   ensureFs();
   loadConfig();
   loadParams();
+  loadLastCmdTs();
   printConfig();
 
   // Watchdog: 30 s (suficiente para conexiones WiFi lentas + portal).
@@ -1234,6 +1389,7 @@ void loop() {
     tEvap = leerNTCpromedio(NTC2_PIN, fault2, P.F04);
     leerPuerta();
     aplicarControl();
+    applyManualOverride();
     evaluarAlarmas();
   }
 

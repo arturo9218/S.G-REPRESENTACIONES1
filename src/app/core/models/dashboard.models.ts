@@ -93,6 +93,10 @@ export interface DashboardCombistato {
   lastPhaseTotalS?: number | null;
   /** AR12 (F08): temperatura de corte (S2) en °C — se usa cuando la fase es defrost. */
   defrostTargetC?: number | null;
+  /** Segundos restantes del forzado manual del compresor (0/null si está en automático). */
+  lastCompForcedRemainingS?: number | null;
+  /** Segundos restantes del forzado manual del ventilador (0/null si está en automático). */
+  lastFanForcedRemainingS?: number | null;
 }
 
 export type CombistatoPhase =
