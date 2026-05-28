@@ -138,8 +138,8 @@ struct Cfg {
   /** Telemetría a ingest-reading (ms). 60 s reduce invocaciones Edge en plan Free y mantiene
    *  `device_readings` chiquita (la temperatura de una cámara cambia en minutos, no en segundos). */
   uint32_t intervalMs = 60000;
-  /** Intervalo para traer params desde la app (Supabase fetch-pr500-params). */
-  uint32_t paramsPullMs = 120000;
+  /** Pull params en reposo (ms). Tras edición en app: ventana rápida 10 s (ver g_pullFastUntilMs). */
+  uint32_t paramsPullMs = 60000;
 };
 
 struct Params {
@@ -202,6 +202,9 @@ static unsigned long g_lastRetryMs = 0;
 static unsigned long g_lastSendMs = 0;
 static unsigned long g_lastTxErrLogMs = 0;
 static unsigned long g_lastParamsPullMs = 0;
+static unsigned long g_pullFastUntilMs  = 0;
+static constexpr unsigned long PR500_PULL_FAST_MS     = 10UL * 1000UL;
+static constexpr unsigned long PR500_PULL_FAST_WINDOW = 2UL * 60UL * 1000UL;
 static unsigned long g_lastPullErrLogMs = 0;
 static unsigned long g_lastCloudFailMs = 0;
 static unsigned long g_lastStartMs = 0;
@@ -212,6 +215,50 @@ static unsigned long g_offSincePhys[3] = {0, 0, 0};
 static bool g_alarmLow = false;
 static bool g_alarmHigh = false;
 static bool g_alarmSensor = false;
+
+/* ============== Event-driven telemetry ====================================
+ * Aparte del ciclo de g_cfg.intervalMs (60 s), disparamos TX inmediato cuando
+ * cambia el estado de un relé (R1/R2/R3) o se activa/desactiva una alarma.
+ * Eso mantiene la app "en vivo" para eventos importantes sin inflar la cuota
+ * Free de Supabase (los eventos son raros). Rate-limit de 5 s anti-bounce.
+ */
+static bool          g_immediateTxRequested = false;
+static unsigned long g_lastImmediateTxAt    = 0;
+static constexpr unsigned long IMMEDIATE_TX_MIN_GAP_MS = 5000UL;
+static bool prevR1On     = false;
+static bool prevR2On     = false;
+static bool prevR3On     = false;
+static bool prevAlarmLow = false;
+static bool prevAlarmHigh = false;
+static bool prevAlarmSensor = false;
+/** Última presión (bar filtrada) incluida en un flash-TX por delta. */
+static float prevBarReported = NAN;
+static constexpr float PRESSURE_DELTA_TX_BAR = 0.1f;
+static inline void requestImmediateTx(const char *reason) {
+  g_immediateTxRequested = true;
+  Serial.printf("[TX] flash-tx solicitado por cambio de %s\n", reason);
+}
+static inline void requestFastPullWindow() {
+  g_pullFastUntilMs = millis() + PR500_PULL_FAST_WINDOW;
+}
+static unsigned long pr500EffectivePullMs(unsigned long nowMs) {
+  if (g_pullFastUntilMs != 0 && nowMs < g_pullFastUntilMs) return PR500_PULL_FAST_MS;
+  return g_cfg.paramsPullMs;
+}
+static void checkPressureDeltaForImmediateTx() {
+  const float b = g_pressureBarFiltered;
+  if (!isfinite(b)) return;
+  if (!isfinite(prevBarReported)) {
+    prevBarReported = b;
+    return;
+  }
+  if (fabsf(b - prevBarReported) >= PRESSURE_DELTA_TX_BAR) {
+    Serial.printf("[TX] delta presion %.3f -> %.3f bar (umbral %.2f)\n",
+                  prevBarReported, b, PRESSURE_DELTA_TX_BAR);
+    requestImmediateTx("presion");
+    prevBarReported = b;
+  }
+}
 static unsigned long g_lowCondSince = 0;
 static unsigned long g_highCondSince = 0;
 static unsigned long g_sensorInvalidSince = 0;
@@ -308,7 +355,7 @@ static void loadDefaults() {
   memset(&g_cfg, 0, sizeof(g_cfg));
   strlcpy(g_cfg.apiUrl, DEFAULT_INGEST_URL, sizeof(g_cfg.apiUrl));
   g_cfg.intervalMs = 60000;
-  g_cfg.paramsPullMs = 120000;
+  g_cfg.paramsPullMs = 60000;
   /* DEFAULT_PARAMS_JSON tiene muchos Fxx; 256 B de pool ArduinoJson queda corto → defaults rotos. */
   StaticJsonDocument<2048> d;
   {
@@ -387,8 +434,8 @@ static bool loadConfig() {
   // Hard floor de 60 s para proteger la cuota Free de Supabase. Migra silenciosamente
   // configs viejas que tenían 30 s guardados en LittleFS.
   if (g_cfg.intervalMs < 60000) g_cfg.intervalMs = 60000;
-  g_cfg.paramsPullMs = (uint32_t)(doc["params_pull_ms"] | 120000);
-  if (g_cfg.paramsPullMs < 15000) g_cfg.paramsPullMs = 15000;
+  g_cfg.paramsPullMs = (uint32_t)(doc["params_pull_ms"] | 60000);
+  if (g_cfg.paramsPullMs < 10000) g_cfg.paramsPullMs = 10000;
   trimAsciiInPlace(g_cfg.moduleId);
   trimAsciiInPlace(g_cfg.apiKey);
   trimAsciiInPlace(g_cfg.anonKey);
@@ -1842,6 +1889,7 @@ static void tryPullParamsFromCloud() {
   g_lastPullErrLogMs = 0;
   if (applyCloudParams(p)) {
     saveParams();
+    requestFastPullWindow();
     Serial.println(F("[PULL] Parámetros actualizados desde la app (Supabase)."));
   }
 }
@@ -2052,6 +2100,7 @@ static void handleSerialLine(const String &raw) {
   } else if (cmd == "runtime" || cmd == "run") {
     printCompressorRuntime();
   } else if (cmd == "pull") {
+    requestFastPullWindow();
     tryPullParamsFromCloud();
   } else if (cmd.startsWith("pullms ")) {
     unsigned long n = (unsigned long)cmd.substring(7).toInt();
@@ -2130,15 +2179,45 @@ void loop() {
   tickCompressorRuntime(nowMs);
   maybeSaveCompressorRuntime(nowMs);
 
+  /* Eventos: si cambió un relé o una alarma, pedimos TX inmediato. Lo hacemos
+   * *después* de applyRelays() para capturar el estado real escrito al pin
+   * (por anti-ciclado puede no coincidir con g_stageWant). */
+  {
+    const bool r1 = relayIsOn(PIN_R1);
+    const bool r2 = relayIsOn(PIN_R2);
+    const bool r3 = relayIsOn(PIN_R3);
+    if (r1 != prevR1On)              { requestImmediateTx(r1 ? "R1 ON" : "R1 OFF"); prevR1On = r1; }
+    if (r2 != prevR2On)              { requestImmediateTx(r2 ? "R2 ON" : "R2 OFF"); prevR2On = r2; }
+    if (r3 != prevR3On)              { requestImmediateTx(r3 ? "R3 ON" : "R3 OFF"); prevR3On = r3; }
+    if (g_alarmLow != prevAlarmLow)         { requestImmediateTx(g_alarmLow    ? "alarmLow ON"    : "alarmLow OFF");    prevAlarmLow    = g_alarmLow; }
+    if (g_alarmHigh != prevAlarmHigh)       { requestImmediateTx(g_alarmHigh   ? "alarmHigh ON"   : "alarmHigh OFF");   prevAlarmHigh   = g_alarmHigh; }
+    if (g_alarmSensor != prevAlarmSensor)   { requestImmediateTx(g_alarmSensor ? "alarmSensor ON" : "alarmSensor OFF"); prevAlarmSensor = g_alarmSensor; }
+  }
+  checkPressureDeltaForImmediateTx();
+
   /* No encadenar dos HTTPS en el mismo loop: hasta ~12 s bloqueados → TASK_WDT o sensación de cuelgue. */
   bool cloudHttpThisLoop = false;
-  if (nowMs - g_lastSendMs >= g_cfg.intervalMs) {
+  // TX baseline cada g_cfg.intervalMs (60 s) + TX inmediato si un evento lo
+  // pidió y pasó el gap anti-bounce. Si el evento llega pero todavía no se
+  // cumplió el gap, el flag queda pendiente y se sirve en el próximo loop.
+  bool sendNow = (nowMs - g_lastSendMs >= g_cfg.intervalMs);
+  if (g_immediateTxRequested) {
+    const bool gapOk = (g_lastImmediateTxAt == 0) ||
+                       (nowMs - g_lastImmediateTxAt >= IMMEDIATE_TX_MIN_GAP_MS);
+    if (gapOk) {
+      sendNow = true;
+      g_immediateTxRequested = false;
+      g_lastImmediateTxAt = nowMs;
+      Serial.println(F("[TX] disparando flash-tx (evento)"));
+    }
+  }
+  if (sendNow) {
     g_lastSendMs = nowMs;
     sendIngest();
     cloudHttpThisLoop = true;
   }
   if (WiFi.status() == WL_CONNECTED && strlen(g_cfg.moduleId) && strlen(g_cfg.apiKey)) {
-    if (nowMs - g_lastParamsPullMs >= g_cfg.paramsPullMs) {
+    if (nowMs - g_lastParamsPullMs >= pr500EffectivePullMs(nowMs)) {
       if (!cloudHttpThisLoop) {
         g_lastParamsPullMs = nowMs;
         tryPullParamsFromCloud();

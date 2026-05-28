@@ -21,6 +21,15 @@ export class CombistatoSettingsComponent implements OnChanges {
   feedback = '';
   jsonExport = '';
 
+  /**
+   * Buffer string por campo. Existe para permitir estados intermedios mientras se
+   * tipea (p.ej. solo "-" antes de poner los dígitos del número negativo). Con
+   * type=number + [ngModel] one-way Angular re-renderizaba el input y borraba el
+   * "-" antes de que el usuario pudiera completar "-18". Acá guardamos lo que se
+   * vea en pantalla y solo escribimos al modelo cuando parseFloat es finito.
+   */
+  drafts: Record<string, string> = {};
+
   constructor(public combistatoStore: CombistatoStoreService) {}
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -33,6 +42,7 @@ export class CombistatoSettingsComponent implements OnChanges {
     const id = this.combistatoId;
     if (!id) {
       this.model = null;
+      this.drafts = {};
       return;
     }
     this.loading = true;
@@ -40,22 +50,52 @@ export class CombistatoSettingsComponent implements OnChanges {
     this.jsonExport = '';
     const r = await this.combistatoStore.fetchCombistatoParams(id);
     this.model = r.params;
+    this.syncDraftsFromModel();
     this.loading = false;
     if (r.error) {
       this.feedback = `No se pudo cargar: ${r.error}. Se muestran valores por defecto.`;
     }
   }
 
-  onFieldChange(key: keyof CombistatoFormModel, v: string | number): void {
+  /** Reescribe todos los drafts a partir del modelo (después de cargar/reset). */
+  private syncDraftsFromModel(): void {
+    this.drafts = {};
     if (!this.model) return;
-    const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+    for (const k of Object.keys(this.model) as (keyof CombistatoFormModel)[]) {
+      this.drafts[k as string] = String(this.model[k]);
+    }
+  }
+
+  onDraftChange(key: keyof CombistatoFormModel, v: string): void {
+    if (!this.model) return;
+    // Mostramos SIEMPRE lo que tipeó el usuario; el modelo solo se actualiza si
+    // hay un número finito. Eso permite tipear "-" → "-1" → "-18" sin que el
+    // input se borre/revierta entre keystrokes.
+    this.drafts[key as string] = v;
+    const n = parseFloat(String(v).replace(',', '.'));
     if (Number.isFinite(n)) {
+      this.model[key] = n;
+    }
+  }
+
+  onFieldBlur(key: keyof CombistatoFormModel): void {
+    if (!this.model) return;
+    const draft = this.drafts[key as string] ?? '';
+    const n = parseFloat(draft.replace(',', '.'));
+    if (!Number.isFinite(n)) {
+      // Quedó algo inválido (vacío, "-", ".", etc.): restauramos el valor real
+      // del modelo así el usuario no se queda viendo un input roto.
+      this.drafts[key as string] = String(this.model[key]);
+    } else {
+      // Normalizamos la representación visible (ej: "-18.0 " → "-18").
+      this.drafts[key as string] = String(n);
       this.model[key] = n;
     }
   }
 
   resetDefaults(): void {
     this.model = mergeCombistatoParams(null);
+    this.syncDraftsFromModel();
     this.feedback = 'Valores restaurados a los del firmware (sin guardar en la nube).';
   }
 

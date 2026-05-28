@@ -95,7 +95,12 @@ static constexpr unsigned long WIFI_BOOT_CONNECT_MS = 20000UL;
 // y mantiene el Free tier de Supabase con aire. La temperatura de cámara cambia en
 // minutos, no en segundos, así que 1 punto/min sigue siendo de sobra para gráficos.
 static constexpr unsigned long TELEMETRY_DEFAULT_MS = 60000UL;
-static constexpr unsigned long PARAMS_PULL_MS       = 2UL * 60UL * 1000UL;  // 2 min
+/** Pull AR + pending_command: 60 s en reposo; 10 s tras comando o params nuevos (2 min). */
+static constexpr unsigned long PARAMS_PULL_MS_NORMAL = 60UL * 1000UL;
+static constexpr unsigned long PARAMS_PULL_MS_FAST   = 10UL * 1000UL;
+static constexpr unsigned long PULL_FAST_WINDOW_MS     = 2UL * 60UL * 1000UL;
+/** Si |ΔT| de la sonda de control supera esto, TX inmediato (Fase 1 smart delta). */
+static constexpr float TEMP_DELTA_TX_C = 0.3f;
 
 struct Cfg {
   char apiUrl[200]   = "https://fohbhymulrmdsgrubtlo.supabase.co/functions/v1/ingest-reading";
@@ -271,13 +276,73 @@ static TaskHandle_t g_netTaskHandle = NULL;
 // core 1 con prioridad mayor que el loopTask, así ningún cálculo / log /
 // portal / NTC le roba ciclos al display (causa principal de parpadeo).
 static TaskHandle_t g_displayTaskHandle = NULL;
-static bool         g_pullNowRequested = false;   // pedido desde serie
+static bool          g_pullNowRequested = false;   // pedido desde serie / params_updated_at
+static unsigned long g_pullFastUntilMs  = 0;     // ventana de pull rápido (botones / AR)
 // Banderas seteadas desde la network task (core 0) y leídas por el loop (core 1)
 // para mostrar un scroll efímero en el display cuando se envió/actualizó.
 static volatile bool g_flashTelemetrySent = false;
 static volatile bool g_flashParamsUpdated = false;
 static bool          g_flashActive        = false;
 static unsigned long g_flashEndsAt        = 0;
+
+// ============== Event-driven telemetry ======
+// Aparte del ciclo periódico de g_cfg.intervalMs (60 s por default), disparamos
+// un TX inmediato cuando cambia el estado de un relé, la fase o la puerta. Eso
+// mantiene la app "en tiempo real" para eventos importantes sin inflar la
+// cuota de inserts en Supabase (los eventos son raros vs telemetría continua).
+// Un rate-limit anti-bounce de 5 s evita tormentas si un relé chattea.
+static volatile bool           g_immediateTxRequested = false;
+static unsigned long           g_lastImmediateTxAt    = 0;
+static constexpr unsigned long IMMEDIATE_TX_MIN_GAP_MS = 5000UL;
+
+// Snapshot del estado previo para detectar transiciones (se actualiza tras
+// cada aplicarControl()+applyManualOverride() en el loop).
+static bool  prevCompresor  = false;
+static bool  prevVentilador = false;
+static bool  prevDeshielo   = false;
+static bool  prevDripping   = false;
+static bool  prevDoorOpen   = false;
+static Phase prevPhase      = PH_BOOT;
+/** Última temp reportada en TX flash (sonda que manda el termostato según AR07). */
+static float prevTempReported = TEMP_ERR_VALUE;
+
+static inline void requestImmediateTx(const char *reason) {
+  g_immediateTxRequested = true;
+  Serial.printf("[TX] flash-tx solicitado por cambio de %s\n", reason);
+}
+
+static inline void requestFastPullWindow() {
+  g_pullFastUntilMs = millis() + PULL_FAST_WINDOW_MS;
+  Serial.println(F("[PULL] ventana rapida 10s (2 min)"));
+}
+
+static unsigned long paramsPullIntervalMs(unsigned long nowMs) {
+  if (g_pullFastUntilMs != 0 && nowMs < g_pullFastUntilMs) return PARAMS_PULL_MS_FAST;
+  return PARAMS_PULL_MS_NORMAL;
+}
+
+/** Sonda usada para control (AR07 F53): 0=S1 cámara, 1=S2 evaporador. */
+static float controlTempC() {
+  if (P.F53 >= 0.5f) {
+    return fault2 ? TEMP_ERR_VALUE : tEvap;
+  }
+  return fault1 ? TEMP_ERR_VALUE : tCam;
+}
+
+static void checkTempDeltaForImmediateTx() {
+  const float t = controlTempC();
+  if (t <= TEMP_ERR_VALUE + 1.0f) return;  // sonda en fallo
+  if (prevTempReported <= TEMP_ERR_VALUE + 1.0f) {
+    prevTempReported = t;
+    return;
+  }
+  if (fabsf(t - prevTempReported) >= TEMP_DELTA_TX_C) {
+    Serial.printf("[TX] delta temp %.2f -> %.2f (umbral %.1f C)\n",
+                  prevTempReported, t, TEMP_DELTA_TX_C);
+    requestImmediateTx("temperatura");
+    prevTempReported = t;
+  }
+}
 
 // ============== WiFiManager + portal ========
 static WiFiManager wm;
@@ -965,6 +1030,7 @@ static void applyPendingCommand(JsonObject cmd) {
   g_lastCmdTs = String(ts);
   saveLastCmdTs();
   if (!applied) Serial.println(F("[CMD] comando registrado pero NO aplicado por permisos."));
+  else requestFastPullWindow();
 }
 
 /** Deriva la URL de fetch-pro300-params desde la URL de ingest-reading guardada. */
@@ -1240,6 +1306,7 @@ static void enviarTelemetria() {
       Serial.printf("[TX] Detecté params nuevos (%s vs %s) → forzando pull.\n",
                     g_paramsUpdatedAt.c_str(), pu);
       g_pullNowRequested = true;
+      requestFastPullWindow();
     }
   }
 }
@@ -1329,7 +1396,7 @@ static void displayTask(void *param) {
  * Corre en core 0 y se ocupa de:
  *   - reintento de WiFi cuando se cae,
  *   - POST de telemetría cada g_cfg.intervalMs,
- *   - pull periódico de AR desde Supabase (PARAMS_PULL_MS) o on-demand desde Serial.
+ *   - pull AR/comandos: 60 s en reposo, 10 s tras comando o params nuevos (2 min).
  * El loop principal (core 1) queda libre para multiplexar el 7-seg y atender los
  * cálculos de control sin que un POST HTTP de varios segundos congele el display.
  */
@@ -1352,14 +1419,38 @@ static void networkTask(void *param) {
           }
         }
       } else {
-        if (millis() - lastTel >= g_cfg.intervalMs) {
-          lastTel = millis();
+        // TX baseline cada g_cfg.intervalMs (60 s) + TX inmediato cuando el
+        // loop detecta un cambio de relé / fase / puerta. El rate-limit de
+        // IMMEDIATE_TX_MIN_GAP_MS evita que un relé que chattea reviente la
+        // cuota Free. Si el evento llega y el gap todavía no pasó, el flag
+        // queda pendiente y se sirve en el próximo tick (200 ms).
+        const unsigned long nowMs = millis();
+        bool sendNow = false;
+        if (nowMs - lastTel >= g_cfg.intervalMs) {
+          sendNow = true;
+        }
+        if (g_immediateTxRequested) {
+          const bool gapOk = (g_lastImmediateTxAt == 0) ||
+                             (nowMs - g_lastImmediateTxAt >= IMMEDIATE_TX_MIN_GAP_MS);
+          if (gapOk) {
+            sendNow = true;
+            g_immediateTxRequested = false;
+            g_lastImmediateTxAt = nowMs;
+            Serial.println(F("[TX] disparando flash-tx (evento)"));
+          }
+          // else: flag queda pendiente y el próximo loop la atiende.
+        }
+        if (sendNow) {
+          lastTel = nowMs;
           enviarTelemetria();
         }
-        if (g_pullNowRequested || (millis() - lastPull >= PARAMS_PULL_MS)) {
-          lastPull = millis();
-          g_pullNowRequested = false;
-          pullParamsFromCloud();
+        {
+          const unsigned long pullEvery = paramsPullIntervalMs(nowMs);
+          if (g_pullNowRequested || (nowMs - lastPull >= pullEvery)) {
+            lastPull = nowMs;
+            g_pullNowRequested = false;
+            pullParamsFromCloud();
+          }
         }
       }
     }
@@ -1387,7 +1478,7 @@ void setup() {
 
   Serial.println();
   Serial.println(F("S.G PRO300 booteando..."));
-  Serial.println(F("[FW] build: comandos manuales (force/cancel comp/fan/def)"));
+  Serial.println(F("[FW] Fase1: TX 60s + eventos + deltaT + pull 60s/10s"));
   ensureFs();
   loadConfig();
   loadParams();
@@ -1468,6 +1559,35 @@ void loop() {
     aplicarControl();
     applyManualOverride();
     evaluarAlarmas();
+
+    // Detectar transiciones y pedir TX inmediato. Se mira *después* del
+    // override manual así un click en la app (force_comp, etc.) se ve en
+    // tiempo real sin tener que esperar al próximo ciclo de 60 s.
+    if (compresor != prevCompresor) {
+      requestImmediateTx(compresor ? "comp ON" : "comp OFF");
+      prevCompresor = compresor;
+    }
+    if (ventilador != prevVentilador) {
+      requestImmediateTx(ventilador ? "vent ON" : "vent OFF");
+      prevVentilador = ventilador;
+    }
+    if (deshielo != prevDeshielo) {
+      requestImmediateTx(deshielo ? "deshielo ON" : "deshielo OFF");
+      prevDeshielo = deshielo;
+    }
+    if (dripping != prevDripping) {
+      requestImmediateTx(dripping ? "goteo ON" : "goteo OFF");
+      prevDripping = dripping;
+    }
+    if (doorOpen != prevDoorOpen) {
+      requestImmediateTx(doorOpen ? "puerta ABIERTA" : "puerta CERRADA");
+      prevDoorOpen = doorOpen;
+    }
+    if (g_phase != prevPhase) {
+      requestImmediateTx(phaseName(g_phase));
+      prevPhase = g_phase;
+    }
+    checkTempDeltaForImmediateTx();
   }
 
   // ---- Mensajes efímeros en marquesina (TX OK / AR actualizados) ----

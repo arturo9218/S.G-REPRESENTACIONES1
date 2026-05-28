@@ -19,11 +19,14 @@
             </span>
             <span class="param-help" *ngIf="f.help">{{ f.help }}</span>
             <input
-              type="number"
-              [ngModel]="m[f.key]"
-              (ngModelChange)="onFieldChange(f.key, $event)"
+              type="text"
+              inputmode="decimal"
+              autocomplete="off"
+              spellcheck="false"
+              [ngModel]="drafts[f.key + '']"
+              (ngModelChange)="onDraftChange(f.key, $event)"
+              (blur)="onFieldBlur(f.key)"
               [name]="'cb-' + sec.id + '-' + (f.key + '')"
-              [step]="f.step != null ? f.step : 1"
             />
           </label>
         </div>
