@@ -17,6 +17,8 @@ import { CombistatoChartComponent } from './combistato-chart/combistato-chart.co
 import { Pr500SettingsComponent } from './pr500/pr500-settings.component';
 import { Pr500ChartComponent } from './pr500-chart/pr500-chart.component';
 import { InicioPageComponent } from './inicio/inicio-page.component';
+import { AyudaPageComponent } from './ayuda/ayuda-page.component';
+import { HerramientasPageComponent } from './herramientas/herramientas-page.component';
 import { environment } from '../environments/environment';
 
 export function rootErrorHandlerFactory(): ErrorHandler {
@@ -41,6 +43,8 @@ export function rootErrorHandlerFactory(): ErrorHandler {
     Pr500SettingsComponent,
     Pr500ChartComponent,
     InicioPageComponent,
+    AyudaPageComponent,
+    HerramientasPageComponent,
   ],
   imports: [
     BrowserModule,

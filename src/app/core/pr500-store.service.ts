@@ -392,6 +392,7 @@ export class Pr500StoreService {
         moduleId: (r.module_id ?? '').trim() || undefined,
         updatedAtLabel: this.formatUpdatedLabel(r.updated_at),
         lastSeenLabel: lastSeenStr ? this.formatUpdatedLabel(lastSeenStr) : 'Sin contacto aún',
+        lastSeenAt: lastSeenStr,
         online: this.pr500OnlineFromLastSeen(lastSeenStr),
         ownerUserId: r.owner_user_id,
         deviceToken: tokens[r.id] ?? ((r.device_token_hash ?? '').trim() || undefined),

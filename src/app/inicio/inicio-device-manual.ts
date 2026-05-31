@@ -78,9 +78,9 @@ const PR500_LOGIC: Record<string, string> = {
   AR30: 'Corrección en °C si la sonda de succión lee distinto a un termómetro patrón en el mismo punto.',
   AR31:
     'Tipo de refrigerante para evaluar recalentamiento cuando AR32 está activo (R134a, R404A, R22, R410A, R507A según la tabla del equipo).',
-  AR32: 'En uno, calcula y valida superheat con presión + temperatura de succión. Cero = no evalúa.',
-  AR33: 'Por debajo de este superheat (°C) se considera fuera de zona (si AR32 está activo).',
-  AR34: 'Por encima de este superheat (°C) se considera fuera de zona.',
+  AR32: 'En uno, calcula y valida el recalentamiento con presión + temperatura de succión. Cero = no evalúa.',
+  AR33: 'Por debajo de este recalentamiento (°C) se considera fuera de zona (si AR32 está activo).',
+  AR34: 'Por encima de este recalentamiento (°C) se considera fuera de zona.',
 };
 
 const PR500_EXAMPLES: Record<string, string> = {
@@ -118,7 +118,7 @@ const PR500_EXAMPLES: Record<string, string> = {
   AR29: 'Con sonda en succión cableada: AR29 = 1.',
   AR30: 'Sonda 6,2 °C, termómetro 6,0 °C → AR30 = −0,2 °C.',
   AR31: 'Instalación R404A → elegir R404A en la lista (valor 2 en equipo).',
-  AR32: 'Supervisar superheat: AR32 = 1 y definir AR33/AR34.',
+  AR32: 'Supervisar recalentamiento: AR32 = 1 y definir AR33/AR34.',
   AR33: 'AR33 = 4 °C: por debajo, posible líquido en succión.',
   AR34: 'AR34 = 12 °C: por encima, posible poca carga o válvula muy abierta.',
 };
@@ -131,7 +131,7 @@ const SECTION_INTROS: Record<string, string> = {
   'f17-f22': 'Parámetros AR17 a AR22: pruebas manuales por compresor y modo clásico o “demanda” de presión.',
   'f23-f27':
     'Parámetros AR23 a AR27: detección de cable o sensor de presión dañado y ciclo de emergencia (diferente a alarma AR10/AR11).',
-  'f29-f34': 'Parámetros AR29 a AR34: sonda de succión opcional y recalentamiento (superheat).',
+  'f29-f34': 'Parámetros AR29 a AR34: sonda de succión opcional y recalentamiento.',
 };
 
 /** AR08 explicado para operadores sin conocer el firmware. */

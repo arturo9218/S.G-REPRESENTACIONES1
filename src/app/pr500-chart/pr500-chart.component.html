@@ -5,7 +5,7 @@
       <h1 class="pr5-title">{{ pr500Name }}</h1>
       <p class="pr5-sub">
         Curva de presión de proceso en el rango elegido. La nube guarda siempre bar; si el control está en
-        <strong>psi</strong>, el eje izquierdo usa esa unidad. Si el firmware envía sonda de succión y superheat,
+        <strong>psi</strong>, el eje izquierdo usa esa unidad. Si el firmware envía sonda de succión y recalentamiento,
         podés superponer <strong>°C</strong> en el eje derecho. Debajo: marcha ON/OFF de compresores y alarma (escalón o barras).
       </p>
     </div>
@@ -41,7 +41,7 @@
       <div class="pr5-side__toggles">
         <label><input type="checkbox" [(ngModel)]="showPressure" (ngModelChange)="onLayerToggle()" /> Presión</label>
         <label><input type="checkbox" [(ngModel)]="showTempSuction" (ngModelChange)="onLayerToggle()" /> Succión °C</label>
-        <label><input type="checkbox" [(ngModel)]="showSuperheat" (ngModelChange)="onLayerToggle()" /> Superheat</label>
+        <label><input type="checkbox" [(ngModel)]="showSuperheat" (ngModelChange)="onLayerToggle()" /> Recalentamiento</label>
         <label><input type="checkbox" [(ngModel)]="showComp1" (ngModelChange)="onLayerToggle()" /> C1</label>
         <label><input type="checkbox" [(ngModel)]="showComp2" (ngModelChange)="onLayerToggle()" /> C2</label>
         <label><input type="checkbox" [(ngModel)]="showComp3" (ngModelChange)="onLayerToggle()" /> C3</label>

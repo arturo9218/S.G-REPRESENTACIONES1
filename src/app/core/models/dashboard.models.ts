@@ -73,6 +73,8 @@ export interface DashboardCombistato {
   updatedAtLabel: string;
   /** Último POST de telemetría aceptado (columna `last_seen_at`); vacío si aún no hubo envíos. */
   lastSeenLabel: string;
+  /** ISO de `last_seen_at` para comparar frescura entre equipos. */
+  lastSeenAt?: string | null;
   /** Conexión reciente según `last_seen_at` y el mismo umbral que paneles (`deviceOfflineAfterMs`). */
   online: boolean;
   /** Dueño en Supabase (útil en vista admin). */
@@ -116,6 +118,8 @@ export interface DashboardPr500 {
   moduleId?: string;
   updatedAtLabel: string;
   lastSeenLabel: string;
+  /** ISO de `last_seen_at` para comparar frescura entre equipos. */
+  lastSeenAt?: string | null;
   online: boolean;
   ownerUserId?: string;
   deviceToken?: string;

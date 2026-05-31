@@ -1,7 +1,5 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import type { DashboardAlert } from '../core/models/dashboard.models';
-import { INICIO_DEVICE_MANUALS, type InicioDeviceManual } from './inicio-device-manual';
-import { downloadInicioManualPdf } from './inicio-manual-pdf';
 
 export type InicioEquipmentKind = 'pr500' | 'pro400' | 'pro300';
 
@@ -40,16 +38,15 @@ export class InicioPageComponent {
   @Input() lastDataLabel = '';
   @Input() attentionAlerts: DashboardAlert[] = [];
   @Input() fleetRows: InicioFleetRow[] = [];
+  @Input() fleetSearchQuery = '';
 
   @Output() goDevices = new EventEmitter<void>();
   @Output() goAlerts = new EventEmitter<void>();
-  @Output() goSettings = new EventEmitter<void>();
+  @Output() goAyuda = new EventEmitter<void>();
+  @Output() goHerramientas = new EventEmitter<void>();
   @Output() addEquipment = new EventEmitter<InicioEquipmentKind>();
   /** Clic en una fila de «Tus equipos»: ir a Dispositivos y mostrar esa tarjeta. */
   @Output() openFleetRow = new EventEmitter<InicioFleetRow>();
-
-  readonly deviceManuals: InicioDeviceManual[] = INICIO_DEVICE_MANUALS;
-  manualPdfBusy = false;
 
   readonly equipmentOptions: {
     kind: InicioEquipmentKind;
@@ -60,7 +57,7 @@ export class InicioPageComponent {
     {
       kind: 'pr500',
       title: 'PR500',
-      desc: 'Central frigorífica: presión, compresores y superheat.',
+      desc: 'Central frigorífica: presión, compresores y recalentamiento.',
       badge: 'Presión',
     },
     {
@@ -85,7 +82,7 @@ export class InicioPageComponent {
     },
     {
       title: 'Sala de máquinas',
-      caption: 'Controladores PR500: presión, compresores ON/OFF y superheat en un solo panel.',
+      caption: 'Controladores PR500: presión, compresores ON/OFF y recalentamiento en un solo panel.',
       image: 'assets/inicio/compresores.svg',
     },
     {
@@ -107,6 +104,10 @@ export class InicioPageComponent {
     return this.fleetRows.slice(0, 10);
   }
 
+  get fleetSearchActive(): boolean {
+    return this.fleetSearchQuery.trim().length > 0;
+  }
+
   get greeting(): string {
     const h = new Date().getHours();
     if (h < 12) return 'Buenos días';
@@ -116,19 +117,5 @@ export class InicioPageComponent {
 
   pickEquipment(kind: InicioEquipmentKind): void {
     this.addEquipment.emit(kind);
-  }
-
-  async downloadManualPdf(manual: InicioDeviceManual): Promise<void> {
-    if (this.manualPdfBusy) return;
-    this.manualPdfBusy = true;
-    try {
-      await downloadInicioManualPdf(manual);
-    } catch (err) {
-      console.error('Error al generar PDF del manual', err);
-      const msg = err instanceof Error ? err.message : String(err);
-      alert(`No se pudo generar el PDF: ${msg}`);
-    } finally {
-      this.manualPdfBusy = false;
-    }
   }
 }

@@ -26,6 +26,8 @@ const routes: Routes = [
   { path: 'dispositivos', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'ficha-equipo', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'alertas', component: DashboardComponent, canActivate: [authGuard] },
+  { path: 'ayuda', component: DashboardComponent, canActivate: [authGuard] },
+  { path: 'herramientas', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'configuracion', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'chart', component: ChartAnalysisComponent },
   { path: 'chart-combistato', component: CombistatoChartComponent, canActivate: [authGuard] },

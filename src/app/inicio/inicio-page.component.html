@@ -9,6 +9,9 @@
       <p class="inicio-hero__lead">
         Resumen de planta, alertas y alta de equipos PR500, PRO400 y PRO300 desde un solo acceso.
       </p>
+      <p class="inicio-hero__onboard" *ngIf="totalEquipos === 0">
+        Todavía no hay equipos en tu cuenta. Elegí un tipo abajo para dar de alta el primero.
+      </p>
       <div class="inicio-hero__actions">
         <button type="button" class="inicio-btn inicio-btn--primary" (click)="goDevices.emit()">
           Ver dispositivos y gráficos
@@ -71,75 +74,19 @@
     </ul>
   </section>
 
-  <section class="inicio-add" aria-label="Agregar equipo">
-    <h2 class="inicio-section-title">Agregar equipo</h2>
-    <p class="inicio-section-lead">Elegí el tipo de controlador. Después completás nombre, ubicación e ID módulo en el formulario.</p>
-    <div class="inicio-add__grid">
-      <button
-        type="button"
-        class="inicio-add__card"
-        *ngFor="let eq of equipmentOptions"
-        (click)="pickEquipment(eq.kind)"
-      >
-        <span class="inicio-add__badge">{{ eq.badge }}</span>
-        <span class="inicio-add__title">{{ eq.title }}</span>
-        <span class="inicio-add__desc">{{ eq.desc }}</span>
-        <span class="inicio-add__cta">+ Agregar</span>
-      </button>
-    </div>
-  </section>
-
-  <section class="inicio-manual" aria-label="Manual de uso de equipos">
-    <h2 class="inicio-section-title">Manual de uso</h2>
-    <p class="inicio-section-lead">
-      Cómo funciona cada parámetro <strong>AR01 a AR34</strong> del PR500 (explicación en lenguaje claro + ejemplo). Podés
-      <strong>descargar el manual en PDF</strong> para imprimirlo o enviarlo a alguien de planta. PRO400/PRO300 también tienen PDF.
-    </p>
-    <details
-      class="inicio-manual__panel"
-      [class.inicio-manual__panel--pr500]="manual.id === 'pr500'"
-      *ngFor="let manual of deviceManuals"
-      [attr.id]="'manual-' + manual.id"
-    >
-      <summary class="inicio-manual__summary">
-        <span class="inicio-manual__summary-title">{{ manual.title }}</span>
-        <span class="inicio-manual__summary-sub">{{ manual.subtitle }}</span>
-      </summary>
-      <div class="inicio-manual__body">
-        <p class="inicio-manual__intro">{{ manual.intro }}</p>
-        <div class="inicio-manual__block" *ngFor="let block of manual.blocks">
-          <h3 class="inicio-manual__block-title">{{ block.title }}</h3>
-          <p class="inicio-manual__block-intro" *ngIf="block.intro">{{ block.intro }}</p>
-          <dl class="inicio-manual__dl">
-            <div class="inicio-manual__row" *ngFor="let item of block.items">
-              <dt>{{ item.term }}</dt>
-              <dd>
-                {{ item.detail }}
-                <span class="inicio-manual__example" *ngIf="item.example">
-                  <strong>Ejemplo:</strong> {{ item.example }}
-                </span>
-              </dd>
-            </div>
-          </dl>
-        </div>
-        <button
-          type="button"
-          class="inicio-btn inicio-btn--ghost inicio-manual__pdf"
-          [disabled]="manualPdfBusy"
-          (click)="downloadManualPdf(manual)"
-        >
-          {{ manualPdfBusy ? 'Generando PDF…' : 'Descargar manual en PDF' }}
-        </button>
-      </div>
-    </details>
-  </section>
-
-  <section class="inicio-fleet" *ngIf="fleetTop.length" aria-label="Estado de equipos">
+  <section
+    class="inicio-fleet"
+    *ngIf="fleetTop.length || (fleetSearchActive && totalEquipos > 0)"
+    aria-label="Estado de equipos"
+  >
     <div class="inicio-fleet__head">
       <h2 class="inicio-section-title">Tus equipos</h2>
       <button type="button" class="inicio-link" (click)="goDevices.emit()">Abrir panel</button>
     </div>
-    <ul class="inicio-fleet__list">
+    <p class="inicio-fleet__empty" *ngIf="!fleetTop.length && fleetSearchActive">
+      Ningún equipo coincide con «{{ fleetSearchQuery.trim() }}».
+    </p>
+    <ul class="inicio-fleet__list" *ngIf="fleetTop.length">
       <li
         class="inicio-fleet__row"
         *ngFor="let row of fleetTop"
@@ -159,25 +106,50 @@
     </ul>
   </section>
 
-  <section class="inicio-quick" aria-label="Accesos rápidos">
-    <h2 class="inicio-section-title">Accesos rápidos</h2>
-    <div class="inicio-quick__grid">
-      <button type="button" class="inicio-quick__card" (click)="goDevices.emit()">
-        <span class="inicio-quick__name">Dispositivos y gráficos</span>
-        <span class="inicio-quick__desc">Curvas, listado y configuración</span>
-      </button>
-      <button type="button" class="inicio-quick__card" (click)="goAlerts.emit()">
-        <span class="inicio-quick__name">Alertas</span>
-        <span class="inicio-quick__desc">Eventos y umbrales</span>
-      </button>
-      <button type="button" class="inicio-quick__card" (click)="goSettings.emit()">
-        <span class="inicio-quick__name">Configuración</span>
-        <span class="inicio-quick__desc">Cuenta y notificaciones</span>
+  <section
+    class="inicio-add"
+    [class.inicio-add--highlight]="totalEquipos === 0"
+    aria-label="Agregar equipo"
+  >
+    <h2 class="inicio-section-title">Agregar equipo</h2>
+    <p class="inicio-section-lead">Elegí el tipo de controlador. Después completás nombre, ubicación e ID módulo en el formulario.</p>
+    <div class="inicio-add__grid">
+      <button
+        type="button"
+        class="inicio-add__card"
+        *ngFor="let eq of equipmentOptions"
+        (click)="pickEquipment(eq.kind)"
+      >
+        <span class="inicio-add__badge">{{ eq.badge }}</span>
+        <span class="inicio-add__title">{{ eq.title }}</span>
+        <span class="inicio-add__desc">{{ eq.desc }}</span>
+        <span class="inicio-add__cta">+ Agregar</span>
       </button>
     </div>
   </section>
 
-  <section class="inicio-gallery" aria-label="Sistemas frigoríficos">
+  <section class="inicio-help" aria-label="Ayuda y herramientas">
+    <button type="button" class="inicio-help__card" (click)="goAyuda.emit()">
+      <span class="inicio-help__text">
+        <span class="inicio-help__title">Manuales y parámetros AR</span>
+        <span class="inicio-help__desc">
+          PR500, PRO300 y PRO400 — guías para planta y PDF descargable.
+        </span>
+      </span>
+      <span class="inicio-help__cta">Abrir ayuda →</span>
+    </button>
+    <button type="button" class="inicio-help__card inicio-help__card--tools" (click)="goHerramientas.emit()">
+      <span class="inicio-help__text">
+        <span class="inicio-help__title">P–T, recalentamiento y subenfriamiento</span>
+        <span class="inicio-help__desc">
+          Tabla P–T, recalentamiento, subenfriamiento y dimensionado Danfoss — independiente del PR500.
+        </span>
+      </span>
+      <span class="inicio-help__cta inicio-help__cta--tools">Abrir herramientas →</span>
+    </button>
+  </section>
+
+  <section class="inicio-gallery" *ngIf="totalEquipos === 0" aria-label="Sistemas frigoríficos">
     <h2 class="inicio-section-title">Sistemas que monitoreamos</h2>
     <div class="inicio-gallery__grid">
       <article class="inicio-gallery__card" *ngFor="let g of gallery">

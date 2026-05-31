@@ -50,6 +50,18 @@
   color: #cbd5e1;
 }
 
+.inicio-hero__onboard {
+  margin: -0.35rem 0 1rem;
+  padding: 0.55rem 0.75rem;
+  max-width: 36rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #e0f2fe;
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 10px;
+}
+
 .inicio-hero__actions {
   display: flex;
   flex-wrap: wrap;
@@ -277,6 +289,23 @@
   margin-top: 0.2rem;
 }
 
+.inicio-add--highlight {
+  padding: 1rem 1.1rem 1.15rem;
+  border-radius: 14px;
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.24);
+}
+
+.inicio-fleet__empty {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  font-size: 0.88rem;
+  color: #94a3b8;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+}
+
 .inicio-add__grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -332,143 +361,68 @@
   color: #7dd3fc;
 }
 
-.inicio-manual {
-  padding-top: 0.25rem;
+.inicio-help {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
 }
 
-.inicio-manual__panel--pr500 .inicio-manual__body {
-  max-height: min(70vh, 720px);
-  overflow-y: auto;
-}
-
-.inicio-manual__panel {
-  margin-top: 0.55rem;
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(15, 23, 42, 0.55);
-  overflow: hidden;
-}
-
-.inicio-manual__panel[open] {
-  border-color: rgba(56, 189, 248, 0.28);
-}
-
-.inicio-manual__summary {
+.inicio-help__card {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.35rem 0.75rem;
-  padding: 0.85rem 1rem;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  width: 100%;
+  padding: 1rem 1.1rem;
+  text-align: left;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(129, 140, 248, 0.22);
   cursor: pointer;
-  list-style: none;
-  user-select: none;
+  transition: border-color 0.15s, background 0.15s;
 }
 
-.inicio-manual__summary::-webkit-details-marker {
-  display: none;
+.inicio-help__card:hover {
+  border-color: rgba(129, 140, 248, 0.45);
+  background: rgba(30, 41, 59, 0.85);
 }
 
-.inicio-manual__summary::before {
-  content: '▸';
-  margin-right: 0.45rem;
-  color: #38bdf8;
-  font-size: 0.85rem;
+.inicio-help__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+  min-width: 12rem;
 }
 
-.inicio-manual__panel[open] .inicio-manual__summary::before {
-  content: '▾';
-}
-
-.inicio-manual__summary-title {
+.inicio-help__title {
   font-weight: 800;
   color: #f1f5f9;
   font-size: 0.95rem;
 }
 
-.inicio-manual__summary-sub {
-  font-size: 0.78rem;
-  color: #64748b;
-}
-
-.inicio-manual__body {
-  padding: 0 1rem 1rem;
-  border-top: 1px solid rgba(148, 163, 184, 0.1);
-}
-
-.inicio-manual__intro {
-  margin: 0.85rem 0 1rem;
-  font-size: 0.88rem;
-  line-height: 1.55;
-  color: #cbd5e1;
-}
-
-.inicio-manual__block + .inicio-manual__block {
-  margin-top: 1.1rem;
-}
-
-.inicio-manual__block-title {
-  margin: 0 0 0.45rem;
-  font-size: 0.92rem;
-  font-weight: 700;
-  color: #7dd3fc;
-}
-
-.inicio-manual__block-intro {
-  margin: 0 0 0.55rem;
+.inicio-help__desc {
   font-size: 0.82rem;
   color: #94a3b8;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
-.inicio-manual__dl {
-  margin: 0;
-}
-
-.inicio-manual__row {
-  padding: 0.55rem 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
-}
-
-.inicio-manual__row:last-child {
-  border-bottom: none;
-}
-
-.inicio-manual__row dt {
-  font-weight: 700;
-  font-size: 0.84rem;
-  color: #e2e8f0;
-  margin-bottom: 0.2rem;
-}
-
-.inicio-manual__row dd {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  color: #94a3b8;
-}
-
-.inicio-manual__example {
-  display: block;
-  margin-top: 0.35rem;
-  padding: 0.45rem 0.55rem;
-  border-radius: 6px;
-  background: rgba(56, 189, 248, 0.08);
-  color: #bae6fd;
+.inicio-help__cta {
   font-size: 0.8rem;
-  line-height: 1.45;
+  font-weight: 700;
+  color: #a5b4fc;
 }
 
-.inicio-manual__example strong {
-  color: #7dd3fc;
+.inicio-help__card--tools {
+  border-color: rgba(52, 211, 153, 0.28);
 }
 
-.inicio-manual__pdf {
-  margin-top: 1rem;
+.inicio-help__card--tools:hover {
+  border-color: rgba(52, 211, 153, 0.5);
 }
 
-.inicio-manual__pdf:disabled {
-  opacity: 0.65;
-  cursor: wait;
+.inicio-help__cta--tools {
+  color: #6ee7b7;
 }
 
 .inicio-fleet__row {

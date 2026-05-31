@@ -29,6 +29,7 @@ import { ingestFunctionUrl } from '../core/supabase-config';
 import { pr500BarToPsi } from '../pr500/pr500-params.defaults';
 import type { InicioFleetRow } from '../inicio/inicio-page.component';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
+import { ToastService } from '../core/toast.service';
 import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 import {
   DeviceEquipmentFichaRow,
@@ -191,7 +192,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
    * Vista según la URL: panel principal, dispositivos, alertas o configuración.
    * Sidebar y barra móvil reflejan este valor (sincronizado en `syncShellRoute`).
    */
-  shellRoute: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'settings' = 'inicio';
+  shellRoute: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'ayuda' | 'herramientas' | 'settings' = 'inicio';
   /** Desde Inicio: mostrar solo la tarjeta del equipo elegido en Dispositivos. */
   deviceSoloFocus: { kind: 'sensor' | 'pr500' | 'combistato'; entityId: string } | null = null;
   /** Preset al alta: PRO400 (1 sonda), PRO300 (2 sondas) o panel genérico. */
@@ -395,7 +396,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     readonly pr500Store: Pr500StoreService,
     private readonly webPush: WebPushService,
     private readonly equipmentSheet: EquipmentSheetService,
-    private readonly combistatoCommand: CombistatoCommandService
+    private readonly combistatoCommand: CombistatoCommandService,
+    private readonly toast: ToastService
   ) {
     void this.auth.getSession().then((s) => {
       this.email = s?.user.email ?? null;
@@ -597,6 +599,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.shellRoute = 'inicio';
       return;
     }
+    if (path === '/ayuda') {
+      this.shellRoute = 'ayuda';
+      return;
+    }
+    if (path === '/herramientas') {
+      this.shellRoute = 'herramientas';
+      return;
+    }
     this.scheduleAlarmHistoryIfVisible();
   }
 
@@ -677,9 +687,40 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.devices.length > 0;
   }
 
+  /** Paneles PRO400 + PRO300 + PR500 (para buscador y frescura de datos). */
+  get hasAnyEquipment(): boolean {
+    return this.devices.length > 0 || this.combistatos.length > 0 || this.pr500s.length > 0;
+  }
+
+  private matchesEquipmentSearch(...parts: (string | null | undefined)[]): boolean {
+    const q = this.searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    const hay = parts
+      .filter((p) => p != null && String(p).trim())
+      .join(' ')
+      .toLowerCase();
+    return hay.includes(q);
+  }
+
+  private combistatoFleetDetail(c: DashboardCombistato): string {
+    const t1 = c.lastTemp1C;
+    const t2 = c.lastTemp2C;
+    let tempBit = 'Sin temp.';
+    if (t1 != null && t2 != null) {
+      tempBit = `S1 ${t1.toFixed(1)} · S2 ${t2.toFixed(1)} °C`;
+    } else if (t1 != null) {
+      tempBit = `S1 ${t1.toFixed(1)} °C`;
+    } else if (t2 != null) {
+      tempBit = `S2 ${t2.toFixed(1)} °C`;
+    }
+    return `${tempBit} · ${c.lastSeenLabel || c.updatedAtLabel}`;
+  }
+
   /** Muestra el panel principal si hay equipos de lectura y/o combistatos en nube. */
   get hasShellContent(): boolean {
     if (this.shellRoute === 'inicio') return true;
+    if (this.shellRoute === 'ayuda') return true;
+    if (this.shellRoute === 'herramientas') return true;
     return (
       this.hasDevices ||
       (this.environment.deviceCloudSync === true &&
@@ -728,23 +769,25 @@ export class DashboardComponent implements OnInit, OnDestroy {
         entityId: c.id,
         kind: 'combistato',
         name: c.name,
-        detail: c.lastSeenLabel || c.updatedAtLabel,
+        detail: this.combistatoFleetDetail(c),
         online: c.online,
-        hasAlert: !c.online,
+        hasAlert: deviceHasAlert(c.id, c.name) || !c.online,
       });
     }
     const score = (r: InicioFleetRow) => (r.hasAlert ? 0 : r.online ? 2 : 1);
-    return rows.sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name, 'es'));
+    let sorted = rows.sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name, 'es'));
+    const q = this.searchQuery.trim().toLowerCase();
+    if (q) {
+      sorted = sorted.filter((r) =>
+        this.matchesEquipmentSearch(r.name, r.detail, r.entityId, r.kind)
+      );
+    }
+    return sorted;
   }
 
-  /** Última marca de tiempo entre todas las lecturas cargadas (referencia de frescura). */
+  /** Última marca de tiempo entre lecturas de paneles, PRO300 y PR500. */
   get lastDataRefreshLabel(): string {
-    if (!this.readings.length) return '';
-    let max = 0;
-    for (const r of this.readings) {
-      const t = new Date(r.at).getTime();
-      if (Number.isFinite(t) && t > max) max = t;
-    }
+    const max = this.computeLastDataRefreshMaxMs();
     if (!max) return '';
     return new Date(max).toLocaleString('es-AR', {
       day: '2-digit',
@@ -752,6 +795,48 @@ export class DashboardComponent implements OnInit, OnDestroy {
       hour: '2-digit',
       minute: '2-digit',
     });
+  }
+
+  get lastDataRefreshAgeLabel(): string {
+    const max = this.computeLastDataRefreshMaxMs();
+    if (!max) return '';
+    return this.formatRelativeAge(max);
+  }
+
+  get lastDataRefreshStale(): boolean {
+    const max = this.computeLastDataRefreshMaxMs();
+    if (!max) return false;
+    return Date.now() - max > 5 * 60 * 1000;
+  }
+
+  get readingsPollIntervalSec(): number {
+    const ms = environment.readingsPollIntervalMs;
+    return Math.round((typeof ms === 'number' && ms >= 2000 ? ms : 4000) / 1000);
+  }
+
+  private computeLastDataRefreshMaxMs(): number {
+    let max = 0;
+    const bump = (iso: string | null | undefined): void => {
+      if (!iso?.trim()) return;
+      const t = new Date(iso).getTime();
+      if (Number.isFinite(t) && t > max) max = t;
+    };
+    for (const r of this.readings) bump(r.at);
+    for (const c of this.combistatos) bump(c.lastSeenAt);
+    for (const p of this.pr500s) bump(p.lastSeenAt);
+    return max;
+  }
+
+  private formatRelativeAge(atMs: number): string {
+    const sec = Math.max(0, Math.floor((Date.now() - atMs) / 1000));
+    if (sec < 10) return 'hace unos segundos';
+    if (sec < 60) return `hace ${sec} s`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `hace ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 48) return `hace ${h} h`;
+    const d = Math.floor(h / 24);
+    return `hace ${d} d`;
   }
 
   get isDeviceSoloView(): boolean {
@@ -785,7 +870,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return this.pr500s.find((p) => p.id === f.entityId)?.name ?? 'PR500';
     }
     if (f.kind === 'combistato') {
-      return this.combistatos.find((c) => c.id === f.entityId)?.name ?? 'Combistato';
+      return this.combistatos.find((c) => c.id === f.entityId)?.name ?? 'PRO300';
     }
     return this.devices.find((d) => d.id === f.entityId)?.name ?? 'Panel';
   }
@@ -805,7 +890,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return this.combistatos.filter((c) => c.id === f.entityId);
     }
     if (this.isDeviceSoloView) return [];
-    return this.combistatos;
+    if (!this.searchQuery.trim()) return this.combistatos;
+    return this.combistatos.filter((c) =>
+      this.matchesEquipmentSearch(c.name, c.location, c.moduleId, c.id)
+    );
   }
 
   get pr500sForView(): DashboardPr500[] {
@@ -814,7 +902,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return this.pr500s.filter((p) => p.id === f.entityId);
     }
     if (this.isDeviceSoloView) return [];
-    return this.pr500s;
+    if (!this.searchQuery.trim()) return this.pr500s;
+    return this.pr500s.filter((p) =>
+      this.matchesEquipmentSearch(p.name, p.location, p.moduleId, p.id)
+    );
   }
 
   get filteredDevices(): DashboardDevice[] {
@@ -2108,12 +2199,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
     setTimeout(scroll, 350);
   }
 
-  scrollToSection(section: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'settings'): void {
+  scrollToSection(
+    section: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'ayuda' | 'herramientas' | 'settings'
+  ): void {
     const paths: Record<typeof section, string> = {
       inicio: '/inicio',
       devices: '/dispositivos',
       equipment: '/ficha-equipo',
       alerts: '/alertas',
+      ayuda: '/ayuda',
+      herramientas: '/herramientas',
       settings: '/configuracion',
     };
     const path = paths[section];
@@ -2133,9 +2228,40 @@ export class DashboardComponent implements OnInit, OnDestroy {
         combistatoId: null,
         pr500Id: null,
         solo: null,
+        fichaId: null,
+        tab: null,
       },
       replaceUrl: true,
     });
+  }
+
+  /** Desde Ficha equipo → Herramientas con panel, ficha y pestaña precargados. */
+  openHerramientasFromEquipment(tab: 'txv' | 'sh' = 'txv'): void {
+    if (!this.selectedDeviceId || !this.selectedFichaId) return;
+    this.deviceSoloFocus = null;
+    void this.router.navigate(['/herramientas'], {
+      queryParams: {
+        deviceId: this.selectedDeviceId,
+        fichaId: this.selectedFichaId,
+        tab,
+        combistatoId: null,
+        pr500Id: null,
+        solo: null,
+      },
+      replaceUrl: true,
+    });
+  }
+
+  onHerramientasFichaSaved(ev: { deviceId: string; fichaId: string }): void {
+    if (this.selectedDeviceId !== ev.deviceId) return;
+    if (this.shellRoute === 'equipment') {
+      void this.loadEquipmentPage();
+      return;
+    }
+    if (this.selectedFichaId === ev.fichaId) {
+      const row = this.equipmentFichas.find((f) => f.id === ev.fichaId);
+      if (row) this.hydrateEquipmentFormsFromFicha(row);
+    }
   }
 
   openChartInNewTab(e?: Event): void {
@@ -2167,7 +2293,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
       void this.loadEquipmentPage();
     }
     if (syncQueryToUrl) {
-      const shellPaths = ['/inicio', '/dispositivos', '/ficha-equipo', '/alertas', '/configuracion'];
+      const shellPaths = [
+        '/inicio',
+        '/dispositivos',
+        '/ficha-equipo',
+        '/alertas',
+        '/ayuda',
+        '/herramientas',
+        '/configuracion',
+      ];
       if (shellPaths.includes(path)) {
         this.skipQueryParamDeviceSync = true;
         const queryParams =
@@ -2633,7 +2767,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const shTxt = sh != null && Number.isFinite(sh) ? `${sh.toFixed(1)}°C` : '—';
     const okTxt =
       p.lastSuperheatOk == null ? 'sin estado' : p.lastSuperheatOk ? 'OK' : 'fuera de rango';
-    return `Succión: ${tTxt} · SH: ${shTxt} · ${okTxt}`;
+    return `Succión: ${tTxt} · Rec.: ${shTxt} · ${okTxt}`;
   }
 
   goPr500Settings(p: DashboardPr500, ev?: Event): void {
@@ -2793,7 +2927,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   async confirmDeleteCombistato(c: DashboardCombistato): Promise<void> {
-    if (!confirm(`¿Eliminar combistato «${c.name}»? Se borrarán también los parámetros en la nube.`)) return;
+    if (!confirm(`¿Eliminar PRO300 «${c.name}»? Se borrarán también los parámetros en la nube.`)) return;
     const r = await this.combistatoStore.removeCombistatoAsync(c.id);
     if (!r.ok) {
       alert(r.error ?? 'No se pudo eliminar.');
@@ -3191,22 +3325,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!window.confirm(question)) return;
     try {
       await this.combistatoCommand.send(c.id, kind, value);
-      this.showCombistatoCommandFeedback(c.id, this.combistatoCommandSuccessMessage(kind, relay));
+      const detail = this.combistatoCommandSuccessMessage(kind, relay);
+      this.toast.success(`${c.name}: ${detail}`);
     } catch (e) {
-      window.alert(`No pude enviar el comando: ${(e as Error).message}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      this.toast.error(`${c.name}: no se pudo enviar el comando (${msg})`);
     }
   }
 
-  /** Feedback efímero (3 s) que se renderiza arriba de la card del PRO300 destinatario. */
-  combistatoCommandFeedback: { id: string; msg: string } | null = null;
-  private combistatoCommandFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
-  private showCombistatoCommandFeedback(id: string, msg: string): void {
-    this.combistatoCommandFeedback = { id, msg };
-    if (this.combistatoCommandFeedbackTimer) clearTimeout(this.combistatoCommandFeedbackTimer);
-    this.combistatoCommandFeedbackTimer = setTimeout(() => {
-      this.combistatoCommandFeedback = null;
-    }, 3500);
-  }
   private combistatoCommandSuccessMessage(
     kind: CombistatoCommandKind,
     relay: 'comp' | 'fan' | 'def'
@@ -5412,7 +5538,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           pushField(fields, 'Presión de descarga (bar)', ficha.dischargePressureBar.toFixed(2));
         }
         if (ficha.superheatC != null && Number.isFinite(ficha.superheatC)) {
-          pushField(fields, 'Sobrecalentamiento (°C)', ficha.superheatC.toFixed(1));
+          pushField(fields, 'Recalentamiento (°C)', ficha.superheatC.toFixed(1));
         }
         if (ficha.subcoolingC != null && Number.isFinite(ficha.subcoolingC)) {
           pushField(fields, 'Subenfriamiento (°C)', ficha.subcoolingC.toFixed(1));

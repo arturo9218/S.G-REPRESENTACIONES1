@@ -92,3 +92,85 @@
   background: #2563eb;
   border-color: #2563eb;
 }
+
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
+  z-index: 10002;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  max-width: min(520px, calc(100vw - 1.5rem));
+  padding: 0.75rem 0.85rem 0.75rem 1rem;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #f8fafc;
+  background: rgba(30, 41, 59, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  transform: translateX(-50%);
+  animation: app-toast-in 180ms ease-out;
+}
+
+.app-toast--success {
+  border-color: rgba(52, 211, 153, 0.45);
+  background: linear-gradient(135deg, rgba(6, 78, 59, 0.96), rgba(15, 23, 42, 0.96));
+}
+
+.app-toast--error {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: linear-gradient(135deg, rgba(69, 10, 10, 0.96), rgba(15, 23, 42, 0.96));
+}
+
+.app-toast__text {
+  flex: 1;
+}
+
+.app-toast__close {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: -0.15rem -0.15rem 0 0;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.app-toast__close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+@keyframes app-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@media (min-width: 901px) {
+  .app-toast {
+    bottom: auto;
+    top: calc(4.5rem + env(safe-area-inset-top, 0px));
+  }
+
+  @keyframes app-toast-in {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-0.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  }
+}

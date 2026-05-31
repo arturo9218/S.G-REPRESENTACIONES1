@@ -63,6 +63,31 @@
       <button
         type="button"
         class="shell__nav-item"
+        [class.shell__nav-item--active]="shellRoute === 'ayuda'"
+        [attr.aria-current]="shellRoute === 'ayuda' ? 'page' : null"
+        (click)="scrollToSection('ayuda')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+        </svg>
+        <span>Ayuda</span>
+      </button>
+      <button
+        type="button"
+        class="shell__nav-item"
+        [class.shell__nav-item--active]="shellRoute === 'herramientas'"
+        [attr.aria-current]="shellRoute === 'herramientas' ? 'page' : null"
+        (click)="scrollToSection('herramientas')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+        <span>Herramientas</span>
+      </button>
+      <button
+        type="button"
+        class="shell__nav-item"
         [class.shell__nav-item--active]="shellRoute === 'settings'"
         [attr.aria-current]="shellRoute === 'settings' ? 'page' : null"
         (click)="scrollToSection('settings')"
@@ -106,10 +131,10 @@
         <input
           type="search"
           class="topbar__search"
-          placeholder="Buscar dispositivo…"
-          aria-label="Buscar dispositivo por nombre"
+          placeholder="Buscar equipo…"
+          aria-label="Buscar equipo por nombre, ubicación o ID"
           [(ngModel)]="searchQuery"
-          [disabled]="!hasDevices"
+          [disabled]="!hasAnyEquipment"
         />
       </div>
       <div class="topbar__right">
@@ -127,14 +152,20 @@
           </svg>
           <span class="topbar__badge" *ngIf="summaryAlarmEvents > 0">{{ summaryAlarmEvents }}</span>
         </button>
-        <button type="button" class="topbar__icon-btn" aria-label="Más opciones">
+        <button
+          type="button"
+          class="topbar__icon-btn"
+          aria-label="Ayuda y manuales"
+          title="Ayuda y manuales"
+          (click)="scrollToSection('ayuda')"
+        >
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
         </button>
         <div class="topbar__avatar" [attr.title]="email ?? ''">{{ userInitial }}</div>
       </div>
     </header>
 
-    <div class="topbar-sub" *ngIf="shellRoute !== 'inicio' && hasDevices && lastDataRefreshLabel" role="status">
+    <div class="topbar-sub" *ngIf="shellRoute !== 'inicio' && shellRoute !== 'ayuda' && shellRoute !== 'herramientas' && shellRoute !== 'devices' && hasAnyEquipment && lastDataRefreshLabel" role="status">
       <span class="topbar-sub__text">
         Última lectura en datos: <strong>{{ lastDataRefreshLabel }}</strong>
       </span>
@@ -154,14 +185,23 @@
         [lastDataLabel]="lastDataRefreshLabel"
         [attentionAlerts]="activeAlerts"
         [fleetRows]="inicioFleetRows"
+        [fleetSearchQuery]="searchQuery"
         (goDevices)="scrollToSection('devices')"
         (goAlerts)="scrollToSection('alerts')"
-        (goSettings)="scrollToSection('settings')"
+        (goAyuda)="scrollToSection('ayuda')"
+        (goHerramientas)="scrollToSection('herramientas')"
         (addEquipment)="openAddEquipment($event)"
         (openFleetRow)="openInicioFleetRow($event)"
       ></app-inicio-page>
 
-      <ng-container *ngIf="shellRoute !== 'inicio' && shellRoute !== 'settings' && shellRoute !== 'equipment'">
+      <app-ayuda-page *ngIf="shellRoute === 'ayuda'"></app-ayuda-page>
+
+      <app-herramientas-page
+        *ngIf="shellRoute === 'herramientas'"
+        (fichaSaved)="onHerramientasFichaSaved($event)"
+      ></app-herramientas-page>
+
+      <ng-container *ngIf="shellRoute !== 'inicio' && shellRoute !== 'ayuda' && shellRoute !== 'herramientas' && shellRoute !== 'settings' && shellRoute !== 'equipment'">
       <section id="section-kpi" class="kpi-row" aria-label="Resumen" *ngIf="!isDeviceSoloView">
         <article class="kpi-card">
           <div class="kpi-card__icon kpi-card__icon--slate">
@@ -212,6 +252,31 @@
 
       <div class="grid-main" [class.grid-main--alerts-only]="shellRoute === 'alerts'" [class.grid-main--solo-device]="isDeviceSoloView">
         <div class="grid-main__left" *ngIf="shellRoute === 'devices'">
+          <div
+            class="devices-sync-bar"
+            *ngIf="hasAnyEquipment"
+            [class.devices-sync-bar--stale]="lastDataRefreshStale"
+            role="status"
+          >
+            <span
+              class="devices-sync-bar__dot"
+              [class.devices-sync-bar__dot--live]="deviceStore.isCloudSyncActive()"
+              aria-hidden="true"
+            ></span>
+            <span class="devices-sync-bar__text">
+              <ng-container *ngIf="lastDataRefreshLabel; else syncNoData">
+                Última lectura:
+                <strong>{{ lastDataRefreshLabel }}</strong>
+                <span *ngIf="lastDataRefreshAgeLabel"> ({{ lastDataRefreshAgeLabel }})</span>
+              </ng-container>
+              <ng-template #syncNoData>Sin lecturas recientes en la cuenta</ng-template>
+            </span>
+            <span class="devices-sync-bar__meta">
+              Consulta app ~{{ readingsPollIntervalSec }} s
+              <ng-container *ngIf="deviceStore.isCloudSyncActive()"> · Nube activa</ng-container>
+              <ng-container *ngIf="!deviceStore.isCloudSyncActive()"> · Modo local</ng-container>
+            </span>
+          </div>
           <div class="device-solo-banner" *ngIf="isDeviceSoloView" role="status">
             <div class="device-solo-banner__text">
               <span class="device-solo-banner__label">Viendo solo</span>
@@ -852,12 +917,6 @@
                       </div>
                     </div>
                     <div
-                      class="device-card__cmd-feedback"
-                      *ngIf="combistatoCommandFeedback?.id === c.id"
-                    >
-                      {{ combistatoCommandFeedback?.msg }}
-                    </div>
-                    <div
                       class="device-card__defrost-strip"
                       *ngIf="c.lastPhase"
                       [attr.data-phase]="c.lastPhase"
@@ -1313,6 +1372,18 @@
       <ng-container *ngIf="shellRoute === 'settings'">
         <div class="settings-page" role="region" aria-labelledby="settings-page-title">
           <h1 id="settings-page-title" class="settings-page__title">Configuración</h1>
+
+          <button type="button" class="settings-help-link" (click)="scrollToSection('ayuda')">
+            <span class="settings-help-link__title">Manuales y parámetros AR</span>
+            <span class="settings-help-link__desc">PR500, PRO300 y PRO400 — guías y PDF para planta</span>
+            <span class="settings-help-link__cta">Abrir ayuda →</span>
+          </button>
+
+          <button type="button" class="settings-help-link settings-help-link--tools" (click)="scrollToSection('herramientas')">
+            <span class="settings-help-link__title">P–T, recalentamiento y subenfriamiento</span>
+            <span class="settings-help-link__desc">Consulta de refrigerante, SH/SC y dimensionado Danfoss</span>
+            <span class="settings-help-link__cta">Abrir herramientas →</span>
+          </button>
 
           <ng-container *ngIf="!isAdminView && environment.deviceCloudSync">
             <ng-container *ngTemplateOutlet="settingsConnectionGuide"></ng-container>
@@ -1895,7 +1966,7 @@
                     <input type="text" [(ngModel)]="eqDischargePressureBarForm" name="eq-discharge-pressure" />
                   </label>
                   <label class="notify-panel__field">
-                    <span>Sobrecalentamiento (°C)</span>
+                    <span>Recalentamiento (°C)</span>
                     <input type="text" [(ngModel)]="eqSuperheatCForm" name="eq-superheat" />
                   </label>
                   <label class="notify-panel__field">
@@ -1985,8 +2056,16 @@
                       [(ngModel)]="eqExpansionOrificeForm"
                       name="eq-exp-orifice"
                       maxlength="120"
-                      placeholder="Ej. n.º orificio, kit"
+                      placeholder="Ej. Danfoss TE2 · orif. 03 · 068-2006"
                     />
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm equipment-page__tool-link"
+                      *ngIf="equipmentSheetAvailable() && selectedFichaId"
+                      (click)="openHerramientasFromEquipment('txv')"
+                    >
+                      Dimensionar válvula Danfoss →
+                    </button>
                   </label>
                   <label class="notify-panel__field notify-panel__field--full">
                     <span>Medida filtro / secador de líquido</span>
@@ -3126,6 +3205,18 @@
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
         </svg>
         <span>Alertas</span>
+      </button>
+      <button
+        type="button"
+        class="mobile-nav__btn"
+        [class.mobile-nav__btn--active]="shellRoute === 'ayuda'"
+        (click)="scrollToSection('ayuda')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+        </svg>
+        <span>Ayuda</span>
       </button>
       <button
         type="button"

@@ -1403,7 +1403,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       }
       if (this.showSuperheat && best.superheat_c != null && Number.isFinite(best.superheat_c)) {
         const warn = best.superheat_ok === false ? ' ⚠' : '';
-        bits.push(`SH ${best.superheat_c.toFixed(1)} °C${warn}`);
+        bits.push(`Rec. ${best.superheat_c.toFixed(1)} °C${warn}`);
       }
       this.cursorTempLabel = bits.join(' · ');
     }
@@ -1437,7 +1437,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       tbits.push(`succión ${r.temp_suction_c.toFixed(1)} °C`);
     }
     if (r.superheat_c != null && Number.isFinite(r.superheat_c)) {
-      tbits.push(`SH ${r.superheat_c.toFixed(1)} °C`);
+      tbits.push(`Rec. ${r.superheat_c.toFixed(1)} °C`);
     }
     const tExtra = tbits.length ? ` · ${tbits.join(', ')}` : '';
     const base = `Última lectura: ${pStr}${tExtra} · Compresores C1–C3 y alarma según leyenda · DI ${di(r.di1_ok)}/${di(r.di2_ok)}/${di(r.di3_ok)}/${di(r.di4_ok)}`;
@@ -1482,7 +1482,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     const L = this.latestReading;
     if (!L || L.superheat_c == null || !Number.isFinite(L.superheat_c)) return '';
     const warn = L.superheat_ok === false ? ' · fuera de ventana' : '';
-    return `SH ${L.superheat_c.toFixed(1)} °C${warn}`;
+    return `Rec. ${L.superheat_c.toFixed(1)} °C${warn}`;
   }
 
   stateRectW(r: { x0: number; x1: number }): number {

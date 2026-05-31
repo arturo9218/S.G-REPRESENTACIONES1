@@ -15,4 +15,15 @@
     <button type="button" class="app-update-banner__btn" (click)="dismissUpdatePrompt()">Más tarde</button>
   </div>
 </div>
+<div
+  class="app-toast"
+  *ngIf="toast as t"
+  [class.app-toast--success]="t.kind === 'success'"
+  [class.app-toast--error]="t.kind === 'error'"
+  role="status"
+  aria-live="polite"
+>
+  <span class="app-toast__text">{{ t.text }}</span>
+  <button type="button" class="app-toast__close" (click)="dismissToast()" aria-label="Cerrar aviso">×</button>
+</div>
 <router-outlet></router-outlet>

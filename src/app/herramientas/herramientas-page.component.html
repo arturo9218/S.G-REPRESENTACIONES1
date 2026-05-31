@@ -1,0 +1,582 @@
+<div class="herr">
+  <header class="herr-hero">
+    <p class="herr-hero__kicker">Herramientas de campo</p>
+    <h1 class="herr-hero__title">Refrigeración de campo</h1>
+    <p class="herr-hero__lead">
+      Tabla P–T, recalentamiento, subenfriamiento, <strong>carga de cámara (kW / HP)</strong> y dimensionado
+      <strong>Danfoss T2 / TE2</strong> + <strong>TE5 / TEX</strong>. Independiente del PR500.
+    </p>
+  </header>
+
+  <nav class="herr-tabs" aria-label="Secciones">
+    <button type="button" class="herr-tabs__btn" [class.herr-tabs__btn--active]="activeTab === 'pt'" (click)="setTab('pt')">
+      Tabla P–T
+    </button>
+    <button type="button" class="herr-tabs__btn" [class.herr-tabs__btn--active]="activeTab === 'sh'" (click)="setTab('sh')">
+      Recalentamiento y subenfriamiento
+    </button>
+    <button type="button" class="herr-tabs__btn" [class.herr-tabs__btn--active]="activeTab === 'camara'" (click)="setTab('camara')">
+      Carga cámara (kW / HP)
+    </button>
+    <button type="button" class="herr-tabs__btn" [class.herr-tabs__btn--active]="activeTab === 'txv'" (click)="setTab('txv')">
+      Dimensionar válvula Danfoss
+    </button>
+  </nav>
+
+  <section class="herr-panel" *ngIf="activeTab === 'pt'" aria-label="Tabla presión temperatura">
+    <div class="herr-controls herr-controls--grid">
+      <label class="herr-field herr-field--span2">
+        <span class="herr-field__label">Buscar refrigerante</span>
+        <input
+          type="search"
+          class="herr-field__input"
+          [(ngModel)]="refFilter"
+          (ngModelChange)="onRefFilterChange()"
+          placeholder="Ej. R454, CO2, amoniaco…"
+        />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Refrigerante</span>
+        <select class="herr-field__input" [(ngModel)]="selectedRefId">
+          <ng-container *ngIf="!refFilter.trim(); else filteredRefOptions">
+            <optgroup *ngFor="let g of refrigerantGroups" [label]="g.label">
+              <option *ngFor="let r of g.items" [value]="r.id">{{ r.label }}</option>
+            </optgroup>
+          </ng-container>
+          <ng-template #filteredRefOptions>
+            <option *ngFor="let r of filteredRefrigerantsForSelect" [value]="r.id">{{ r.label }}</option>
+          </ng-template>
+        </select>
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Unidad de presión</span>
+        <select class="herr-field__input" [(ngModel)]="pressureUnit">
+          <option value="bar_g">bar manométrica (g)</option>
+          <option value="bar_a">bar absoluta (a)</option>
+          <option value="psi_g">psi manométrica (g)</option>
+          <option value="psi_a">psi absoluta (a)</option>
+        </select>
+      </label>
+    </div>
+
+    <p class="herr-note" *ngIf="selectedRefrigerant?.note">{{ selectedRefrigerant?.note }}</p>
+
+    <div class="herr-lookup herr-controls--grid">
+      <div class="herr-lookup__box">
+        <label class="herr-field">
+          <span class="herr-field__label">T (°C) → presión</span>
+          <input type="text" class="herr-field__input" [(ngModel)]="lookupTempDraft" inputmode="decimal" placeholder="Ej. -10" />
+        </label>
+        <button type="button" class="herr-btn herr-btn--ghost" (click)="onLookupTemp()">Calcular presión</button>
+        <p class="herr-lookup__result" *ngIf="lookupTempResult">{{ lookupTempResult }}</p>
+      </div>
+      <div class="herr-lookup__box">
+        <label class="herr-field">
+          <span class="herr-field__label">Presión → T (°C)</span>
+          <input
+            type="text"
+            class="herr-field__input"
+            [(ngModel)]="lookupPressureDraft"
+            inputmode="decimal"
+            [placeholder]="'Ej. 2.5 ' + unitLabel(pressureUnit)"
+          />
+        </label>
+        <button type="button" class="herr-btn herr-btn--ghost" (click)="onLookupPressure()">Calcular temperatura</button>
+        <p class="herr-lookup__result" *ngIf="lookupPressureResult">{{ lookupPressureResult }}</p>
+      </div>
+    </div>
+
+    <div class="herr-table-wrap">
+      <table class="herr-table">
+        <caption class="herr-table__caption">
+          Saturación {{ selectedRefrigerant?.label }} — nivel del mar (~{{ atmBar | number: '1.3-3' }} bar a)
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">T sat. (°C)</th>
+            <th scope="col">P (bar g)</th>
+            <th scope="col">P (bar a)</th>
+            <th scope="col">P (psi g)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of ptTableRows">
+            <td>{{ row.tempC }}</td>
+            <td>{{ fmt(row.pBarG, 2) }}</td>
+            <td>{{ fmt(row.pBarA, 2) }}</td>
+            <td>{{ fmt(row.pPsiG, 1) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="herr-panel" *ngIf="activeTab === 'sh'" aria-label="Recalentamiento y subenfriamiento">
+    <p class="herr-panel__intro">
+      Medí succión y línea de líquido con el mismo refrigerante. Calcula <strong>recalentamiento</strong> (succión) y
+      <strong>subenfriamiento</strong> (líquido antes de la válvula) y sugerencias orientativas de diagnóstico.
+    </p>
+
+    <label class="herr-field herr-field--span2">
+      <span class="herr-field__label">Refrigerante</span>
+      <select class="herr-field__input" [(ngModel)]="shRefId">
+        <optgroup *ngFor="let g of allRefrigerantGroups" [label]="g.label">
+          <option *ngFor="let r of g.items" [value]="r.id">{{ r.label }}</option>
+        </optgroup>
+      </select>
+    </label>
+
+    <h2 class="herr-subpanel__title">Recalentamiento (succión)</h2>
+    <div class="herr-controls herr-controls--grid">
+      <label class="herr-field">
+        <span class="herr-field__label">Presión succión</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="shPressureDraft" inputmode="decimal" placeholder="Ej. 1.8" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Unidad presión</span>
+        <select class="herr-field__input" [(ngModel)]="shPressureUnit">
+          <option value="bar_g">bar g</option>
+          <option value="bar_a">bar a</option>
+          <option value="psi_g">psi g</option>
+          <option value="psi_a">psi a</option>
+        </select>
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Temperatura succión (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="shTempDraft" inputmode="decimal" placeholder="Ej. 5" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Recalentamiento objetivo (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="shTargetDraft" inputmode="decimal" placeholder="8" />
+      </label>
+    </div>
+
+    <article
+      class="herr-result"
+      *ngIf="superheatResult as sh"
+      [class.herr-result--ok]="sh.severity === 'ok'"
+      [class.herr-result--low]="sh.severity === 'low'"
+      [class.herr-result--high]="sh.severity === 'high'"
+    >
+      <h3 class="herr-result__title">Recalentamiento</h3>
+      <dl class="herr-result__dl">
+        <div>
+          <dt>T saturación</dt>
+          <dd>{{ fmt(sh.satTempC, 1) }} °C</dd>
+        </div>
+        <div>
+          <dt>Recalentamiento</dt>
+          <dd><strong>{{ fmt(sh.superheatC, 1) }} °C</strong></dd>
+        </div>
+        <div>
+          <dt>Objetivo</dt>
+          <dd>{{ fmt(sh.targetC, 1) }} °C</dd>
+        </div>
+        <div>
+          <dt>Diferencia</dt>
+          <dd>{{ sh.deltaC >= 0 ? '+' : '' }}{{ fmt(sh.deltaC, 1) }} °C</dd>
+        </div>
+      </dl>
+      <p class="herr-result__hint">{{ sh.hint }}</p>
+    </article>
+
+    <h2 class="herr-subpanel__title">Subenfriamiento (línea de líquido)</h2>
+    <p class="herr-subpanel__hint">
+      Medí en la línea de líquido subenfriado (salida de condensador o recibidor), antes del filtro/seca si es posible.
+      Usá la misma unidad de presión que arriba.
+    </p>
+    <div class="herr-controls herr-controls--grid">
+      <label class="herr-field">
+        <span class="herr-field__label">Presión líquido</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="scPressureDraft" inputmode="decimal" placeholder="Ej. 12" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Temperatura líquido (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="scTempDraft" inputmode="decimal" placeholder="Ej. 32" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Subenfriamiento objetivo (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="scTargetDraft" inputmode="decimal" placeholder="3" />
+      </label>
+    </div>
+
+    <article
+      class="herr-result"
+      *ngIf="subcoolingResult as sc"
+      [class.herr-result--ok]="sc.severity === 'ok'"
+      [class.herr-result--low]="sc.severity === 'low'"
+      [class.herr-result--high]="sc.severity === 'high' || sc.severity === 'negative'"
+    >
+      <h3 class="herr-result__title">Subenfriamiento</h3>
+      <dl class="herr-result__dl">
+        <div>
+          <dt>T saturación</dt>
+          <dd>{{ fmt(sc.satTempC, 1) }} °C</dd>
+        </div>
+        <div>
+          <dt>Subenfriamiento</dt>
+          <dd><strong>{{ fmt(sc.subcoolingC, 1) }} °C</strong></dd>
+        </div>
+        <div>
+          <dt>Objetivo</dt>
+          <dd>{{ fmt(sc.targetC, 1) }} °C</dd>
+        </div>
+        <div>
+          <dt>Diferencia</dt>
+          <dd>{{ sc.deltaC >= 0 ? '+' : '' }}{{ fmt(sc.deltaC, 1) }} °C</dd>
+        </div>
+      </dl>
+      <p class="herr-result__hint">{{ sc.hint }}</p>
+    </article>
+
+    <ng-container *ngTemplateOutlet="fichaSave; context: { mode: 'sh' }"></ng-container>
+  </section>
+
+  <section class="herr-panel" *ngIf="activeTab === 'camara'" aria-label="Carga frigorífica de cámara">
+    <p class="herr-panel__intro">
+      Método rápido de taller: <strong>Volumen (m³) × kcal/h·m³</strong> → BTU/h → <strong>kW</strong> → <strong>HP</strong>.
+      Media temperatura (verduras/lácteos): 100–120 kcal/h·m³ (110 habitual con paneles ~100 mm).
+      Congelados (−18 °C): 150–250 kcal/h·m³.
+    </p>
+
+    <div class="herr-controls herr-controls--grid">
+      <label class="herr-field">
+        <span class="herr-field__label">Largo (m)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camLengthDraft" inputmode="decimal" placeholder="5" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Ancho (m)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camWidthDraft" inputmode="decimal" placeholder="4" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Alto (m)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camHeightDraft" inputmode="decimal" placeholder="2,8" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">T° exterior (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camExteriorDraft" inputmode="decimal" placeholder="35" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">T° interior deseada (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camInteriorDraft" inputmode="decimal" placeholder="2" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Uso de la cámara</span>
+        <select class="herr-field__input" [(ngModel)]="camUsage">
+          <option *ngFor="let p of chamberUsagePresets" [value]="p.id">{{ p.label }}</option>
+        </select>
+      </label>
+      <label class="herr-field" *ngIf="camUsage === 'custom'">
+        <span class="herr-field__label">kcal/h por m³</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camKcalCustomDraft" inputmode="decimal" placeholder="110" />
+      </label>
+    </div>
+
+    <article class="herr-result herr-result--ok" *ngIf="chamberLoadResult as load">
+      <h2 class="herr-result__title">Capacidad estimada</h2>
+      <div class="herr-cam-hero">
+        <div class="herr-cam-hero__item">
+          <span class="herr-cam-hero__label">Potencia frigorífica</span>
+          <strong class="herr-cam-hero__value">{{ fmt(load.kw, 2) }} kW</strong>
+          <span class="herr-cam-hero__sub">{{ fmt(load.tr, 2) }} TR</span>
+        </div>
+        <div class="herr-cam-hero__item herr-cam-hero__item--hp">
+          <span class="herr-cam-hero__label">Condensadora orient.</span>
+          <strong class="herr-cam-hero__value">{{ load.hpRangeLabel }}</strong>
+          <span class="herr-cam-hero__sub">≈ {{ fmt(load.hpNom, 1) }} HP a 9.500 BTU/HP</span>
+        </div>
+      </div>
+
+      <dl class="herr-result__dl">
+        <div>
+          <dt>Volumen</dt>
+          <dd><strong>{{ fmt(load.volumeM3, 1) }} m³</strong> · V = L × A × H</dd>
+        </div>
+        <div>
+          <dt>Coeficiente usado</dt>
+          <dd>{{ fmt(load.kcalPerM3, 0) }} kcal/h·m³ (rango típico {{ load.kcalPerM3Range }})</dd>
+        </div>
+        <div>
+          <dt>Carga</dt>
+          <dd>{{ fmt(load.kcalH, 0) }} kcal/h · {{ fmt(load.btuH, 0) }} BTU/h</dd>
+        </div>
+        <div>
+          <dt>ΔT ambiente</dt>
+          <dd>{{ fmt(load.exteriorTempC, 0) }} °C − {{ fmt(load.interiorTempC, 0) }} °C = {{ fmt(load.deltaTC, 0) }} °C</dd>
+        </div>
+      </dl>
+
+      <h3 class="herr-subpanel__title">Cálculo paso a paso</h3>
+      <ol class="herr-calc-steps">
+        <li *ngFor="let step of load.steps">
+          <strong>{{ step.label }}:</strong> {{ step.detail }}
+        </li>
+      </ol>
+
+      <div class="herr-cam-comp">
+        <h3 class="herr-subpanel__title">Referencia compresor (Danfoss MTZ)</h3>
+        <p class="herr-result__reason">
+          Sugerido: <strong>{{ load.compressor.recommended }}</strong>
+          <span *ngIf="load.compressor.stressed as stressed">
+            · {{ stressed }} quedaría <strong>exigido</strong> para esta carga.
+          </span>
+        </p>
+        <p class="herr-result__hint">{{ load.compressor.note }}</p>
+      </div>
+
+      <p class="herr-result__hint">{{ load.correctionsNote }}</p>
+
+      <button type="button" class="herr-btn herr-btn--primary" (click)="applyChamberLoadToTxv()">
+        Usar {{ fmt(load.kw, 2) }} kW en dimensionado Danfoss →
+      </button>
+    </article>
+
+    <p class="herr-disclaimer" *ngIf="!chamberLoadResult">
+      Ingresá largo, ancho y alto &gt; 0 m y temperaturas válidas.
+    </p>
+  </section>
+
+  <section class="herr-panel" *ngIf="activeTab === 'txv'" aria-label="Dimensionado de válvula Danfoss">
+    <p class="herr-panel__intro">
+      En planta usamos las dos líneas habituales de Danfoss: <strong>T2 / TE2</strong> (flare, cartuchos 0X … 06) y
+      <strong>TE5 / TEX</strong> (soldadura ODF, orificios 0,5 … 13, elemento rango N). La herramienta calcula ambas
+      recomendaciones y, si aplica, otras líneas (TUA, TR6, TGE).
+    </p>
+
+    <details class="herr-catalog">
+      <summary class="herr-catalog__summary">Tipos de válvula Danfoss (referencia)</summary>
+      <div class="herr-catalog__table-wrap">
+        <table class="herr-catalog__table">
+          <thead>
+            <tr>
+              <th>Línea</th>
+              <th>Cuerpos</th>
+              <th>Orificios</th>
+              <th>Carga orient.</th>
+              <th>Uso típico</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              *ngFor="let line of danfossValveLines"
+              [class.herr-catalog__row--pick]="
+                txvResult &&
+                (line.id === txvResult.danfoss.valveLine ||
+                  (line.id === 'te5_tex' && txvResult.te5Alternative) ||
+                  (line.id === 'tua_tuae' && txvResult.tuaAlternative))
+              "
+            >
+              <td><strong>{{ line.name }}</strong></td>
+              <td>{{ line.bodies }}</td>
+              <td>{{ line.orifices }}</td>
+              <td>{{ line.capacityKw }}</td>
+              <td>{{ line.typicalUse }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="herr-catalog__note" *ngIf="!txvResult">
+        Completá capacidad y temperaturas para ver la línea recomendada resaltada abajo.
+      </p>
+    </details>
+
+    <div class="herr-controls herr-controls--grid">
+      <label class="herr-field">
+        <span class="herr-field__label">Refrigerante</span>
+        <select class="herr-field__input" [(ngModel)]="txvRefId">
+          <optgroup *ngFor="let g of allRefrigerantGroups" [label]="g.label">
+            <option *ngFor="let r of g.items" [value]="r.id">{{ r.label }}</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Aplicación</span>
+        <select class="herr-field__input" [(ngModel)]="txvApplication">
+          <option value="refrigeracion">Refrigeración / cámara fría (T2·TE2 habitual)</option>
+          <option value="ac">Aire acondicionado / chiller (puede sugerir TR6)</option>
+        </select>
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Capacidad frigorífica (kW)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="txvCapacityDraft" inputmode="decimal" placeholder="Ej. 5" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Te — temp. evaporación (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="txvEvapDraft" inputmode="decimal" placeholder="-10" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Tc — temp. condensación (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="txvCondDraft" inputmode="decimal" placeholder="35" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Recalentamiento de diseño (K)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="txvShDraft" inputmode="decimal" placeholder="8" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Subenfriamiento (K)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="txvScDraft" inputmode="decimal" placeholder="3" />
+      </label>
+      <div class="herr-field herr-field--check">
+        <span class="herr-field__label">Instalación</span>
+        <label class="herr-check">
+          <input type="checkbox" [(ngModel)]="txvExternalEq" />
+          Distribuidor de líquido / multicircuito → <strong>TE2</strong> (equalización externa)
+        </label>
+        <span class="herr-check herr-check--sub" *ngIf="txvExternalEq">
+          <span class="herr-field__label">Caída en distribuidor (bar)</span>
+          <input
+            type="text"
+            class="herr-field__input herr-field__input--narrow"
+            [(ngModel)]="txvDistributorDropDraft"
+            inputmode="decimal"
+            placeholder="1"
+          />
+        </span>
+        <span class="herr-check__hint" *ngIf="!txvExternalEq">Circuito único sin distribuidor → <strong>T2</strong> (equalización interna)</span>
+      </div>
+    </div>
+
+    <article class="herr-result herr-result--ok" *ngIf="txvResult as txv">
+      <h2 class="herr-result__title">
+        {{
+          txv.danfoss.valveLine === 't2_te2'
+            ? 'Línea T2 / TE2 (flare)'
+            : 'Válvula Danfoss sugerida — ' + txv.danfoss.valveLineLabel
+        }}
+      </h2>
+      <p class="herr-result__lead">{{ txv.valveSummary }}</p>
+      <p class="herr-result__reason">{{ txv.danfoss.lineReason }}</p>
+      <dl class="herr-result__dl">
+        <div>
+          <dt>Línea Danfoss</dt>
+          <dd><strong>{{ txv.danfoss.valveLineLabel }}</strong></dd>
+        </div>
+        <div>
+          <dt>Cuerpo</dt>
+          <dd><strong>{{ txv.danfoss.valveBody }}</strong> — {{ txv.valveBodyLabel }}</dd>
+        </div>
+        <div>
+          <dt>Elemento termostático</dt>
+          <dd>{{ txv.danfoss.elementRange.label }}</dd>
+        </div>
+        <div>
+          <dt>{{ txv.danfoss.valveLine === 'tge' ? 'Modelo sugerido' : 'Orificio' }}</dt>
+          <dd><strong>{{ txv.danfoss.orifice }}</strong><span *ngIf="txv.danfoss.valveLine !== 'tge'"> · {{ txv.danfoss.orificeCode }}</span></dd>
+        </div>
+        <div>
+          <dt>Capacidad a Te</dt>
+          <dd>~{{ fmt(txv.danfoss.ratedCapacityKw, 2) }} kW · carga selección {{ fmt(txv.danfoss.requiredCapacityKw, 2) }} kW</dd>
+        </div>
+        <div>
+          <dt>Capacidad instalación</dt>
+          <dd>{{ fmt(txv.capacityTr, 2) }} TR (ton ref.) · {{ fmt(txv.massFlowKgH, 0) }} kg/h</dd>
+        </div>
+        <div>
+          <dt>Rango de trabajo</dt>
+          <dd>{{ txv.nominalRangeKw }}</dd>
+        </div>
+        <div *ngIf="txv.suctionPressureBarG != null">
+          <dt>P succión esperada</dt>
+          <dd>{{ fmt(txv.suctionPressureBarG, 2) }} bar g</dd>
+        </div>
+      </dl>
+      <ul class="herr-result__notes">
+        <li *ngFor="let n of txv.notes">{{ n }}</li>
+      </ul>
+    </article>
+
+    <article class="herr-result herr-result--te5" *ngIf="txvResult?.te5Alternative as te5">
+      <h2 class="herr-result__title">Línea TE5 / TEX (rango N)</h2>
+      <p class="herr-result__lead">{{ te5.summary }}</p>
+      <p class="herr-result__reason">
+        Segunda recomendación de taller con la misma carga y Te. Cuerpo <strong>{{ te5.valveBody }}</strong>
+        ({{ te5.commercialBody }}), orificio <strong>{{ te5.orifice }}</strong> ({{ te5.orificeCode }}),
+        elemento {{ te5.elementRangeLabel }}. Equalización externa y conexión soldada ODF.
+      </p>
+      <dl class="herr-result__dl">
+        <div>
+          <dt>Capacidad a Te</dt>
+          <dd>~{{ fmt(te5.ratedCapacityKw, 2) }} kW · carga selección {{ fmt(te5.requiredCapacityKw, 2) }} kW</dd>
+        </div>
+      </dl>
+      <button
+        type="button"
+        class="herr-btn herr-btn--ghost"
+        *ngIf="fichaEnabled && fichaId"
+        [disabled]="fichaSaving"
+        (click)="saveToFicha('te5')"
+      >
+        Guardar línea TE5 en ficha
+      </button>
+    </article>
+
+    <article class="herr-result herr-result--alt" *ngIf="txvResult?.tuaAlternative as tua">
+      <h2 class="herr-result__title">Alternativa soldadura TUA / TUAE</h2>
+      <p class="herr-result__lead">{{ tua.summary }}</p>
+      <p class="herr-result__reason">
+        Misma carga y Te que la sugerencia flare, pero con cuerpo <strong>{{ tua.valveBody }}</strong> y cartucho
+        <strong>{{ tua.orifice }}</strong> ({{ tua.orificeCode }}) para conexión soldada ODF.
+      </p>
+      <button
+        type="button"
+        class="herr-btn herr-btn--ghost"
+        *ngIf="fichaEnabled && fichaId"
+        [disabled]="fichaSaving"
+        (click)="saveToFicha('tua')"
+      >
+        Guardar alternativa TUA en ficha
+      </button>
+    </article>
+
+    <p class="herr-disclaimer" *ngIf="txvCapacityDraft && !txvResult">
+      Revisá los valores: Tc debe ser al menos 5 °C mayor que Te y la capacidad debe ser &gt; 0 kW.
+    </p>
+
+    <ng-container *ngTemplateOutlet="fichaSave; context: { mode: 'txv' }"></ng-container>
+  </section>
+
+  <ng-template #fichaSave let-mode="mode">
+    <div class="herr-ficha" *ngIf="fichaEnabled">
+      <h3 class="herr-ficha__title">Guardar en ficha de equipo</h3>
+      <p class="herr-ficha__lead">
+        Vincula refrigerante{{
+          mode === 'sh'
+            ? ', presión de succión, recalentamiento y/o subenfriamiento'
+            : ' y nota de orificio de la válvula TXV'
+        }}
+        a una ficha del panel PRO400 (Ficha equipo).
+      </p>
+      <div class="herr-controls herr-controls--grid">
+        <label class="herr-field">
+          <span class="herr-field__label">Panel</span>
+          <select class="herr-field__input" [(ngModel)]="fichaDeviceId" (ngModelChange)="onFichaDeviceChange()">
+            <option value="">— Elegir panel —</option>
+            <option *ngFor="let d of cloudDevices" [value]="d.id">{{ d.name }}</option>
+          </select>
+        </label>
+        <label class="herr-field">
+          <span class="herr-field__label">Ficha</span>
+          <select class="herr-field__input" [(ngModel)]="fichaId" [disabled]="fichaLoading || !fichaRows.length">
+            <option value="">— Elegir ficha —</option>
+            <option *ngFor="let f of fichaRows" [value]="f.id">{{ f.label }}</option>
+          </select>
+        </label>
+      </div>
+      <button
+        type="button"
+        class="herr-btn herr-btn--primary"
+        [disabled]="fichaSaving || !fichaId"
+        (click)="saveToFicha(mode)"
+      >
+        {{ fichaSaving ? 'Guardando…' : 'Guardar en ficha' }}
+      </button>
+    </div>
+    <p class="herr-disclaimer herr-disclaimer--tight" *ngIf="!fichaEnabled">
+      Para guardar en ficha necesitás un panel PRO400 en nube (Ficha equipo).
+    </p>
+  </ng-template>
+
+  <p class="herr-disclaimer">
+    Valores orientativos de taller. No reemplazan tablas del fabricante ni procedimientos de carga en planta.
+  </p>
+</div>

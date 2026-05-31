@@ -1,0 +1,101 @@
+<div class="ayuda">
+  <header class="ayuda-hero">
+    <p class="ayuda-hero__kicker">Documentación</p>
+    <h1 class="ayuda-hero__title">Manuales y parámetros AR</h1>
+    <p class="ayuda-hero__lead">
+      Guías en lenguaje claro para operadores y técnicos. Cada equipo tiene su rango de parámetros:
+      <strong>PR500</strong> (AR01–AR34), <strong>PRO300</strong> (AR01–AR48) y <strong>PRO400</strong>.
+      Podés descargar cada manual en PDF para imprimir o enviar a planta.
+    </p>
+    <p class="ayuda-hero__tools">
+      <a routerLink="/herramientas" class="ayuda-hero__tools-link">Tabla P–T, recalentamiento, subenfriamiento y Danfoss →</a>
+    </p>
+  </header>
+
+  <section class="ayuda-tools" aria-label="Herramientas de campo">
+    <h2 class="ayuda-tools__title">Herramientas de refrigerante y válvula TXV</h2>
+    <p class="ayuda-tools__intro">
+      En <a routerLink="/herramientas">Herramientas</a> tenés consultas orientativas de taller, independientes del PR500
+      (no cambian parámetros ni controladores en la nube).
+    </p>
+    <dl class="ayuda-tools__dl">
+      <div class="ayuda-tools__row">
+        <dt>Tabla P–T</dt>
+        <dd>Presión ↔ temperatura de saturación para decenas de refrigerantes; unidades bar g/a y psi.</dd>
+      </div>
+      <div class="ayuda-tools__row">
+        <dt>Recalentamiento</dt>
+        <dd>
+          Con presión y temperatura de succión calcula el recalentamiento y sugiere sentido de ajuste de la válvula de
+          expansión (pasos pequeños, ≈ ¼ vuelta).
+        </dd>
+      </div>
+      <div class="ayuda-tools__row">
+        <dt>Subenfriamiento</dt>
+        <dd>
+          Con presión y temperatura en línea de líquido calcula el subenfriamiento (T<sub>sat</sub> − T<sub>líquido</sub>)
+          y orientación de diagnóstico (condensación, carga, filtro/seca).
+        </dd>
+      </div>
+      <div class="ayuda-tools__row">
+        <dt>Carga cámara (kW / HP)</dt>
+        <dd>
+          Con largo, ancho, alto y temperaturas estima la potencia: volumen × kcal/h·m³ (110 habitual en media
+          temperatura) → kW y HP de condensadora. Referencia MTZ orientativa y enlace al dimensionado Danfoss.
+        </dd>
+      </div>
+      <div class="ayuda-tools__row">
+        <dt>Dimensionar válvula Danfoss</dt>
+        <dd>
+          Con capacidad, Te, Tc, subenfriamiento y tipo de instalación sugiere <strong>dos líneas habituales en planta</strong>:
+          <strong>T2 / TE2</strong> (flare, cartuchos 0X–06) y <strong>TE5 / TEX</strong> (soldadura ODF, orificios 0,5–13,
+          elemento rango N). También puede indicar TUA/TUAE, TR6 o TGE según carga y aplicación. Podés guardar la
+          recomendación en la ficha de equipo (PRO400).
+        </dd>
+      </div>
+    </dl>
+    <p class="ayuda-tools__note">
+      Valores orientativos según tablas Danfoss; confirmá la selección final con Coolselector®2 o catálogo del fabricante.
+    </p>
+  </section>
+
+  <section class="ayuda-manual" aria-label="Manuales de equipos">
+    <details
+      class="ayuda-manual__panel"
+      [class.ayuda-manual__panel--pr500]="manual.id === 'pr500'"
+      *ngFor="let manual of deviceManuals"
+      [attr.id]="'manual-' + manual.id"
+    >
+      <summary class="ayuda-manual__summary">
+        <span class="ayuda-manual__summary-title">{{ manual.title }}</span>
+        <span class="ayuda-manual__summary-sub">{{ manual.subtitle }}</span>
+      </summary>
+      <div class="ayuda-manual__body">
+        <p class="ayuda-manual__intro">{{ manual.intro }}</p>
+        <div class="ayuda-manual__block" *ngFor="let block of manual.blocks">
+          <h2 class="ayuda-manual__block-title">{{ block.title }}</h2>
+          <p class="ayuda-manual__block-intro" *ngIf="block.intro">{{ block.intro }}</p>
+          <dl class="ayuda-manual__dl">
+            <div class="ayuda-manual__row" *ngFor="let item of block.items">
+              <dt>{{ item.term }}</dt>
+              <dd>
+                {{ item.detail }}
+                <span class="ayuda-manual__example" *ngIf="item.example">
+                  <strong>Ejemplo:</strong> {{ item.example }}
+                </span>
+              </dd>
+            </div>
+          </dl>
+        </div>
+        <button
+          type="button"
+          class="ayuda-btn ayuda-btn--ghost ayuda-manual__pdf"
+          [disabled]="manualPdfBusy"
+          (click)="downloadManualPdf(manual)"
+        >
+          {{ manualPdfBusy ? 'Generando PDF…' : 'Descargar manual en PDF' }}
+        </button>
+      </div>
+    </details>
+  </section>
+</div>

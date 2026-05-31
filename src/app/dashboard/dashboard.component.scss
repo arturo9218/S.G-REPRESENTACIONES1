@@ -204,6 +204,57 @@ $border: rgba(148, 163, 184, 0.18);
   max-width: 48rem;
 }
 
+.devices-sync-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  color: $muted;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+
+  strong {
+    color: #93c5fd;
+    font-weight: 700;
+  }
+}
+
+.devices-sync-bar--stale {
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(69, 26, 3, 0.28);
+
+  strong {
+    color: #fcd34d;
+  }
+}
+
+.devices-sync-bar__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #64748b;
+  flex-shrink: 0;
+}
+
+.devices-sync-bar__dot--live {
+  background: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+}
+
+.devices-sync-bar__text {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.devices-sync-bar__meta {
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
 .topbar__left {
   display: flex;
   align-items: center;
@@ -639,6 +690,61 @@ $border: rgba(148, 163, 184, 0.18);
   font-weight: 700;
   margin: 0 0 1rem;
   letter-spacing: -0.02em;
+}
+
+.settings-help-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1rem;
+  width: 100%;
+  margin: 0 0 1.25rem;
+  padding: 0.85rem 1rem;
+  text-align: left;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(129, 140, 248, 0.22);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+
+  &:hover {
+    border-color: rgba(129, 140, 248, 0.45);
+    background: rgba(30, 41, 59, 0.75);
+  }
+}
+
+.settings-help-link__title {
+  font-weight: 700;
+  color: #f1f5f9;
+  font-size: 0.92rem;
+  flex: 1;
+  min-width: 12rem;
+}
+
+.settings-help-link__desc {
+  width: 100%;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.settings-help-link__cta {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #a5b4fc;
+  margin-left: auto;
+}
+
+.settings-help-link--tools {
+  border-color: rgba(52, 211, 153, 0.22);
+
+  &:hover {
+    border-color: rgba(52, 211, 153, 0.45);
+  }
+
+  .settings-help-link__cta {
+    color: #6ee7b7;
+  }
 }
 
 .settings-page__device-pick {
@@ -3474,6 +3580,10 @@ $border: rgba(148, 163, 184, 0.18);
 
 .equipment-page__section-title {
   margin-bottom: 0.15rem;
+}
+
+.equipment-page__tool-link {
+  margin-top: 0.45rem;
 }
 
 .equipment-page__section-icon {

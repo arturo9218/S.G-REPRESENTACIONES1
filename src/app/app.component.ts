@@ -4,6 +4,7 @@ import { Subscription, fromEvent, interval } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { environment } from '../environments/environment';
 import { ConnectivityService } from './core/connectivity.service';
+import { ToastService, type ToastMessage } from './core/toast.service';
 
 @Component({
   selector: 'app-root',
@@ -17,20 +18,27 @@ export class AppComponent implements OnInit, OnDestroy {
   /** Conexión a internet (navegador / PWA). */
   online = true;
 
+  toast: ToastMessage | null = null;
+
   private versionSub?: Subscription;
   private pollSub?: Subscription;
   private visSub?: Subscription;
   private connSub?: Subscription;
+  private toastSub?: Subscription;
 
   constructor(
     private readonly swUpdate: SwUpdate,
-    private readonly connectivity: ConnectivityService
+    private readonly connectivity: ConnectivityService,
+    private readonly toastService: ToastService
   ) {}
 
   ngOnInit(): void {
     this.online = this.connectivity.isOnline;
     this.connSub = this.connectivity.online$.subscribe((v) => {
       this.online = v;
+    });
+    this.toastSub = this.toastService.toast$.subscribe((t) => {
+      this.toast = t;
     });
 
     if (!environment.production || !this.swUpdate.isEnabled) {
@@ -65,6 +73,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.connSub?.unsubscribe();
+    this.toastSub?.unsubscribe();
     this.versionSub?.unsubscribe();
     this.pollSub?.unsubscribe();
     this.visSub?.unsubscribe();
@@ -79,6 +88,10 @@ export class AppComponent implements OnInit, OnDestroy {
 
   dismissUpdatePrompt(): void {
     this.updateAvailable = false;
+  }
+
+  dismissToast(): void {
+    this.toastService.dismiss();
   }
 
   async activateNewVersion(): Promise<void> {
