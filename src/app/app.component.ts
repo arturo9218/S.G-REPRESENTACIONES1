@@ -5,6 +5,7 @@ import { filter } from 'rxjs/operators';
 import { environment } from '../environments/environment';
 import { AuthService } from './core/auth.service';
 import { ChatRealtimeService } from './core/chat-realtime.service';
+import { ChatUnreadService } from './core/chat-unread.service';
 import { ConnectivityService } from './core/connectivity.service';
 import { ToastService, type ToastMessage } from './core/toast.service';
 
@@ -33,7 +34,8 @@ export class AppComponent implements OnInit, OnDestroy {
     private readonly connectivity: ConnectivityService,
     private readonly toastService: ToastService,
     private readonly auth: AuthService,
-    private readonly chatRealtime: ChatRealtimeService
+    private readonly chatRealtime: ChatRealtimeService,
+    private readonly chatUnread: ChatUnreadService
   ) {}
 
   ngOnInit(): void {
@@ -46,11 +48,19 @@ export class AppComponent implements OnInit, OnDestroy {
     });
 
     void this.auth.getSession().then((s) => {
-      if (s) void this.chatRealtime.start();
+      if (s) {
+        void this.chatRealtime.start();
+        void this.chatUnread.refresh();
+      }
     });
     this.auth.client.auth.onAuthStateChange((_event, session) => {
-      if (session) void this.chatRealtime.start();
-      else this.chatRealtime.stop();
+      if (session) {
+        void this.chatRealtime.start();
+        void this.chatUnread.refresh();
+      } else {
+        this.chatRealtime.stop();
+        this.chatUnread.clear();
+      }
     });
 
     if (!environment.production || !this.swUpdate.isEnabled) {

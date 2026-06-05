@@ -2,6 +2,7 @@ import { Injectable, NgZone } from '@angular/core';
 import { Subject } from 'rxjs';
 import { AuthService } from './auth.service';
 import { ChatNotificationService } from './chat-notification.service';
+import { ChatUnreadService } from './chat-unread.service';
 import {
   CommunityChatService,
   type CommunityMessage,
@@ -29,6 +30,7 @@ export class ChatRealtimeService {
     private readonly globalChat: CommunityChatService,
     private readonly directChat: DirectMessageService,
     private readonly notify: ChatNotificationService,
+    private readonly unread: ChatUnreadService,
     private readonly zone: NgZone
   ) {}
 
@@ -71,6 +73,7 @@ export class ChatRealtimeService {
   private onPrivate(msg: PrivateMessage): void {
     if (msg.senderId === this.myUserId) return;
     this.private$.next(msg);
+    void this.unread.refresh();
     const who = this.shortEmail(msg.senderEmail);
     void this.notify.notifyMessage(`Mensaje de ${who}`, msg.body, `dm-${msg.senderId}-${msg.id}`);
   }

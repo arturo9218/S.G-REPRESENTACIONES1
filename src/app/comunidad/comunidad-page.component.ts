@@ -18,6 +18,7 @@ import {
 } from '../core/chat-notification-settings';
 import { ChatNotificationService } from '../core/chat-notification.service';
 import { ChatRealtimeService } from '../core/chat-realtime.service';
+import { ChatUnreadService } from '../core/chat-unread.service';
 import {
   CommunityChatService,
   type CommunityMessage,
@@ -29,6 +30,7 @@ import {
 } from '../core/direct-message.service';
 import { ToastService } from '../core/toast.service';
 import { WebPushService } from '../core/web-push.service';
+import { environment } from '../../environments/environment';
 
 type ChatMode = 'private' | 'global';
 
@@ -53,6 +55,7 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
   loadError = '';
   notifyPermission: NotificationPermission | 'unsupported' = 'unsupported';
   pushUiState = '';
+  pushDiagLabel = '';
   soundSettings: ChatNotificationSettings = loadChatNotificationSettings();
   readonly soundPresets = CHAT_SOUND_PRESETS;
   myUserId = '';
@@ -65,6 +68,7 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     private readonly directChat: DirectMessageService,
     private readonly chatNotify: ChatNotificationService,
     private readonly chatRealtime: ChatRealtimeService,
+    private readonly chatUnread: ChatUnreadService,
     private readonly webPush: WebPushService,
     private readonly auth: AuthService,
     private readonly toast: ToastService
@@ -87,12 +91,14 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     this.myEmail = (session?.user?.email ?? '').trim().toLowerCase();
     this.soundSettings = loadChatNotificationSettings();
     this.notifyPermission = await this.chatNotify.ensurePermission();
+    await this.refreshPushDiagnostics();
     void this.chatRealtime.start();
     this.uiSubs.push(
       this.chatRealtime.global$.subscribe((msg) => {
         if (this.mode === 'global') void this.reloadGlobal(true);
       }),
       this.chatRealtime.private$.subscribe((msg) => {
+        void this.loadContacts();
         if (this.mode === 'private' && this.selectedPeerId === msg.senderId) {
           void this.reloadPrivate(true);
         }
@@ -119,15 +125,32 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     }
   }
 
+  async refreshPushDiagnostics(): Promise<void> {
+    const ui = await this.webPush.getUiState();
+    const vapidOk =
+      typeof environment.vapidPublicKey === 'string' && environment.vapidPublicKey.trim().length > 0;
+    const parts: string[] = [];
+    if (this.notifyPermission === 'granted') parts.push('Navegador: permitido');
+    else if (this.notifyPermission === 'denied') parts.push('Navegador: bloqueado');
+    else if (this.notifyPermission === 'unsupported') parts.push('Navegador: no soportado');
+    else parts.push('Navegador: sin permiso');
+    if (!vapidOk) parts.push('FCM: falta VAPID en Vercel');
+    else if (ui === 'active') parts.push('FCM: suscrito');
+    else if (ui === 'unsupported') parts.push('FCM: SW inactivo (usá la app publicada en HTTPS)');
+    else parts.push('FCM: sin suscripción');
+    this.pushDiagLabel = parts.join(' · ');
+  }
+
   async enableAlerts(): Promise<void> {
     this.notifyPermission = await this.chatNotify.ensurePermission();
     const push = await this.webPush.subscribeBackgroundAlerts();
     this.pushUiState = push.message;
+    await this.refreshPushDiagnostics();
     if (this.notifyPermission === 'granted') {
       this.toast.success(
         push.ok
-          ? 'Avisos activos: sonido en la app y notificaciones con la pantalla apagada.'
-          : 'Permiso OK en este navegador. Para segundo plano: ' + push.message
+          ? 'Avisos activos: tono en la app y push con Google (FCM) aunque la pantalla esté apagada.'
+          : 'Permiso OK en este navegador. Para segundo plano (FCM): ' + push.message
       );
       this.chatNotify.playIncomingSound();
     } else if (this.notifyPermission === 'denied') {
@@ -148,18 +171,27 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     const file = (ev.target as HTMLInputElement).files?.[0];
     (ev.target as HTMLInputElement).value = '';
     if (!file) return;
-    const dataUrl = await readCustomSoundFile(file);
-    if (!dataUrl) {
-      this.toast.show('Archivo no válido o muy pesado (máx. ~800 KB). Usá mp3, wav u ogg.', 'info');
+    const loaded = await readCustomSoundFile(file);
+    if (!loaded) {
+      this.toast.show(
+        'Archivo no válido o muy pesado (máx. ~2,5 MB). Elegí mp3/m4a del celular; conviene un fragmento corto.',
+        'info'
+      );
       return;
     }
-    this.soundSettings = {
-      soundId: 'custom',
-      customSoundDataUrl: dataUrl,
-    };
-    saveChatNotificationSettings(this.soundSettings);
+    try {
+      this.soundSettings = {
+        soundId: 'custom',
+        customSoundDataUrl: loaded.dataUrl,
+        customSoundFileName: loaded.fileName,
+      };
+      saveChatNotificationSettings(this.soundSettings);
+    } catch {
+      this.toast.show('No se pudo guardar (archivo muy largo). Probá un tono de menos de 30 segundos.', 'info');
+      return;
+    }
     this.chatNotify.playIncomingSound();
-    this.toast.success('Tono personalizado guardado.');
+    this.toast.success(`Tono guardado: ${loaded.fileName}`);
   }
 
   testSound(): void {
@@ -179,7 +211,7 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     if (error) {
       const hint =
         error.includes('list_chat_contacts') || error.includes('private_messages')
-          ? ' Ejecutá 052_private_messages.sql en Supabase.'
+          ? ' Ejecutá 052 y 055_chat_contacts_unread.sql en Supabase.'
           : '';
       if (this.mode === 'private' && !this.loadError) {
         this.loadError = `${error}${hint}`;
@@ -187,6 +219,7 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
       return;
     }
     this.contacts = rows;
+    void this.chatUnread.refresh();
     if (this.mode === 'private' && !this.selectedPeerId && rows.length) {
       this.selectedPeerId = rows[0].userId;
     }

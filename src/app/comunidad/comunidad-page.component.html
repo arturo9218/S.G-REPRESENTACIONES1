@@ -4,11 +4,13 @@
     <h1 class="com-hero__title">Mensajes AR Monitoreo</h1>
     <p class="com-hero__lead">
       Escribí a <strong>un solo usuario</strong> en privado o usá la sala global. Con avisos activados,
-      el teléfono suena al llegar un mensaje (como un chat).
+      el teléfono suena al llegar un mensaje (como un chat). En Android/Chrome las alertas con pantalla
+      apagada usan <strong>Google Firebase (FCM)</strong>, más fiables que solo el navegador abierto.
     </p>
     <button type="button" class="com-alert-btn" (click)="enableAlerts()">
-      {{ notifyPermission === 'granted' ? '🔔 Avisos activados' : 'Activar tono y notificaciones' }}
+      {{ notifyPermission === 'granted' ? '🔔 Avisos + FCM activados' : 'Activar tono y notificaciones (FCM)' }}
     </button>
+    <p class="com-alert-hint" *ngIf="pushDiagLabel" role="status">{{ pushDiagLabel }}</p>
     <p class="com-alert-hint" *ngIf="pushUiState">{{ pushUiState }}</p>
 
     <section class="com-sound" aria-label="Tono de mensaje">
@@ -30,9 +32,18 @@
       </div>
       <div class="com-sound__custom" *ngIf="soundSettings.soundId === 'custom'">
         <label class="com-btn com-btn--ghost com-btn--sm">
-          Subir mi tono (mp3, wav, ogg…)
-          <input type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a" hidden (change)="onCustomSoundFile($event)" />
+          Elegir del celular (música, tono, mp3, m4a…)
+          <input
+            type="file"
+            accept="audio/*,audio/mpeg,audio/mp4,.mp3,.m4a,.aac,.wav,.ogg"
+            hidden
+            (change)="onCustomSoundFile($event)"
+          />
         </label>
+        <p class="com-sound__file" *ngIf="soundSettings.customSoundFileName">
+          Usando: {{ soundSettings.customSoundFileName }}
+        </p>
+        <p class="com-sound__file-hint">Conviene un fragmento corto (ringtone); máx. ~2,5 MB.</p>
       </div>
       <button type="button" class="com-btn com-btn--ghost com-btn--sm" (click)="testSound()">
         Probar tono
@@ -90,6 +101,13 @@
       >
         <span class="com-contacts__avatar">{{ contactLabel(c).slice(0, 1) }}</span>
         <span class="com-contacts__email">{{ c.email }}</span>
+        <span
+          class="com-contacts__bell"
+          *ngIf="c.unreadCount > 0"
+          [attr.aria-label]="c.unreadCount + ' mensajes sin leer'"
+          title="Mensajes sin leer"
+        >🔔</span>
+        <span class="com-contacts__badge" *ngIf="c.unreadCount > 0">{{ c.unreadCount }}</span>
       </button>
     </aside>
 

@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 export interface ChatContact {
   userId: string;
   email: string;
+  unreadCount: number;
 }
 
 export type PrivateDeliveryStatus = 'sent' | 'delivered' | 'read';
@@ -37,6 +38,7 @@ export class DirectMessageService {
     const rows = (data ?? []).map((r: Record<string, unknown>) => ({
       userId: r['user_id'] as string,
       email: String(r['email'] ?? '').trim().toLowerCase(),
+      unreadCount: Number(r['unread_count'] ?? 0) || 0,
     }));
     return { rows, error: null };
   }

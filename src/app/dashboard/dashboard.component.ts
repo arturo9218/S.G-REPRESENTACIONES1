@@ -30,6 +30,7 @@ import { pr500BarToPsi } from '../pr500/pr500-params.defaults';
 import type { InicioFleetRow } from '../inicio/inicio-page.component';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
 import { ToastService } from '../core/toast.service';
+import { ChatUnreadService } from '../core/chat-unread.service';
 import { effectiveCurrentAWithNominal } from '../core/reading.utils';
 import {
   DeviceEquipmentFichaRow,
@@ -141,6 +142,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   newAdminEmail = '';
   adminListFeedback = '';
   private routerSub: Subscription | null = null;
+  private chatUnreadSub: Subscription | null = null;
+  /** Mensajes privados sin leer (campana en menú Comunidad). */
+  chatUnreadTotal = 0;
   private routeQuerySub: Subscription | null = null;
   private visibilitySub: Subscription | null = null;
   /** Evita que queryParamMap pise la selección mientras actualizamos la URL desde el picker */
@@ -406,7 +410,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     private readonly webPush: WebPushService,
     private readonly equipmentSheet: EquipmentSheetService,
     private readonly combistatoCommand: CombistatoCommandService,
-    private readonly toast: ToastService
+    private readonly toast: ToastService,
+    private readonly chatUnread: ChatUnreadService
   ) {
     void this.auth.getSession().then((s) => {
       this.email = s?.user.email ?? null;
@@ -424,6 +429,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.loadChartStylePreset();
     this.loadAlarmSoundPreset();
     void this.refreshWebPushUi();
+    void this.chatUnread.refresh();
+    this.chatUnreadSub = this.chatUnread.total$.subscribe((n) => {
+      this.chatUnreadTotal = n;
+    });
     this.setupAlarmAudioUnlock();
     /** Al volver a la pestaña/app, el cooldown del pitido repetido no debe dispararse por el tiempo en segundo plano. */
     this.visibilitySub = fromEvent(document, 'visibilitychange').subscribe(() => {
@@ -577,6 +586,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subCombistatos?.unsubscribe();
     this.subPr500?.unsubscribe();
     this.routerSub?.unsubscribe();
+    this.chatUnreadSub?.unsubscribe();
     this.routeQuerySub?.unsubscribe();
     this.visibilitySub?.unsubscribe();
     this.visibilitySub = null;
