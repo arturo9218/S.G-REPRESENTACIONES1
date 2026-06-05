@@ -3,8 +3,12 @@
     <p class="com-hero__kicker">Comunidad</p>
     <h1 class="com-hero__title">Mensajes AR Monitoreo</h1>
     <p class="com-hero__lead">
-      Escribí a <strong>un solo usuario</strong> en privado o usá la sala global para todo el equipo.
+      Escribí a <strong>un solo usuario</strong> en privado o usá la sala global. Con avisos activados,
+      el teléfono suena al llegar un mensaje (como un chat).
     </p>
+    <button type="button" class="com-alert-btn" (click)="enableAlerts()">
+      {{ notifyPermission === 'granted' ? '🔔 Avisos activados' : 'Activar tono y notificaciones' }}
+    </button>
     <div class="com-tabs" role="tablist">
       <button
         type="button"

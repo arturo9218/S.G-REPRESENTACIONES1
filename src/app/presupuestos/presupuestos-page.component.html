@@ -127,7 +127,7 @@
           <textarea rows="2" [(ngModel)]="circuitSurvey.generalDiagnosis"></textarea>
         </label>
 
-        <article class="pre-circuit" *ngFor="let sec of circuitSurvey.sections">
+        <article class="pre-circuit" *ngFor="let sec of circuitSurvey.sections; trackBy: trackSection">
           <header class="pre-circuit__head">
             <h3>{{ sec.title }}</h3>
             <p>{{ sec.key === 'evaporador' ? 'Lado baja presión' : sec.key === 'condensador_compresor' ? 'Compresión y descarga' : 'Tuberías y controles' }}</p>
@@ -156,20 +156,20 @@
               <span role="columnheader">Estado</span>
               <span role="columnheader">Notas</span>
             </div>
-            <div class="pre-comp-table__row" role="row" *ngFor="let c of sec.components">
+            <div class="pre-comp-table__row" role="row" *ngFor="let c of sec.components; trackBy: trackComponent">
               <span class="pre-comp-table__name" role="cell">{{ c.label }}</span>
               <span role="cell">
                 <input
                   type="checkbox"
                   [checked]="c.present"
-                  (change)="onComponentPresent(sec, c.key, $any($event.target).checked)"
+                  (change)="onPresentChange(c, $any($event.target).checked)"
                   [attr.aria-label]="'Presente: ' + c.label"
                 />
               </span>
               <span role="cell">
                 <select
-                  [ngModel]="c.status"
-                  (ngModelChange)="onComponentStatus(sec, c.key, $event)"
+                  [(ngModel)]="c.status"
+                  (ngModelChange)="onStatusChange(c, $event)"
                 >
                   <option *ngFor="let st of componentStatuses" [ngValue]="st.id">{{ st.label }}</option>
                 </select>
@@ -177,9 +177,10 @@
               <span role="cell">
                 <input
                   type="text"
-                  [ngModel]="c.notes"
-                  (ngModelChange)="onComponentNotes(sec, c.key, $event)"
+                  [(ngModel)]="c.notes"
                   placeholder="Detalle"
+                  autocomplete="off"
+                  autocapitalize="sentences"
                 />
               </span>
             </div>

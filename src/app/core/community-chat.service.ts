@@ -60,15 +60,16 @@ export class CommunityChatService {
     return { error: error?.message ?? null };
   }
 
-  subscribeNewMessages(onInsert: () => void): void {
+  subscribeNewMessages(onInsert: (msg: CommunityMessage) => void): void {
     this.unsubscribe();
     this.channel = this.auth.client
       .channel('community_messages_live')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'community_messages' },
-        () => {
-          this.zone.run(() => onInsert());
+        (payload) => {
+          const row = this.mapRow(payload.new as Record<string, unknown>);
+          this.zone.run(() => onInsert(row));
         }
       )
       .subscribe();

@@ -7,6 +7,7 @@ import {
   ViewChild,
 } from '@angular/core';
 import { AuthService } from '../core/auth.service';
+import { ChatNotificationService } from '../core/chat-notification.service';
 import {
   CommunityChatService,
   type CommunityMessage,
@@ -39,13 +40,17 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
   loadingContacts = false;
   sending = false;
   loadError = '';
+  notifyPermission: NotificationPermission | 'unsupported' = 'unsupported';
   myUserId = '';
   myEmail = '';
   private scrollPending = false;
+  private globalRealtimeOn = false;
+  private privateRealtimeOn = false;
 
   constructor(
     private readonly globalChat: CommunityChatService,
     private readonly directChat: DirectMessageService,
+    private readonly chatNotify: ChatNotificationService,
     private readonly auth: AuthService,
     private readonly toast: ToastService
   ) {}
@@ -65,7 +70,9 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     const session = await this.auth.getSession();
     this.myUserId = session?.user?.id ?? '';
     this.myEmail = (session?.user?.email ?? '').trim().toLowerCase();
+    this.notifyPermission = await this.chatNotify.ensurePermission();
     await this.loadContacts();
+    this.bindRealtimeListeners();
     await this.reload();
   }
 
@@ -82,11 +89,58 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     }
   }
 
+  async enableAlerts(): Promise<void> {
+    this.notifyPermission = await this.chatNotify.ensurePermission();
+    if (this.notifyPermission === 'granted') {
+      this.toast.success('Avisos y tono activados para mensajes nuevos.');
+      this.chatNotify.playIncomingSound();
+    } else if (this.notifyPermission === 'denied') {
+      this.toast.show(
+        'Permiso bloqueado. En el teléfono: ajustes del navegador → notificaciones para este sitio.',
+        'info'
+      );
+    }
+  }
+
+  private bindRealtimeListeners(): void {
+    if (!this.globalRealtimeOn) {
+      this.globalRealtimeOn = true;
+      this.globalChat.subscribeNewMessages((msg) => this.handleGlobalInsert(msg));
+    }
+    if (!this.privateRealtimeOn && this.myUserId) {
+      this.privateRealtimeOn = true;
+      this.directChat.subscribeIncoming(this.myUserId, (msg) => this.handlePrivateInsert(msg));
+    }
+  }
+
+  private handleGlobalInsert(msg: CommunityMessage): void {
+    if (msg.userId === this.myUserId) return;
+    if (this.mode === 'global') {
+      void this.reloadGlobal(true);
+    }
+    const viewing = this.mode === 'global' && !document.hidden;
+    if (!viewing) {
+      const who = this.emailLabel(msg.authorEmail);
+      void this.chatNotify.notifyMessage(`Comunidad — ${who}`, msg.body, `community-${msg.id}`);
+    }
+  }
+
+  private handlePrivateInsert(msg: PrivateMessage): void {
+    if (msg.senderId === this.myUserId) return;
+    if (this.mode === 'private' && this.selectedPeerId === msg.senderId) {
+      void this.reloadPrivate(true);
+    }
+    const viewing =
+      this.mode === 'private' && this.selectedPeerId === msg.senderId && !document.hidden;
+    if (!viewing) {
+      const who = this.emailLabel(msg.senderEmail);
+      void this.chatNotify.notifyMessage(who, msg.body, `dm-${msg.senderId}`);
+    }
+  }
+
   async setMode(next: ChatMode): Promise<void> {
     if (this.mode === next) return;
     this.mode = next;
-    this.globalChat.unsubscribe();
-    this.directChat.unsubscribe();
     await this.reload();
   }
 
@@ -112,13 +166,7 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
 
   async selectPeer(peerId: string): Promise<void> {
     this.selectedPeerId = peerId;
-    this.directChat.unsubscribe();
     await this.reloadPrivate();
-    if (this.myUserId) {
-      this.directChat.subscribeConversation(peerId, this.myUserId, () => {
-        void this.reloadPrivate(true);
-      });
-    }
   }
 
   async reload(quiet = false): Promise<void> {
@@ -129,11 +177,6 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
         this.selectedPeerId = this.contacts[0].userId;
       }
       await this.reloadPrivate(quiet);
-      if (this.selectedPeerId && this.myUserId) {
-        this.directChat.subscribeConversation(this.selectedPeerId, this.myUserId, () => {
-          void this.reloadPrivate(true);
-        });
-      }
     }
   }
 
@@ -151,9 +194,6 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     }
     this.globalMessages = rows;
     this.scrollPending = true;
-    this.globalChat.subscribeNewMessages(() => {
-      void this.reloadGlobal(true);
-    });
   }
 
   async reloadPrivate(quiet = false): Promise<void> {

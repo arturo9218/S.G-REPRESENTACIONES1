@@ -6,12 +6,14 @@ import {
   systemTypeLabel,
 } from './presupuesto-circuit.catalog';
 import type {
+  CircuitComponentState,
   CircuitSectionState,
   ComponentStatus,
   PresupuestoProfessionalInfo,
   RefrigerationCircuitSurvey,
   RefrigerationSystemType,
 } from './presupuesto-circuit.models';
+import { collectMissingPdfFields, confirmPdfDespiteMissing } from './presupuesto-pdf-check';
 import {
   defaultCircuitSurvey,
   emptyProfessional,
@@ -188,42 +190,26 @@ export class PresupuestosPageComponent implements OnInit {
     this.toast.success('Datos del técnico guardados como predeterminados.');
   }
 
-  onComponentPresent(sec: CircuitSectionState, compKey: string, present: boolean): void {
-    this.patchSection(sec.key, (s) => ({
-      ...s,
-      components: s.components.map((c) =>
-        c.key !== compKey
-          ? c
-          : {
-              ...c,
-              present,
-              status: present && c.status === 'na' ? 'revisar' : c.status,
-            }
-      ),
-    }));
+  onPresentChange(c: CircuitComponentState, present: boolean): void {
+    c.present = present;
+    if (present && c.status === 'na') {
+      c.status = 'revisar';
+    }
   }
 
-  onComponentStatus(sec: CircuitSectionState, compKey: string, status: ComponentStatus): void {
-    this.patchSection(sec.key, (s) => ({
-      ...s,
-      components: s.components.map((c) =>
-        c.key === compKey ? { ...c, status, present: c.present || status !== 'na' } : c
-      ),
-    }));
+  onStatusChange(c: CircuitComponentState, status: ComponentStatus): void {
+    c.status = status;
+    if (status !== 'na') {
+      c.present = true;
+    }
   }
 
-  onComponentNotes(sec: CircuitSectionState, compKey: string, notes: string): void {
-    this.patchSection(sec.key, (s) => ({
-      ...s,
-      components: s.components.map((c) => (c.key === compKey ? { ...c, notes } : c)),
-    }));
+  trackSection(_index: number, sec: CircuitSectionState): string {
+    return sec.key;
   }
 
-  private patchSection(sectionKey: string, fn: (s: CircuitSectionState) => CircuitSectionState): void {
-    this.circuitSurvey = {
-      ...this.circuitSurvey,
-      sections: this.circuitSurvey.sections.map((s) => (s.key === sectionKey ? fn(s) : s)),
-    };
+  trackComponent(_index: number, c: CircuitComponentState): string {
+    return c.key;
   }
 
   addLine(): void {
@@ -333,8 +319,8 @@ export class PresupuestosPageComponent implements OnInit {
   async exportPdf(): Promise<void> {
     if (this.exporting) return;
     const snapshot = this.buildSnapshotForPdf();
-    if (!snapshot.items.length) {
-      this.toast.show('Completá ítems antes de exportar el PDF.', 'info');
+    const missing = collectMissingPdfFields(snapshot, this.items);
+    if (!confirmPdfDespiteMissing(missing)) {
       return;
     }
     this.exporting = true;

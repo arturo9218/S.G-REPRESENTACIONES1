@@ -18,8 +18,7 @@ export interface PrivateMessage {
 
 @Injectable({ providedIn: 'root' })
 export class DirectMessageService {
-  private channel: RealtimeChannel | null = null;
-  private watchPeerId: string | null = null;
+  private incomingChannel: RealtimeChannel | null = null;
 
   constructor(
     private readonly auth: AuthService,
@@ -87,11 +86,10 @@ export class DirectMessageService {
     return { error: error?.message ?? null };
   }
 
-  subscribeConversation(peerId: string, myUserId: string, onChange: () => void): void {
+  subscribeIncoming(myUserId: string, onInsert: (msg: PrivateMessage) => void): void {
     this.unsubscribe();
-    this.watchPeerId = peerId;
-    this.channel = this.auth.client
-      .channel(`private_messages_${myUserId}_${peerId}`)
+    this.incomingChannel = this.auth.client
+      .channel(`private_messages_in_${myUserId}`)
       .on(
         'postgres_changes',
         {
@@ -101,21 +99,17 @@ export class DirectMessageService {
           filter: `recipient_id=eq.${myUserId}`,
         },
         (payload) => {
-          const row = payload.new as Record<string, unknown>;
-          const sender = row['sender_id'] as string;
-          if (sender === peerId) {
-            this.zone.run(() => onChange());
-          }
+          const msg = this.mapRow(payload.new as Record<string, unknown>);
+          this.zone.run(() => onInsert(msg));
         }
       )
       .subscribe();
   }
 
   unsubscribe(): void {
-    this.watchPeerId = null;
-    if (this.channel) {
-      void this.auth.client.removeChannel(this.channel);
-      this.channel = null;
+    if (this.incomingChannel) {
+      void this.auth.client.removeChannel(this.incomingChannel);
+      this.incomingChannel = null;
     }
   }
 
