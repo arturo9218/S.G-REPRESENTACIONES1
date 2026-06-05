@@ -565,10 +565,12 @@ Deno.serve(async (req) => {
         });
 
         const nowIso = new Date().toISOString();
-        const patch: Record<string, string> = {};
-        if (shouldSendTemp) patch.last_push_temp_breach_at = nowIso;
-        if (shouldSendCurr) patch.last_push_current_breach_at = nowIso;
-        await supabase.from('device_thresholds').update(patch).eq('device_id', device.id);
+        if (pushResult.sent > 0) {
+          const patch: Record<string, string> = {};
+          if (shouldSendTemp) patch.last_push_temp_breach_at = nowIso;
+          if (shouldSendCurr) patch.last_push_current_breach_at = nowIso;
+          await supabase.from('device_thresholds').update(patch).eq('device_id', device.id);
+        }
 
         /** Historial: solo el 1er aviso del episodio; las repeticiones cada 1 min son solo push. */
         const firstTempPushOfEpisode = shouldSendTemp && !th.last_push_temp_breach_at;

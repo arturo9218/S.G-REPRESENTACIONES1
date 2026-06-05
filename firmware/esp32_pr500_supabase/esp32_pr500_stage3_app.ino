@@ -135,11 +135,10 @@ struct Cfg {
   char moduleId[48]{};
   char apiKey[24]{};
   char anonKey[400]{};
-  /** Telemetría a ingest-reading (ms). 60 s reduce invocaciones Edge en plan Free y mantiene
-   *  `device_readings` chiquita (la temperatura de una cámara cambia en minutos, no en segundos). */
-  uint32_t intervalMs = 60000;
-  /** Pull params en reposo (ms). Tras edición en app: ventana rápida 10 s (ver g_pullFastUntilMs). */
-  uint32_t paramsPullMs = 60000;
+  /** Telemetría a ingest-reading (ms). 120 s reduce invocaciones Edge y filas en pr500_readings. */
+  uint32_t intervalMs = 120000;
+  /** Pull params en reposo (ms). Tras edición en app: ventana rápida 30 s (ver g_pullFastUntilMs). */
+  uint32_t paramsPullMs = 180000;
 };
 
 struct Params {
@@ -203,7 +202,7 @@ static unsigned long g_lastSendMs = 0;
 static unsigned long g_lastTxErrLogMs = 0;
 static unsigned long g_lastParamsPullMs = 0;
 static unsigned long g_pullFastUntilMs  = 0;
-static constexpr unsigned long PR500_PULL_FAST_MS     = 10UL * 1000UL;
+static constexpr unsigned long PR500_PULL_FAST_MS     = 30UL * 1000UL;
 static constexpr unsigned long PR500_PULL_FAST_WINDOW = 2UL * 60UL * 1000UL;
 static unsigned long g_lastPullErrLogMs = 0;
 static unsigned long g_lastCloudFailMs = 0;
@@ -220,11 +219,11 @@ static bool g_alarmSensor = false;
  * Aparte del ciclo de g_cfg.intervalMs (60 s), disparamos TX inmediato cuando
  * cambia el estado de un relé (R1/R2/R3) o se activa/desactiva una alarma.
  * Eso mantiene la app "en vivo" para eventos importantes sin inflar la cuota
- * Free de Supabase (los eventos son raros). Rate-limit de 5 s anti-bounce.
+ * Free de Supabase (los eventos son raros). Rate-limit de 20 s anti-bounce.
  */
 static bool          g_immediateTxRequested = false;
 static unsigned long g_lastImmediateTxAt    = 0;
-static constexpr unsigned long IMMEDIATE_TX_MIN_GAP_MS = 5000UL;
+static constexpr unsigned long IMMEDIATE_TX_MIN_GAP_MS = 20000UL;
 static bool prevR1On     = false;
 static bool prevR2On     = false;
 static bool prevR3On     = false;
@@ -233,7 +232,7 @@ static bool prevAlarmHigh = false;
 static bool prevAlarmSensor = false;
 /** Última presión (bar filtrada) incluida en un flash-TX por delta. */
 static float prevBarReported = NAN;
-static constexpr float PRESSURE_DELTA_TX_BAR = 0.1f;
+static constexpr float PRESSURE_DELTA_TX_BAR = 0.25f;
 static inline void requestImmediateTx(const char *reason) {
   g_immediateTxRequested = true;
   Serial.printf("[TX] flash-tx solicitado por cambio de %s\n", reason);
@@ -430,12 +429,11 @@ static bool loadConfig() {
   strlcpy(g_cfg.moduleId, doc["module_id"] | "", sizeof(g_cfg.moduleId));
   strlcpy(g_cfg.apiKey, doc["api_key"] | "", sizeof(g_cfg.apiKey));
   strlcpy(g_cfg.anonKey, doc["supabase_anon_key"] | "", sizeof(g_cfg.anonKey));
-  g_cfg.intervalMs = (uint32_t)(doc["interval_ms"] | 60000);
-  // Hard floor de 60 s para proteger la cuota Free de Supabase. Migra silenciosamente
-  // configs viejas que tenían 30 s guardados en LittleFS.
-  if (g_cfg.intervalMs < 60000) g_cfg.intervalMs = 60000;
-  g_cfg.paramsPullMs = (uint32_t)(doc["params_pull_ms"] | 60000);
-  if (g_cfg.paramsPullMs < 10000) g_cfg.paramsPullMs = 10000;
+  g_cfg.intervalMs = (uint32_t)(doc["interval_ms"] | 120000);
+  // Hard floor 120 s: menos filas en pr500_readings y menos invocaciones Edge.
+  if (g_cfg.intervalMs < 120000) g_cfg.intervalMs = 120000;
+  g_cfg.paramsPullMs = (uint32_t)(doc["params_pull_ms"] | 180000);
+  if (g_cfg.paramsPullMs < 30000) g_cfg.paramsPullMs = 30000;
   trimAsciiInPlace(g_cfg.moduleId);
   trimAsciiInPlace(g_cfg.apiKey);
   trimAsciiInPlace(g_cfg.anonKey);
@@ -1403,7 +1401,8 @@ static void discardHttpResponseBody(HTTPClient &http, int maxBytes) {
   }
 }
 
-static void sendIngest() {
+/** @param eventTx true si el envío es por cambio de relé/alarma (payload completo). */
+static void sendIngest(bool eventTx = false) {
   if (WiFi.status() != WL_CONNECTED) return;
   const unsigned long now = millis();
   if (cloudInCooldown(now)) return;
@@ -1438,12 +1437,14 @@ static void sendIngest() {
   d["r2_on"] = relayIsOn(PIN_R2);
   d["r3_on"] = relayIsOn(PIN_R3);
   d["r4_alarm"] = (g_alarmLow || g_alarmHigh || g_alarmSensor);
-  d["comp1_run_ms"] = (double)g_runMsTotal[0];
-  d["comp2_run_ms"] = (double)g_runMsTotal[1];
-  d["comp3_run_ms"] = (double)g_runMsTotal[2];
-  if (g_suctionTempOk && isfinite(g_suctionTempC)) d["temp_suction_c"] = g_suctionTempC;
-  if (isfinite(g_superheatC)) d["superheat_c"] = g_superheatC;
-  if (g_superheatOk >= 0) d["superheat_ok"] = (g_superheatOk != 0);
+  if (eventTx) {
+    d["comp1_run_ms"] = (double)g_runMsTotal[0];
+    d["comp2_run_ms"] = (double)g_runMsTotal[1];
+    d["comp3_run_ms"] = (double)g_runMsTotal[2];
+    if (g_suctionTempOk && isfinite(g_suctionTempC)) d["temp_suction_c"] = g_suctionTempC;
+    if (isfinite(g_superheatC)) d["superheat_c"] = g_superheatC;
+    if (g_superheatOk >= 0) d["superheat_ok"] = (g_superheatOk != 0);
+  }
   String body;
   serializeJson(d, body);
   int code = http.POST(body);
@@ -2201,11 +2202,13 @@ void loop() {
   // pidió y pasó el gap anti-bounce. Si el evento llega pero todavía no se
   // cumplió el gap, el flag queda pendiente y se sirve en el próximo loop.
   bool sendNow = (nowMs - g_lastSendMs >= g_cfg.intervalMs);
+  bool eventTx = false;
   if (g_immediateTxRequested) {
     const bool gapOk = (g_lastImmediateTxAt == 0) ||
                        (nowMs - g_lastImmediateTxAt >= IMMEDIATE_TX_MIN_GAP_MS);
     if (gapOk) {
       sendNow = true;
+      eventTx = true;
       g_immediateTxRequested = false;
       g_lastImmediateTxAt = nowMs;
       Serial.println(F("[TX] disparando flash-tx (evento)"));
@@ -2213,7 +2216,7 @@ void loop() {
   }
   if (sendNow) {
     g_lastSendMs = nowMs;
-    sendIngest();
+    sendIngest(eventTx);
     cloudHttpThisLoop = true;
   }
   if (WiFi.status() == WL_CONNECTED && strlen(g_cfg.moduleId) && strlen(g_cfg.apiKey)) {

@@ -5,8 +5,12 @@
 --    CHAT_PUSH_SECRET = una clave larga (ej. openssl rand -hex 32)
 --    (Ya debés tener VAPID_*, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY en la función.)
 
--- 2) Deploy:
---    supabase functions deploy notify-chat-message --no-verify-jwt
+-- 2) Deploy (desde carpeta FRONTEND):
+--    npm run deploy:supabase-functions
+--    o solo: supabase functions deploy notify-chat-message --no-verify-jwt
+--
+-- 2b) Verificar en Table Editor → push_subscriptions: debe haber fila con tu user_id
+--     tras abrir la app y dar permiso de notificaciones.
 
 -- 3) Database Webhooks (Dashboard → Database → Webhooks → Create hook):
 --

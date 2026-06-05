@@ -370,6 +370,18 @@ deno_version = 2
 
 # Tokens ES256 (JWT Signing Keys): el verificador del gateway puede devolver 401 antes de ejecutar el código.
 # Esta función valida Authorization con auth.getUser() y comprueba owner_user_id del dispositivo.
+[functions.ingest-reading]
+verify_jwt = false
+
+[functions.check-offline-push]
+verify_jwt = false
+
+[functions.notify-chat-message]
+verify_jwt = false
+
+[functions.fetch-pro400-params]
+verify_jwt = false
+
 [functions.ai-chart-insight]
 verify_jwt = false
 

@@ -10,7 +10,7 @@
     "build": "ng build",
     "manual:pdf": "node scripts/generate-manual-pdf.cjs",
     "doc:pr500-pcb-pdf": "node scripts/generate-pr500-pinout-pdf.cjs",
-    "deploy:supabase-functions": "npx -y supabase@latest functions deploy ingest-reading --no-verify-jwt && npx -y supabase@latest functions deploy check-offline-push --no-verify-jwt && npx -y supabase@latest functions deploy ai-chart-insight",
+    "deploy:supabase-functions": "npx -y supabase@latest functions deploy ingest-reading --no-verify-jwt && npx -y supabase@latest functions deploy check-offline-push --no-verify-jwt && npx -y supabase@latest functions deploy notify-chat-message --no-verify-jwt && npx -y supabase@latest functions deploy fetch-pro400-params --no-verify-jwt && npx -y supabase@latest functions deploy ai-chart-insight",
     "deploy:fetch-pr500-params": "npx -y supabase@latest functions deploy fetch-pr500-params --no-verify-jwt",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"

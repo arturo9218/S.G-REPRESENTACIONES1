@@ -8,6 +8,7 @@ import { ChatRealtimeService } from './core/chat-realtime.service';
 import { ChatUnreadService } from './core/chat-unread.service';
 import { ConnectivityService } from './core/connectivity.service';
 import { ToastService, type ToastMessage } from './core/toast.service';
+import { WebPushService } from './core/web-push.service';
 
 @Component({
   selector: 'app-root',
@@ -35,7 +36,8 @@ export class AppComponent implements OnInit, OnDestroy {
     private readonly toastService: ToastService,
     private readonly auth: AuthService,
     private readonly chatRealtime: ChatRealtimeService,
-    private readonly chatUnread: ChatUnreadService
+    private readonly chatUnread: ChatUnreadService,
+    private readonly webPush: WebPushService
   ) {}
 
   ngOnInit(): void {
@@ -51,12 +53,14 @@ export class AppComponent implements OnInit, OnDestroy {
       if (s) {
         void this.chatRealtime.start();
         void this.chatUnread.refresh();
+        void this.ensureBackgroundPush();
       }
     });
     this.auth.client.auth.onAuthStateChange((_event, session) => {
       if (session) {
         void this.chatRealtime.start();
         void this.chatUnread.refresh();
+        void this.ensureBackgroundPush();
       } else {
         this.chatRealtime.stop();
         this.chatUnread.clear();
@@ -91,6 +95,16 @@ export class AppComponent implements OnInit, OnDestroy {
         void this.swUpdate.checkForUpdate();
       }
     });
+  }
+
+  /** Re-suscribe FCM si el usuario ya dio permiso pero no hay fila en push_subscriptions. */
+  private async ensureBackgroundPush(): Promise<void> {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    if (!environment.vapidPublicKey?.trim()) return;
+    const ui = await this.webPush.getUiState();
+    if (ui === 'active') return;
+    await this.webPush.subscribeBackgroundAlerts();
   }
 
   ngOnDestroy(): void {
