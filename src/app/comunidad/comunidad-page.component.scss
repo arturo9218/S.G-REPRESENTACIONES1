@@ -1,7 +1,139 @@
 .com {
-  max-width: 720px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 0 4px 24px;
+}
+
+.com-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.com-tabs__btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #94a3b8;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.com-tabs__btn--active {
+  border-color: #38bdf8;
+  background: rgba(14, 165, 233, 0.15);
+  color: #7dd3fc;
+}
+
+.com-private {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 420px;
+}
+
+@media (max-width: 720px) {
+  .com-private {
+    grid-template-columns: 1fr;
+  }
+}
+
+.com-contacts {
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 10px;
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.com-contacts__search input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 0.85rem;
+}
+
+.com-contacts__loading,
+.com-contacts__empty {
+  margin: 8px 4px;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.com-contacts__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.com-contacts__item:hover,
+.com-contacts__item--active {
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(30, 41, 59, 0.85);
+}
+
+.com-contacts__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #1e3a5f;
+  color: #7dd3fc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.com-contacts__email {
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.com-chat__peer {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: #94a3b8;
+}
+
+.com-chat__peer strong {
+  color: #e2e8f0;
+  margin-left: 4px;
+}
+
+.com-pick {
+  padding: 24px;
+  color: #64748b;
+  text-align: center;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 .com-hero {

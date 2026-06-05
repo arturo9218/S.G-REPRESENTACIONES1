@@ -1,53 +1,151 @@
 <div class="com">
   <header class="com-hero">
     <p class="com-hero__kicker">Comunidad</p>
-    <h1 class="com-hero__title">AR Monitoreo — conversación</h1>
+    <h1 class="com-hero__title">Mensajes AR Monitoreo</h1>
     <p class="com-hero__lead">
-      Todos los usuarios registrados pueden escribirse aquí entre sí. Es un chat global: cualquier
-      mensaje lo ven el resto del equipo en AR Monitoreo.
+      Escribí a <strong>un solo usuario</strong> en privado o usá la sala global para todo el equipo.
     </p>
+    <div class="com-tabs" role="tablist">
+      <button
+        type="button"
+        class="com-tabs__btn"
+        role="tab"
+        [class.com-tabs__btn--active]="mode === 'private'"
+        [attr.aria-selected]="mode === 'private'"
+        (click)="setMode('private')"
+      >
+        Mensaje privado
+      </button>
+      <button
+        type="button"
+        class="com-tabs__btn"
+        role="tab"
+        [class.com-tabs__btn--active]="mode === 'global'"
+        [attr.aria-selected]="mode === 'global'"
+        (click)="setMode('global')"
+      >
+        Sala global
+      </button>
+    </div>
   </header>
 
   <p class="com-error" *ngIf="loadError" role="alert">{{ loadError }}</p>
-  <p class="com-loading" *ngIf="loading && !loadError">Cargando mensajes…</p>
 
-  <div class="com-chat" *ngIf="!loadError">
-    <div class="com-chat__scroll" #scrollBox role="log" aria-live="polite" aria-relevant="additions">
-      <p class="com-chat__empty" *ngIf="!loading && !messages.length">
-        Todavía no hay mensajes. Sé el primero en saludar al equipo.
+  <!-- Privado -->
+  <div class="com-private" *ngIf="mode === 'private' && !loadError">
+    <aside class="com-contacts" aria-label="Usuarios">
+      <label class="com-contacts__search">
+        <span class="visually-hidden">Buscar usuario</span>
+        <input
+          type="search"
+          [(ngModel)]="contactSearch"
+          placeholder="Buscar por email…"
+          [disabled]="loadingContacts"
+        />
+      </label>
+      <p class="com-contacts__loading" *ngIf="loadingContacts">Cargando usuarios…</p>
+      <p class="com-contacts__empty" *ngIf="!loadingContacts && !contacts.length">
+        No hay otros usuarios registrados todavía. Invitá a alguien a crear cuenta en la app.
+      </p>
+      <button
+        type="button"
+        class="com-contacts__item"
+        *ngFor="let c of filteredContacts"
+        [class.com-contacts__item--active]="selectedPeerId === c.userId"
+        (click)="selectPeer(c.userId)"
+      >
+        <span class="com-contacts__avatar">{{ contactLabel(c).slice(0, 1) }}</span>
+        <span class="com-contacts__email">{{ c.email }}</span>
+      </button>
+    </aside>
+
+    <section class="com-chat" *ngIf="selectedPeerId; else pickUser">
+      <header class="com-chat__peer">
+        <span>Conversación con</span>
+        <strong>{{ selectedContact?.email }}</strong>
+      </header>
+      <p class="com-loading" *ngIf="loading">Cargando mensajes…</p>
+      <div
+        class="com-chat__scroll"
+        #scrollBox
+        role="log"
+        aria-live="polite"
+        *ngIf="!loading"
+      >
+        <p class="com-chat__empty" *ngIf="!privateMessages.length">
+          Todavía no hay mensajes con este usuario. Escribí el primero abajo.
+        </p>
+        <article
+          class="com-msg"
+          *ngFor="let m of privateMessages"
+          [class.com-msg--mine]="isMinePrivate(m)"
+        >
+          <div class="com-msg__head">
+            <strong class="com-msg__author">{{ emailLabel(m.senderEmail) }}</strong>
+            <time class="com-msg__time">{{ timeLabel(m.createdAt) }}</time>
+          </div>
+          <p class="com-msg__body">{{ m.body }}</p>
+          <button
+            type="button"
+            class="com-msg__del"
+            *ngIf="isMinePrivate(m)"
+            (click)="removePrivate(m)"
+          >
+            Eliminar
+          </button>
+        </article>
+      </div>
+      <ng-container *ngTemplateOutlet="compose"></ng-container>
+    </section>
+
+    <ng-template #pickUser>
+      <p class="com-pick" *ngIf="contacts.length">Elegí un usuario de la lista para chatear.</p>
+    </ng-template>
+  </div>
+
+  <!-- Global -->
+  <div class="com-chat com-chat--global" *ngIf="mode === 'global' && !loadError">
+    <p class="com-loading" *ngIf="loading">Cargando mensajes…</p>
+    <div class="com-chat__scroll" #scrollBox role="log" aria-live="polite" *ngIf="!loading">
+      <p class="com-chat__empty" *ngIf="!globalMessages.length">
+        Todavía no hay mensajes en la sala global.
       </p>
       <article
         class="com-msg"
-        *ngFor="let m of messages"
-        [class.com-msg--mine]="isMine(m)"
+        *ngFor="let m of globalMessages"
+        [class.com-msg--mine]="isMineGlobal(m)"
       >
         <div class="com-msg__head">
-          <strong class="com-msg__author">{{ authorLabel(m) }}</strong>
+          <strong class="com-msg__author">{{ emailLabel(m.authorEmail) }}</strong>
           <time class="com-msg__time">{{ timeLabel(m.createdAt) }}</time>
         </div>
         <p class="com-msg__body">{{ m.body }}</p>
         <button
           type="button"
           class="com-msg__del"
-          *ngIf="isMine(m)"
-          (click)="remove(m)"
-          title="Eliminar tu mensaje"
+          *ngIf="isMineGlobal(m)"
+          (click)="removeGlobal(m)"
         >
           Eliminar
         </button>
       </article>
     </div>
+    <ng-container *ngTemplateOutlet="compose"></ng-container>
+  </div>
 
+  <ng-template #compose>
     <footer class="com-compose">
-      <label class="com-compose__label" for="com-draft">Tu mensaje</label>
+      <label class="com-compose__label" for="com-draft">
+        {{ mode === 'private' ? 'Mensaje privado' : 'Mensaje a la sala' }}
+      </label>
       <textarea
         id="com-draft"
         class="com-compose__input"
         rows="3"
         [(ngModel)]="draft"
         (keydown)="onKeydown($event)"
-        placeholder="Escribí aquí… Enter envía, Shift+Enter nueva línea"
-        [disabled]="sending"
+        [placeholder]="mode === 'private' ? 'Solo lo verá el usuario elegido…' : 'Todos los usuarios lo verán…'"
+        [disabled]="sending || (mode === 'private' && !selectedPeerId)"
       ></textarea>
       <div class="com-compose__actions">
         <button type="button" class="com-btn com-btn--ghost" (click)="reload()" [disabled]="loading">
@@ -57,11 +155,11 @@
           type="button"
           class="com-btn com-btn--primary"
           (click)="send()"
-          [disabled]="sending || !draft.trim()"
+          [disabled]="sending || !draft.trim() || (mode === 'private' && !selectedPeerId)"
         >
           {{ sending ? 'Enviando…' : 'Enviar' }}
         </button>
       </div>
     </footer>
-  </div>
+  </ng-template>
 </div>
