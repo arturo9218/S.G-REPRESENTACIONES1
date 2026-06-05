@@ -19,7 +19,8 @@ export class ChatUnreadService {
   }
 
   async refresh(): Promise<void> {
-    const { rows } = await this.directChat.fetchContacts();
+    const { rows, error } = await this.directChat.fetchContacts();
+    if (error) return;
     const total = rows.reduce((s, c) => s + c.unreadCount, 0);
     this.totalSubject.next(total);
   }

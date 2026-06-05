@@ -35,12 +35,43 @@ export class DirectMessageService {
     if (error) {
       return { rows: [], error: error.message };
     }
-    const rows = (data ?? []).map((r: Record<string, unknown>) => ({
-      userId: r['user_id'] as string,
-      email: String(r['email'] ?? '').trim().toLowerCase(),
-      unreadCount: Number(r['unread_count'] ?? 0) || 0,
-    }));
+    const unreadFallback = await this.fetchUnreadCountsBySender();
+    const rows = (data ?? []).map((r: Record<string, unknown>) => {
+      const userId = r['user_id'] as string;
+      const fromRpc = Number(r['unread_count']);
+      const unreadCount =
+        Number.isFinite(fromRpc) && fromRpc > 0
+          ? fromRpc
+          : unreadFallback.get(userId) ?? 0;
+      return {
+        userId,
+        email: String(r['email'] ?? '').trim().toLowerCase(),
+        unreadCount,
+      };
+    });
     return { rows, error: null };
+  }
+
+  /** Si falta 055 en Supabase, cuenta no leídos directo desde private_messages. */
+  private async fetchUnreadCountsBySender(): Promise<Map<string, number>> {
+    const session = await this.auth.getSession();
+    const me = session?.user?.id;
+    if (!me) return new Map();
+
+    const { data, error } = await this.auth.client
+      .from('private_messages')
+      .select('sender_id')
+      .eq('recipient_id', me)
+      .is('read_at', null);
+
+    if (error) return new Map();
+    const map = new Map<string, number>();
+    for (const row of data ?? []) {
+      const senderId = String(row['sender_id'] ?? '');
+      if (!senderId) continue;
+      map.set(senderId, (map.get(senderId) ?? 0) + 1);
+    }
+    return map;
   }
 
   async fetchConversation(

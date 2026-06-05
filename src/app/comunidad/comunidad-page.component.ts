@@ -92,8 +92,10 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     this.soundSettings = loadChatNotificationSettings();
     this.notifyPermission = await this.chatNotify.ensurePermission();
     await this.refreshPushDiagnostics();
+    await this.ensureBackgroundPush();
     void this.chatRealtime.start();
     this.uiSubs.push(
+      this.chatUnread.total$.subscribe(() => void this.loadContacts()),
       this.chatRealtime.global$.subscribe((msg) => {
         if (this.mode === 'global') void this.reloadGlobal(true);
       }),
@@ -124,6 +126,18 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
       el.scrollTop = el.scrollHeight;
       this.scrollPending = false;
     }
+  }
+
+  /** Si ya hay permiso del navegador, intenta suscribir FCM para avisos con app cerrada. */
+  private async ensureBackgroundPush(): Promise<void> {
+    const vapidOk =
+      typeof environment.vapidPublicKey === 'string' && environment.vapidPublicKey.trim().length > 0;
+    if (!vapidOk || this.notifyPermission !== 'granted') return;
+    const ui = await this.webPush.getUiState();
+    if (ui !== 'none') return;
+    const push = await this.webPush.subscribeBackgroundAlerts();
+    if (push.message) this.pushUiState = push.message;
+    await this.refreshPushDiagnostics();
   }
 
   async refreshPushDiagnostics(): Promise<void> {
@@ -283,6 +297,7 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     if (!refresh.error) {
       this.privateMessages = refresh.rows;
     }
+    await this.loadContacts();
   }
 
   deliveryLabel(m: PrivateMessage): string {

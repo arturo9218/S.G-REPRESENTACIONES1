@@ -102,12 +102,15 @@
         <span class="com-contacts__avatar">{{ contactLabel(c).slice(0, 1) }}</span>
         <span class="com-contacts__email">{{ c.email }}</span>
         <span
-          class="com-contacts__bell"
+          class="com-contacts__unread"
           *ngIf="c.unreadCount > 0"
           [attr.aria-label]="c.unreadCount + ' mensajes sin leer'"
-          title="Mensajes sin leer"
-        >🔔</span>
-        <span class="com-contacts__badge" *ngIf="c.unreadCount > 0">{{ c.unreadCount }}</span>
+          title="{{ c.unreadCount }} sin leer"
+        >
+          <span class="com-contacts__unread-dot" aria-hidden="true"></span>
+          <span class="com-contacts__unread-bell" aria-hidden="true">🔔</span>
+          <span class="com-contacts__unread-count">{{ c.unreadCount }}</span>
+        </span>
       </button>
     </aside>
 
