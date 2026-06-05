@@ -7,8 +7,9 @@ import { AuthService } from './auth.service';
  * (forzar comp/vent, gatillar/cancelar deshielo, cancelar forzados) al PRO300.
  *
  * El servidor escribe el comando en `combistatos.pending_command` y bumpea
- * `updated_at`. El ESP32 lo agarra al siguiente POST de telemetría (con la
- * propagación rápida que ya armamos) y lo aplica. Lag esperado: 5-30 s.
+ * `updated_at`. El ESP hace pull cada ~20 s (o cada 5 s mientras el comando
+ * sigue pendiente) sin aumentar los INSERT de telemetría (60 s + eventos).
+ * Lag típico: 5–25 s.
  */
 export type CombistatoCommandKind =
   | 'force_comp'

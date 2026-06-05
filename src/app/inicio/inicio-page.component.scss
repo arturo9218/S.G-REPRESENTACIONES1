@@ -425,6 +425,30 @@
   color: #6ee7b7;
 }
 
+.inicio-help__card--community {
+  border-color: rgba(167, 139, 250, 0.28);
+}
+
+.inicio-help__card--community:hover {
+  border-color: rgba(167, 139, 250, 0.5);
+}
+
+.inicio-help__cta--community {
+  color: #c4b5fd;
+}
+
+.inicio-help__card--budget {
+  border-color: rgba(251, 191, 36, 0.28);
+}
+
+.inicio-help__card--budget:hover {
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
+.inicio-help__cta--budget {
+  color: #fde68a;
+}
+
 .inicio-fleet__row {
   display: grid;
   grid-template-columns: auto 1fr auto;

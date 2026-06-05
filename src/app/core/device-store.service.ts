@@ -9,12 +9,33 @@ import { environment } from '../../environments/environment';
 import { AuthService } from './auth.service';
 import { ingestFunctionUrl, isSupabaseConfigured } from './supabase-config';
 import {
+  mergePro400Params,
+  pro400ToJsonBlob,
+  type Pro400FormModel,
+} from '../pro400/pro400-params.defaults';
+import {
+  CombistatoPhase,
   DashboardDevice,
   DashboardDeviceAccessRole,
   DeviceAlarmEvent,
   DeviceChartMarker,
   TemperatureReading,
 } from './models/dashboard.models';
+
+function parseDevicePhase(raw: unknown): CombistatoPhase | null {
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim().toLowerCase();
+  const ok: CombistatoPhase[] = [
+    'boot',
+    'normal',
+    'defrost',
+    'drip',
+    'post_defrost',
+    'emerg',
+    'off',
+  ];
+  return ok.includes(v as CombistatoPhase) ? (v as CombistatoPhase) : null;
+}
 
 const STORAGE_KEY_PREFIX = 'ar-monitor-devices-v2';
 const READINGS_KEY_PREFIX = 'ar-monitor-readings-v2';
@@ -91,6 +112,7 @@ export interface NewDeviceInput {
   location: string;
   moduleId: string;
   espLocalIp: string;
+  equipmentKind?: 'pro400' | 'generic' | null;
 }
 
 export interface DeviceNotificationConfigInput {
@@ -223,18 +245,24 @@ export class DeviceStoreService {
       }
 
       const deviceToken = await this.randomDeviceTokenAsync();
+      const equipmentKind = input.equipmentKind ?? null;
+      const insertRow: Record<string, unknown> = {
+        owner_user_id: session.user.id,
+        module_id: moduleId,
+        name,
+        location,
+        device_token_hash: deviceToken,
+        active: true,
+        sensor_1_label: DEFAULT_SENSOR_1_LABEL,
+        sensor_2_label: DEFAULT_SENSOR_2_LABEL,
+      };
+      if (equipmentKind === 'pro400') {
+        insertRow['equipment_kind'] = 'pro400';
+        insertRow['params'] = pro400ToJsonBlob(mergePro400Params(null));
+      }
       const { data, error } = await this.auth.client
         .from('devices')
-        .insert({
-          owner_user_id: session.user.id,
-          module_id: moduleId,
-          name,
-          location,
-          device_token_hash: deviceToken,
-          active: true,
-          sensor_1_label: DEFAULT_SENSOR_1_LABEL,
-          sensor_2_label: DEFAULT_SENSOR_2_LABEL,
-        })
+        .insert(insertRow)
         .select('id')
         .single();
 
@@ -300,6 +328,7 @@ export class DeviceStoreService {
         offlinePushCooldownMs: 15 * 60 * 1000,
         currentMaxA: null,
         nominalVoltageV: 220,
+        equipmentKind: equipmentKind === 'pro400' ? 'pro400' : undefined,
       };
 
       this.persistDevices([...this.snapshot.filter((d) => d.id !== id), device]);
@@ -1154,7 +1183,7 @@ export class DeviceStoreService {
     this.adminSubject.next(isAdmin);
 
     const baseFields =
-      'id, module_id, name, location, active, updated_at, sensor_1_label, sensor_2_label';
+      'id, module_id, name, location, active, updated_at, sensor_1_label, sensor_2_label, equipment_kind';
     const selectOwned = `${baseFields}, owner_user_id`;
 
     type DeviceRow = {
@@ -1164,6 +1193,7 @@ export class DeviceStoreService {
       module_id: string;
       sensor_1_label: string | null;
       sensor_2_label: string | null;
+      equipment_kind?: string | null;
       owner_user_id?: string | null;
     };
     type DeviceRowWithAccess = DeviceRow & { _access: DashboardDeviceAccessRole };
@@ -1368,6 +1398,10 @@ export class DeviceStoreService {
         temp3OffsetC: th?.o3 ?? prev?.temp3OffsetC ?? 0,
         currentOffsetA: th?.oA ?? prev?.currentOffsetA ?? 0,
         powerOffsetW: th?.oP ?? prev?.powerOffsetW ?? 0,
+        equipmentKind:
+          row.equipment_kind === 'pro400'
+            ? 'pro400'
+            : prev?.equipmentKind ?? undefined,
       };
     });
 
@@ -1452,6 +1486,16 @@ export class DeviceStoreService {
       }
       const atMs = new Date(r.at).getTime();
       const isOnline = Number.isFinite(atMs) ? nowMs - atMs <= offlineAfterMs : false;
+      const pro400Extras =
+        d.equipmentKind === 'pro400'
+          ? {
+              lastCompOn: r.compOn ?? null,
+              lastDefrostOn: r.defrostOn ?? null,
+              lastPhase: r.phase ?? null,
+              lastPhaseElapsedS: r.phaseElapsedS ?? null,
+              lastPhaseTotalS: r.phaseTotalS ?? null,
+            }
+          : {};
       return {
         ...d,
         temperatureC: r.temperatureC,
@@ -1460,6 +1504,7 @@ export class DeviceStoreService {
         powerW: r.powerW ?? null,
         online: isOnline,
         updatedAtLabel: this.formatUpdatedLabel(r.at),
+        ...pro400Extras,
       };
     });
     this.persistDevices(updated);
@@ -1477,7 +1522,7 @@ export class DeviceStoreService {
     if (!ids.length) return;
 
     const selectCols =
-      'device_id, created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w, current_a_raw, power_w_raw, press1_bar, press2_bar';
+      'device_id, created_at, temp1_c, temp2_c, temp3_c, temp1_raw_c, temp2_raw_c, temp3_raw_c, current_a, power_w, current_a_raw, power_w_raw, press1_bar, press2_bar, comp_on, defrost_on, fan_on, phase, phase_elapsed_s, phase_total_s';
     const rows: Record<string, unknown>[] = [];
 
     for (const deviceId of ids) {
@@ -1542,6 +1587,18 @@ export class DeviceStoreService {
         press2Bar:
           typeof r['press2_bar'] === 'number' && !Number.isNaN(r['press2_bar'] as number)
             ? (r['press2_bar'] as number)
+            : null,
+        compOn: typeof r['comp_on'] === 'boolean' ? r['comp_on'] : null,
+        defrostOn: typeof r['defrost_on'] === 'boolean' ? r['defrost_on'] : null,
+        fanOn: typeof r['fan_on'] === 'boolean' ? r['fan_on'] : null,
+        phase: parseDevicePhase(r['phase']),
+        phaseElapsedS:
+          typeof r['phase_elapsed_s'] === 'number' && Number.isFinite(r['phase_elapsed_s'] as number)
+            ? (r['phase_elapsed_s'] as number)
+            : null,
+        phaseTotalS:
+          typeof r['phase_total_s'] === 'number' && Number.isFinite(r['phase_total_s'] as number)
+            ? (r['phase_total_s'] as number)
             : null,
       };
     });
@@ -1815,6 +1872,39 @@ export class DeviceStoreService {
       return { kwh: null, error: 'Respuesta inválida del servidor.' };
     }
     return { kwh: n };
+  }
+
+  async fetchPro400Params(deviceId: string): Promise<{ params: Pro400FormModel; error?: string }> {
+    const defaults = mergePro400Params(null);
+    if (!this.isCloudSyncEnabled() || !this.isUuid(deviceId)) {
+      return { params: defaults };
+    }
+    const { data, error } = await this.auth.client
+      .from('devices')
+      .select('params')
+      .eq('id', deviceId)
+      .maybeSingle();
+    if (error) return { params: defaults, error: error.message };
+    return { params: mergePro400Params(data?.params) };
+  }
+
+  async savePro400Params(
+    deviceId: string,
+    blob: Record<string, number>
+  ): Promise<{ ok: boolean; error?: string }> {
+    const dev = this.snapshot.find((d) => d.id === deviceId);
+    if (!this.canEditDeviceDataOnCloud(dev)) {
+      return { ok: false, error: 'Solo lectura: no podés cambiar parámetros.' };
+    }
+    if (!this.isCloudSyncEnabled() || !this.isUuid(deviceId)) {
+      return { ok: false, error: 'Requiere sesión en la nube.' };
+    }
+    const { error } = await this.auth.client
+      .from('devices')
+      .update({ params: blob, updated_at: new Date().toISOString() })
+      .eq('id', deviceId);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
   }
 
   async updateDeviceTempCalibration(

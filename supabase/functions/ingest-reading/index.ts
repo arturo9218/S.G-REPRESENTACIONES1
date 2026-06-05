@@ -77,6 +77,13 @@ function ingestBool(v: unknown): boolean {
 }
 
 /** Banderas opcionales del firmware PRO300 con control: si el campo no viene, se guarda NULL. */
+function clampInt(raw: unknown, max = 86400): number | null {
+  if (raw === undefined || raw === null) return null;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.min(Math.round(n), max);
+}
+
 function ingestOptionalBool(v: unknown): boolean | null {
   if (v === undefined || v === null) return null;
   return ingestBool(v);
@@ -138,14 +145,16 @@ Deno.serve(async (req) => {
 
     const { data: device, error: devErr } = await supabase
       .from('devices')
-      .select('id, device_token_hash, active, owner_user_id, name, sensor_1_label, sensor_2_label')
+      .select(
+        'id, device_token_hash, active, owner_user_id, name, sensor_1_label, sensor_2_label, updated_at, params, equipment_kind'
+      )
       .eq('module_id', moduleId)
       .single();
 
     if (devErr || !device) {
       const { data: combi, error: combiErr } = await supabase
         .from('combistatos')
-        .select('id, device_token_hash, updated_at')
+        .select('id, device_token_hash, updated_at, pending_command')
         .eq('module_id', moduleId)
         .maybeSingle();
 
@@ -164,12 +173,6 @@ Deno.serve(async (req) => {
           payload.temp2_c == null || Number.isNaN(payload.temp2_c as number)
             ? null
             : (payload.temp2_c as number);
-        const clampInt = (raw: unknown, max = 86400): number | null => {
-          if (raw === undefined || raw === null) return null;
-          const n = typeof raw === 'number' ? raw : Number(raw);
-          if (!Number.isFinite(n) || n < 0) return null;
-          return Math.min(Math.round(n), max);
-        };
         const phaseRaw = payload.phase;
         const phase = (() => {
           if (typeof phaseRaw !== 'string') return null;
@@ -215,8 +218,25 @@ Deno.serve(async (req) => {
           typeof combi.updated_at === 'string' && combi.updated_at.trim()
             ? combi.updated_at.trim()
             : null;
+        let pullParamsNow = false;
+        const pendingRaw = combi.pending_command;
+        if (
+          pendingRaw &&
+          typeof pendingRaw === 'object' &&
+          !Array.isArray(pendingRaw)
+        ) {
+          const cmd = pendingRaw as Record<string, unknown>;
+          const expiresRaw = typeof cmd['expiresAt'] === 'string' ? cmd['expiresAt'] : '';
+          const expires = expiresRaw ? Date.parse(expiresRaw) : NaN;
+          pullParamsNow = !Number.isFinite(expires) || expires > Date.now();
+        }
         return new Response(
-          JSON.stringify({ ok: true, kind: 'combistato', params_updated_at: paramsUpdatedAt }),
+          JSON.stringify({
+            ok: true,
+            kind: 'combistato',
+            params_updated_at: paramsUpdatedAt,
+            pull_params_now: pullParamsNow,
+          }),
           {
             status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -364,6 +384,13 @@ Deno.serve(async (req) => {
     const fanOn     = ingestOptionalBool(payload.fan_on);
     const defrostOn = ingestOptionalBool(payload.defrost_on);
     const doorOpen  = ingestOptionalBool(payload.door_open);
+    const phaseRaw = payload.phase;
+    const phase = (() => {
+      if (typeof phaseRaw !== 'string') return null;
+      const v = phaseRaw.trim().toLowerCase();
+      const ok = ['boot', 'normal', 'defrost', 'drip', 'post_defrost', 'emerg', 'off'];
+      return ok.includes(v) ? v : null;
+    })();
 
     const { error: insErr } = await supabase.from('device_readings').insert({
       device_id: device.id,
@@ -390,6 +417,9 @@ Deno.serve(async (req) => {
       fan_on: fanOn,
       defrost_on: defrostOn,
       door_open: doorOpen,
+      phase,
+      phase_elapsed_s: clampInt(payload.phase_elapsed_s),
+      phase_total_s: clampInt(payload.phase_total_s),
     });
 
     if (insErr) {
@@ -582,9 +612,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    const out: Record<string, unknown> = { ok: true };
+    const out: Record<string, unknown> = { ok: true, kind: 'device' };
     if (pushDiag) out.push = pushDiag;
     if (thErr) out.thresholdsWarning = thErr.message;
+    const serverUpd =
+      typeof (device as { updated_at?: string }).updated_at === 'string'
+        ? (device as { updated_at: string }).updated_at
+        : null;
+    if (serverUpd) {
+      out.params_updated_at = serverUpd;
+      const clientUpd =
+        typeof payload.params_updated_at === 'string' ? payload.params_updated_at.trim() : '';
+      out.pull_params_now = !clientUpd || clientUpd !== serverUpd;
+    }
 
     return new Response(JSON.stringify(out), {
       status: 200,

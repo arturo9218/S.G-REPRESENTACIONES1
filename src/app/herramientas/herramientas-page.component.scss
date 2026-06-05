@@ -507,6 +507,92 @@
   color: #cbd5e1;
 }
 
+.herr-cloud-opt {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  border-radius: 12px;
+  background: rgba(14, 165, 233, 0.06);
+}
+
+.herr-cloud-opt__summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #7dd3fc;
+  font-size: 14px;
+}
+
+.herr-cloud-opt__lead {
+  margin: 10px 0 14px;
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.herr-cloud-opt__block {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+}
+
+.herr-cloud-opt__block:last-of-type {
+  border-bottom: 0;
+  margin-bottom: 8px;
+}
+
+.herr-visit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 20px;
+}
+
+.herr-visit-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.herr-visit-log__item {
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.herr-visit-log__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.herr-visit-log__del {
+  border: none;
+  background: transparent;
+  color: #f87171;
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.herr-visit-log__note {
+  margin: 0;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: #e2e8f0;
+}
+
+.herr-field__input[type='datetime-local'] {
+  color-scheme: dark;
+}
+
 .herr-disclaimer {
   margin: 1rem 0 0;
   font-size: 0.78rem;

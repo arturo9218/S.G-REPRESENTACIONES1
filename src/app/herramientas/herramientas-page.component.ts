@@ -4,9 +4,21 @@ import { Subscription } from 'rxjs';
 import { DeviceStoreService } from '../core/device-store.service';
 import {
   DeviceEquipmentFichaRow,
+  DeviceEquipmentLogRow,
   EquipmentSheetService,
 } from '../core/equipment-sheet.service';
-import type { DashboardDevice } from '../core/models/dashboard.models';
+import type {
+  DashboardCombistato,
+  DashboardDevice,
+  DashboardPr500,
+} from '../core/models/dashboard.models';
+import { CombistatoStoreService } from '../core/combistato-store.service';
+import { Pr500StoreService } from '../core/pr500-store.service';
+import {
+  formatCombistatoImportSummary,
+  formatPr500ImportSummary,
+  formatPro400ImportSummary,
+} from './cloud-import.util';
 import { ToastService } from '../core/toast.service';
 import { environment } from '../../environments/environment';
 import {
@@ -40,8 +52,30 @@ import {
 import { danfossOrificeFichaText, sizeTxv, type TxvSizingResult } from './txv-sizing.utils';
 import type { DanfossApplication } from './danfoss-valve-lines.data';
 import { DANFOSS_VALVE_LINES } from './danfoss-valve-lines.data';
+import { evaluateFilterDeltaT, type FilterDeltaTResult } from './filter-delta-t.utils';
+import { refrigerantIdFromPr500Code } from './pr500-refrigerant.util';
+import {
+  barGToPressure,
+  cToTemp,
+  kwToPower,
+  PRESSURE_UNIT_LABELS,
+  POWER_UNIT_LABELS,
+  pressureToBarG,
+  powerToKw,
+  TEMP_UNIT_LABELS,
+  tempToC,
+  type PowerConvertUnit,
+  type PressureConvertUnit,
+  type TempConvertUnit,
+  type UnitCategory,
+} from './unit-convert.utils';
 
-export type HerramientasTab = 'pt' | 'sh' | 'camara' | 'txv';
+export type HerramientasTab = 'pt' | 'sh' | 'units' | 'camara' | 'txv' | 'visita';
+
+export interface UnitConvertRow {
+  label: string;
+  value: string;
+}
 
 export interface PtTableRow {
   tempC: number;
@@ -102,6 +136,32 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
   camUsage: ChamberUsagePreset = 'media_verduras';
   camKcalCustomDraft = '110';
 
+  unitCategory: UnitCategory = 'pressure';
+  unitValueDraft = '2.5';
+  unitPressureFrom: PressureConvertUnit = 'bar_g';
+  unitTempFrom: TempConvertUnit = 'c';
+  unitPowerFrom: PowerConvertUnit = 'kw';
+
+  filtroInDraft = '';
+  filtroOutDraft = '';
+
+  pr500PickId = '';
+  pro300PickId = '';
+  pro400PickId = '';
+  cloudImportHint = '';
+  pr500List: DashboardPr500[] = [];
+  combistatoList: DashboardCombistato[] = [];
+
+  visitAtDraft = '';
+  visitPbDraft = '';
+  visitPaDraft = '';
+  visitShDraft = '';
+  visitScDraft = '';
+  visitFilterDtDraft = '';
+  visitNoteDraft = '';
+  visitLogs: DeviceEquipmentLogRow[] = [];
+  visitLogLoading = false;
+
   /** Guardar en ficha (paneles PRO400 con ficha en nube). */
   fichaDeviceId = '';
   fichaId = '';
@@ -112,21 +172,41 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
 
   private subDev?: Subscription;
   private subRoute?: Subscription;
+  private subPr500?: Subscription;
+  private subCombistato?: Subscription;
 
   constructor(
     private readonly deviceStore: DeviceStoreService,
     private readonly equipmentSheet: EquipmentSheetService,
+    private readonly pr500Store: Pr500StoreService,
+    private readonly combistatoStore: CombistatoStoreService,
     private readonly toast: ToastService,
     private readonly route: ActivatedRoute
   ) {}
 
   ngOnInit(): void {
+    this.visitAtDraft = new Date().toISOString().slice(0, 16);
+    this.subPr500 = this.pr500Store.pr500s$.subscribe((list) => {
+      this.pr500List = list.filter((p) => this.isUuid(p.id));
+      if (this.pr500PickId && !this.pr500List.some((p) => p.id === this.pr500PickId)) {
+        this.pr500PickId = '';
+      }
+    });
+    this.subCombistato = this.combistatoStore.combistatos$.subscribe((list) => {
+      this.combistatoList = list.filter((c) => this.isUuid(c.id));
+      if (this.pro300PickId && !this.combistatoList.some((c) => c.id === this.pro300PickId)) {
+        this.pro300PickId = '';
+      }
+    });
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
       this.cloudDevices = list.filter((d) => d.cloudSynced && this.isUuid(d.id));
       if (this.fichaDeviceId && !this.cloudDevices.some((d) => d.id === this.fichaDeviceId)) {
         this.fichaDeviceId = '';
         this.fichaId = '';
         this.fichaRows = [];
+      }
+      if (this.pro400PickId && !this.pro400CloudDevices.some((d) => d.id === this.pro400PickId)) {
+        this.pro400PickId = '';
       }
     });
     this.subRoute = this.route.queryParamMap.subscribe((params) => {
@@ -137,6 +217,8 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.subDev?.unsubscribe();
     this.subRoute?.unsubscribe();
+    this.subPr500?.unsubscribe();
+    this.subCombistato?.unsubscribe();
   }
 
   get fichaEnabled(): boolean {
@@ -218,6 +300,77 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
       usage: this.camUsage,
       kcalPerM3Custom: this.camUsage === 'custom' ? customKcal : undefined,
     });
+  }
+
+  get filterDeltaResult(): FilterDeltaTResult | null {
+    const tin = parseFloat(this.filtroInDraft.replace(',', '.'));
+    const tout = parseFloat(this.filtroOutDraft.replace(',', '.'));
+    return evaluateFilterDeltaT(tin, tout);
+  }
+
+  get unitConvertRows(): UnitConvertRow[] {
+    const v = parseFloat(this.unitValueDraft.replace(',', '.'));
+    if (!Number.isFinite(v)) return [];
+    if (this.unitCategory === 'pressure') {
+      const barG = pressureToBarG(v, this.unitPressureFrom);
+      if (barG == null) return [];
+      return (Object.keys(PRESSURE_UNIT_LABELS) as PressureConvertUnit[]).map((u) => {
+        const out = barGToPressure(barG, u);
+        return {
+          label: PRESSURE_UNIT_LABELS[u],
+          value: out != null ? formatNum(out, u === 'kpa_g' ? 1 : 2) : '—',
+        };
+      });
+    }
+    if (this.unitCategory === 'temp') {
+      const c = tempToC(v, this.unitTempFrom);
+      if (c == null) return [];
+      return (Object.keys(TEMP_UNIT_LABELS) as TempConvertUnit[]).map((u) => {
+        const out = cToTemp(c, u);
+        return {
+          label: TEMP_UNIT_LABELS[u],
+          value: out != null ? formatNum(out, 1) : '—',
+        };
+      });
+    }
+    const kw = powerToKw(v, this.unitPowerFrom);
+    if (kw == null) return [];
+    return (Object.keys(POWER_UNIT_LABELS) as PowerConvertUnit[]).map((u) => {
+      const out = kwToPower(kw, u);
+      return {
+        label: POWER_UNIT_LABELS[u],
+        value: out != null ? formatNum(out, u === 'btu_h' ? 0 : 2) : '—',
+      };
+    });
+  }
+
+  get hasCloudImport(): boolean {
+    return (
+      this.pr500List.length > 0 ||
+      this.combistatoList.length > 0 ||
+      this.pro400CloudDevices.length > 0
+    );
+  }
+
+  /** Paneles PRO400 en nube con al menos una temperatura reciente. */
+  get pro400CloudDevices(): DashboardDevice[] {
+    return this.cloudDevices.filter(
+      (d) =>
+        d.equipmentKind === 'pro400' &&
+        (d.temperatureC != null || d.temperature2C != null)
+    );
+  }
+
+  get selectedPr500(): DashboardPr500 | undefined {
+    return this.pr500List.find((p) => p.id === this.pr500PickId);
+  }
+
+  get selectedCombistato(): DashboardCombistato | undefined {
+    return this.combistatoList.find((c) => c.id === this.pro300PickId);
+  }
+
+  get selectedPro400(): DashboardDevice | undefined {
+    return this.pro400CloudDevices.find((d) => d.id === this.pro400PickId);
   }
 
   get txvResult(): TxvSizingResult | null {
@@ -307,9 +460,198 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
     this.lookupPressureResult = `A ${formatNum(p, 2)} ${this.unitLabel(this.pressureUnit)} → ${formatNum(t, 1)} °C (sat.)`;
   }
 
+  applyPr500ToSuperheat(): void {
+    const p = this.selectedPr500;
+    if (!p) {
+      this.toast.error('Elegí un PR500.');
+      return;
+    }
+    const refId = refrigerantIdFromPr500Code(p.refrigerantCode);
+    if (refId) {
+      this.shRefId = refId;
+      this.scPressureDraft = this.scPressureDraft || this.shPressureDraft;
+    }
+    if (p.lastPressureBar != null && Number.isFinite(p.lastPressureBar)) {
+      this.shPressureDraft = String(Math.round(p.lastPressureBar * 100) / 100);
+      this.shPressureUnit = 'bar_g';
+    }
+    if (p.lastTempSuctionC != null && Number.isFinite(p.lastTempSuctionC)) {
+      this.shTempDraft = String(Math.round(p.lastTempSuctionC * 10) / 10);
+    }
+    this.cloudImportHint = formatPr500ImportSummary(p);
+    if (!p.lastPressureBar && !p.lastTempSuctionC) {
+      this.toast.error('Sin lectura reciente de presión o temperatura en ese PR500.');
+      return;
+    }
+    this.activeTab = 'sh';
+    this.toast.success('Lectura del PR500 aplicada (opcional).');
+  }
+
+  /** PRO300: solo temperaturas de sonda; no reemplaza presión de manifold. */
+  applyPro300Temps(): void {
+    const c = this.selectedCombistato;
+    if (!c) {
+      this.toast.error('Elegí un PRO300.');
+      return;
+    }
+    if (c.lastTemp1C == null && c.lastTemp2C == null) {
+      this.toast.error('Sin temperaturas recientes en ese PRO300.');
+      return;
+    }
+    if (c.lastTemp1C != null && Number.isFinite(c.lastTemp1C)) {
+      this.camInteriorDraft = String(Math.round(c.lastTemp1C * 10) / 10);
+    }
+    this.cloudImportHint = formatCombistatoImportSummary(c);
+    this.toast.success('Temperaturas del PRO300 aplicadas (S1 → cámara; ver nota).');
+  }
+
+  applyPro400Temps(): void {
+    const d = this.selectedPro400;
+    if (!d) {
+      this.toast.error('Elegí un panel PRO400.');
+      return;
+    }
+    if (d.temperatureC == null && d.temperature2C == null) {
+      this.toast.error('Sin lecturas de temperatura en ese panel.');
+      return;
+    }
+    if (d.temperatureC != null && Number.isFinite(d.temperatureC)) {
+      this.camInteriorDraft = String(Math.round(d.temperatureC * 10) / 10);
+    }
+    this.cloudImportHint = formatPro400ImportSummary(d);
+    this.toast.success('Temperaturas del PRO400 aplicadas (opcional).');
+  }
+
+  appendCloudTempsToVisit(): void {
+    const lines: string[] = [];
+    const pr = this.selectedPr500;
+    const cb = this.selectedCombistato;
+    const dev = this.selectedPro400;
+    if (pr) lines.push(`PR500: ${formatPr500ImportSummary(pr)}`);
+    if (cb) lines.push(`PRO300: ${formatCombistatoImportSummary(cb)}`);
+    if (dev) lines.push(`PRO400: ${formatPro400ImportSummary(dev)}`);
+    if (!lines.length) {
+      this.toast.error('Elegí al menos un equipo en la sección opcional de nube.');
+      return;
+    }
+    const block = lines.join('\n');
+    this.visitNoteDraft = this.visitNoteDraft.trim()
+      ? `${this.visitNoteDraft.trim()}\n${block}`
+      : block;
+    this.toast.success('Referencia de nube agregada a observaciones.');
+  }
+
+  async onFichaIdChange(): Promise<void> {
+    await this.loadVisitLogs();
+  }
+
+  async loadVisitLogs(): Promise<void> {
+    this.visitLogs = [];
+    if (!this.fichaDeviceId || !this.fichaId) return;
+    this.visitLogLoading = true;
+    const { rows, error } = await this.equipmentSheet.listLog(this.fichaDeviceId, this.fichaId);
+    this.visitLogLoading = false;
+    if (error) {
+      this.toast.error(`No se pudo cargar el historial: ${error}`);
+      return;
+    }
+    this.visitLogs = rows;
+  }
+
+  async saveFieldVisit(): Promise<void> {
+    if (!this.fichaDeviceId || !this.fichaId) {
+      this.toast.error('Elegí panel y ficha de equipo.');
+      return;
+    }
+    const note = this.buildVisitNote();
+    if (!note.trim()) {
+      this.toast.error('Agregá al menos una medición u observación.');
+      return;
+    }
+    const occurred = this.visitAtDraft
+      ? new Date(this.visitAtDraft).toISOString()
+      : new Date().toISOString();
+
+    const { error: logErr } = await this.equipmentSheet.insertLog(
+      this.fichaDeviceId,
+      this.fichaId,
+      occurred,
+      note
+    );
+    if (logErr) {
+      this.toast.error(`No se pudo guardar la visita: ${logErr}`);
+      return;
+    }
+
+    const ficha = this.fichaRows.find((f) => f.id === this.fichaId);
+    if (ficha) {
+      const patch: Partial<DeviceEquipmentFichaRow> = {};
+      const pb = parseFloat(this.visitPbDraft.replace(',', '.'));
+      const pa = parseFloat(this.visitPaDraft.replace(',', '.'));
+      const sh = parseFloat(this.visitShDraft.replace(',', '.'));
+      const sc = parseFloat(this.visitScDraft.replace(',', '.'));
+      if (Number.isFinite(pb)) patch.suctionPressureBar = Math.round(pb * 100) / 100;
+      if (Number.isFinite(pa)) patch.dischargePressureBar = Math.round(pa * 100) / 100;
+      if (Number.isFinite(sh)) patch.superheatC = Math.round(sh * 10) / 10;
+      if (Number.isFinite(sc)) patch.subcoolingC = Math.round(sc * 10) / 10;
+      if (Object.keys(patch).length > 0) {
+        await this.equipmentSheet.upsertFicha({ ...ficha, ...patch, deviceId: this.fichaDeviceId });
+      }
+    }
+
+    this.toast.success('Visita registrada en la ficha.');
+    this.visitNoteDraft = '';
+    this.fichaSaved.emit({ deviceId: this.fichaDeviceId, fichaId: this.fichaId });
+    await this.loadVisitLogs();
+    await this.onFichaDeviceChange();
+    if (this.fichaRows.some((f) => f.id === this.fichaId)) {
+      /* keep */
+    } else if (this.fichaRows.length) {
+      this.fichaId = this.fichaRows[0].id;
+    }
+  }
+
+  async deleteVisitLog(row: DeviceEquipmentLogRow): Promise<void> {
+    if (!window.confirm('¿Eliminar este registro de visita?')) return;
+    const { error } = await this.equipmentSheet.deleteLog(row.id);
+    if (error) {
+      this.toast.error(error);
+      return;
+    }
+    await this.loadVisitLogs();
+  }
+
+  fillVisitFromCalculators(): void {
+    const sh = this.superheatResult;
+    const sc = this.subcoolingResult;
+    const pSh = parseFloat(this.shPressureDraft.replace(',', '.'));
+    const pAbs = toAbsBar(pSh, this.shPressureUnit);
+    const pb = pAbs != null ? fromAbsBar(pAbs, 'bar_g') : null;
+    if (pb != null) this.visitPbDraft = String(Math.round(pb * 100) / 100);
+    if (sh) this.visitShDraft = String(Math.round(sh.superheatC * 10) / 10);
+    if (sc && sc.severity !== 'negative') {
+      this.visitScDraft = String(Math.round(sc.subcoolingC * 10) / 10);
+    }
+    const fd = this.filterDeltaResult;
+    if (fd) this.visitFilterDtDraft = String(Math.round(fd.deltaC * 10) / 10);
+    this.toast.success('Mediciones copiadas desde las calculadoras.');
+  }
+
+  visitLogLabel(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString('es-AR', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      });
+    } catch {
+      return iso;
+    }
+  }
+
   async onFichaDeviceChange(): Promise<void> {
     this.fichaId = '';
     this.fichaRows = [];
+    this.visitLogs = [];
     if (!this.fichaDeviceId) return;
     this.fichaLoading = true;
     const { rows, error } = await this.equipmentSheet.listFichas(this.fichaDeviceId);
@@ -319,7 +661,10 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.fichaRows = rows;
-    if (rows.length === 1) this.fichaId = rows[0].id;
+    if (rows.length === 1) {
+      this.fichaId = rows[0].id;
+      await this.loadVisitLogs();
+    }
   }
 
   async saveToFicha(mode: 'sh' | 'txv' | 'tua' | 'te5'): Promise<void> {
@@ -451,7 +796,14 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
     fichaId: string | null,
     tab: string | null
   ): Promise<void> {
-    if (tab === 'txv' || tab === 'sh' || tab === 'pt' || tab === 'camara') {
+    if (
+      tab === 'txv' ||
+      tab === 'sh' ||
+      tab === 'pt' ||
+      tab === 'camara' ||
+      tab === 'units' ||
+      tab === 'visita'
+    ) {
       this.activeTab = tab;
     }
     if (!deviceId || !this.isUuid(deviceId)) return;
@@ -484,5 +836,25 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
     if (ficha.suctionPressureBar != null && Number.isFinite(ficha.suctionPressureBar)) {
       this.shPressureDraft = String(ficha.suctionPressureBar);
     }
+    void this.loadVisitLogs();
+  }
+
+  private buildVisitNote(): string {
+    const lines: string[] = ['Visita de campo'];
+    const pb = this.visitPbDraft.trim();
+    const pa = this.visitPaDraft.trim();
+    const sh = this.visitShDraft.trim();
+    const sc = this.visitScDraft.trim();
+    const fd = this.visitFilterDtDraft.trim();
+    if (pb || pa) {
+      lines.push(`Presiones: baja ${pb || '—'} bar g · alta ${pa || '—'} bar g`);
+    }
+    if (sh || sc) {
+      lines.push(`Recalent. ${sh || '—'} K · Subenf. ${sc || '—'} K`);
+    }
+    if (fd) lines.push(`Filtro ΔT: ${fd} K`);
+    const obs = this.visitNoteDraft.trim();
+    if (obs) lines.push(`Obs: ${obs}`);
+    return lines.join('\n');
   }
 }

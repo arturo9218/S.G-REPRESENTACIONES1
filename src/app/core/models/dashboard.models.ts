@@ -61,6 +61,14 @@ export interface DashboardDevice {
   currentOffsetA?: number;
   /** Suma en W al valor de potencia del dispositivo (ingesta); default 0 */
   powerOffsetW?: number;
+  /** `pro400` = parámetros AR01–AR26 en `devices.params`; `generic` u omitido = panel simple */
+  equipmentKind?: 'pro400' | 'generic' | null;
+  /** Última telemetría PRO400 (relés / fase), si el firmware lo envía */
+  lastCompOn?: boolean | null;
+  lastDefrostOn?: boolean | null;
+  lastPhase?: CombistatoPhase | null;
+  lastPhaseElapsedS?: number | null;
+  lastPhaseTotalS?: number | null;
 }
 
 /** Configuración de combistato en nube (tabla `combistatos`); independiente de los paneles de lectura. */
@@ -179,6 +187,12 @@ export interface TemperatureReading {
   currentARaw?: number | null;
   /** Bruto de ingesta antes de power_offset_w */
   powerWRaw?: number | null;
+  compOn?: boolean | null;
+  defrostOn?: boolean | null;
+  fanOn?: boolean | null;
+  phase?: CombistatoPhase | null;
+  phaseElapsedS?: number | null;
+  phaseTotalS?: number | null;
 }
 
 /** Tipo de alarma en panel y sonido */

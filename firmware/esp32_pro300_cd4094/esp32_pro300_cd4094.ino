@@ -1,5 +1,5 @@
 /**
- * S.G Representación — Plaqueta "PRO300 con control" (ESP32 + 2x CD4094)
+ * AR Monitoreo — Plaqueta "PRO300 con control" (ESP32 + 2x CD4094)
  * ----------------------------------------------------------------------
  * Fase B: el ESP32 baja los 48 parámetros AR01–AR48 desde Supabase
  *         (Edge Function `fetch-pro300-params`, tabla `combistatos.params`).
@@ -18,6 +18,14 @@
  *   - DOOR_PIN: opcional. Si tu plaqueta tiene microswitch de puerta cableado
  *               a un GPIO, cambiá `DOOR_PIN` y se activa toda la lógica AR35–AR41.
  *               Con -1 (default) los parámetros se guardan pero no se accionan.
+ *   - Botones (un terminal a GPIO, otro a GND; INPUT_PULLUP):
+ *       UP=13  DOWN=14  SET=27  BACK=17
+ *     (GPIO16 no sirve en muchas ESP32 Dev; no uses 16 para SET.)
+ *     Atajos:
+ *       UP+DOWN 1,2 s → menú AR | SET+ABAJO 1 s → portal WiFi (también SET+UP/VOLVER o SET 4 s)
+ *       UP solo 1,2 s   → deshielo manual | UP toque en deshielo/goteo → parar deshielo
+ *       DOWN toque       → alterna: temp S1 / fase (español) / minutos restantes
+ *       VOLVER toque      → ver temperatura sonda 2 (evaporador); otra vez vuelve a S1
  *
  * Provisión: portal cautivo WiFiManager con campos para Supabase.
  *   1) Primer arranque (sin config) → AP "PRO300-Setup" abierto por 5 min.
@@ -59,6 +67,12 @@
 #include <SPI.h>
 #include <math.h>
 
+// Prototipos / constantes usados antes de su definición (Arduino 1.8 no ordena bien el .ino).
+static void runConfigPortal();
+static void flashUiMessage(const char *msg, unsigned long ms);
+static void requestManualDefrostFromButton();
+static void printLittleFsReport();
+
 // ============== PINES =======================
 #define DATA_PIN          23
 #define CLOCK_PIN         18
@@ -67,6 +81,12 @@
 #define NTC2_PIN          35   // sonda evaporador
 #define PIN_FORCE_PORTAL  0    // BOOT button: a GND al arranque → fuerza portal
 #define DOOR_PIN         -1    // -1 = sin sensor de puerta; cambialo a un GPIO si lo cableaste
+#define BTN_UP_PIN       13    // botón subir
+#define BTN_DOWN_PIN     14    // botón bajar
+#define BTN_SET_PIN      27    // set / confirmar (NO usar GPIO16: suele fallar en ESP32 Dev)
+#define BTN_BACK_PIN     17    // volver / cancelar
+/** Si tu SET va a 3.3V al apretar (no a GND), poné 1. */
+#define BTN_ACTIVE_LOW   1
 
 // ============== NTC =========================
 static constexpr float R_FIXED = 10000.0f;
@@ -74,6 +94,15 @@ static constexpr float BETA    = 3950.0f;
 static constexpr float T0K     = 298.15f;
 static constexpr float R0      = 10000.0f;
 static constexpr float TEMP_ERR_VALUE = -127.0f;
+/** Ambiente muy caliente (ej. 40 °C en cámara): aviso y menos carga WiFi en el ESP. */
+static constexpr float CAMBIENT_HOT_C     = 38.0f;
+static constexpr float CHIP_TEMP_WARN_C = 68.0f;
+/** Relés siempre OFF al menos este tiempo tras energizar (aunque AR14=0). */
+static constexpr unsigned long RELAY_BOOT_MIN_MS = 10000UL;
+/** Tras encender, no entrar en ciclo de emergencia por sonda hasta estabilizar ADC. */
+static constexpr unsigned long SENSOR_FAULT_GRACE_MS = 45000UL;
+static constexpr uint8_t NTC_FAULT_SET_COUNT = 3;
+static constexpr uint8_t NTC_FAULT_CLR_COUNT = 2;
 
 // ============== LAYOUT 4094 #2 ==============
 #define BIT_COM1 0
@@ -88,6 +117,7 @@ static constexpr float TEMP_ERR_VALUE = -127.0f;
 // ============== CONFIG ======================
 static constexpr const char *CFG_PATH       = "/config.json";
 static constexpr const char *PARAMS_PATH    = "/params.json";
+static constexpr const char *CMDTS_PATH     = "/cmdts.txt";
 static constexpr const char *AP_NAME        = "PRO300-Setup";
 static constexpr unsigned long PORTAL_TIMEOUT_SEC   = 5UL * 60UL;
 static constexpr unsigned long WIFI_BOOT_CONNECT_MS = 20000UL;
@@ -95,10 +125,12 @@ static constexpr unsigned long WIFI_BOOT_CONNECT_MS = 20000UL;
 // y mantiene el Free tier de Supabase con aire. La temperatura de cámara cambia en
 // minutos, no en segundos, así que 1 punto/min sigue siendo de sobra para gráficos.
 static constexpr unsigned long TELEMETRY_DEFAULT_MS = 60000UL;
-/** Pull AR + pending_command: 60 s en reposo; 10 s tras comando o params nuevos (2 min). */
-static constexpr unsigned long PARAMS_PULL_MS_NORMAL = 60UL * 1000UL;
+/** Pull AR + pending_command: 20 s en reposo (solo lectura, no inserts); 5 s si hay comando pendiente. */
+static constexpr unsigned long PARAMS_PULL_MS_NORMAL = 20UL * 1000UL;
 static constexpr unsigned long PARAMS_PULL_MS_FAST   = 10UL * 1000UL;
+static constexpr unsigned long PARAMS_PULL_MS_URGENT = 5UL * 1000UL;
 static constexpr unsigned long PULL_FAST_WINDOW_MS     = 2UL * 60UL * 1000UL;
+static constexpr unsigned long PULL_URGENT_WINDOW_MS   = 90UL * 1000UL;
 /** Si |ΔT| de la sonda de control supera esto, TX inmediato (Fase 1 smart delta). */
 static constexpr float TEMP_DELTA_TX_C = 0.3f;
 
@@ -178,6 +210,44 @@ struct Params {
   float F37 = 0.0f;     // AR48 deshielo inmediato cuando se pide (0/1)
 } P;
 
+/** Menú local AR01–AR48 en display (definido antes de funciones que lo usan; Arduino genera prototipos arriba). */
+struct ParamMenuItem {
+  const char *code;
+  float *value;
+  float step;
+  float minValue;
+  float maxValue;
+};
+
+static ParamMenuItem g_paramMenu[] = {
+  // AR01 setpoint: rango amplio (frío -50 °C … calor +50 °C); antes max 20 bloqueaba el ajuste.
+  {"01", &P.F01, 0.5f, -50.0f, 50.0f},  {"02", &P.F02, 0.1f, 0.5f, 20.0f},
+  {"03", &P.F03, 0.1f, -10.0f, 10.0f},  {"04", &P.F04, 0.1f, -10.0f, 10.0f},
+  {"05", &P.F49, 1.0f, 0.0f, 1.0f},     {"06", &P.F50, 1.0f, 0.0f, 1.0f},
+  {"07", &P.F53, 1.0f, 0.0f, 1.0f},     {"08", &P.F54, 1.0f, 4.0f, 32.0f},
+  {"09", &P.F05, 1.0f, 0.0f, 1.0f},     {"10", &P.F06, 1.0f, 1.0f, 9999.0f},
+  {"11", &P.F07, 1.0f, 1.0f, 999.0f},   {"12", &P.F08, 0.5f, -40.0f, 40.0f},
+  {"13", &P.F09, 1.0f, 0.0f, 1.0f},     {"14", &P.F38, 1.0f, 0.0f, 600.0f},
+  {"15", &P.F39, 1.0f, 0.0f, 120.0f},   {"16", &P.F45, 1.0f, 0.0f, 9999.0f},
+  {"17", &P.F46, 1.0f, 0.0f, 9999.0f},  {"18", &P.F52, 1.0f, 0.0f, 1.0f},
+  {"19", &P.F52t, 0.5f, -40.0f, 40.0f}, {"20", &P.F10, 1.0f, 0.0f, 1.0f},
+  {"21", &P.F11, 1.0f, 0.0f, 999.0f},   {"22", &P.F12, 0.5f, -40.0f, 40.0f},
+  {"23", &P.F51, 1.0f, 0.0f, 1.0f},     {"24", &P.F13, 0.5f, -40.0f, 80.0f},
+  {"25", &P.F14, 0.5f, -40.0f, 80.0f},  {"26", &P.F15, 1.0f, 0.0f, 120.0f},
+  {"27", &P.F16, 1.0f, 0.0f, 1.0f},     {"28", &P.F47, 0.1f, 0.0f, 20.0f},
+  {"29", &P.F48, 1.0f, 0.0f, 999.0f},   {"30", &P.F17, 1.0f, 0.0f, 3600.0f},
+  {"31", &P.F18, 1.0f, 0.0f, 3600.0f},  {"32", &P.F19, 1.0f, 0.0f, 3600.0f},
+  {"33", &P.F20, 1.0f, 0.0f, 3600.0f},  {"34", &P.F55, 1.0f, 0.0f, 1.0f},
+  {"35", &P.F25, 1.0f, 0.0f, 1.0f},     {"36", &P.F26, 1.0f, 0.0f, 1.0f},
+  {"37", &P.F27, 1.0f, 0.0f, 9999.0f},  {"38", &P.F28, 1.0f, 0.0f, 1.0f},
+  {"39", &P.F29, 1.0f, 0.0f, 1.0f},     {"40", &P.F30, 1.0f, 0.0f, 1.0f},
+  {"41", &P.F40, 1.0f, 0.0f, 1.0f},     {"42", &P.F31, 1.0f, 0.0f, 1.0f},
+  {"43", &P.F32, 1.0f, 1.0f, 999.0f},   {"44", &P.F33, 1.0f, 0.0f, 1.0f},
+  {"45", &P.F34, 1.0f, 1.0f, 999.0f},   {"46", &P.F35, 1.0f, 0.0f, 1.0f},
+  {"47", &P.F36, 1.0f, 0.0f, 999.0f},   {"48", &P.F37, 1.0f, 0.0f, 1.0f},
+};
+#define PARAM_MENU_COUNT ((int)(sizeof(g_paramMenu) / sizeof(g_paramMenu[0])))
+
 static String g_paramsUpdatedAt = "";    // marca devuelta por la nube; permite saber cuándo cambió
 
 // ============== ESTADO ======================
@@ -220,7 +290,11 @@ static void setPhase(Phase p, uint32_t totalS) {
 
 static bool compresor=false, ventilador=false, deshielo=false, dripping=false;
 static unsigned long compChangedAt=0, defStartedAt=0, dripStartedAt=0;
-static unsigned long lastDefrostAt=0, lastReadAt=0;
+/** AR10/F06/F46: intervalo hasta el próximo deshielo (desde fin de goteo). */
+static unsigned long lastDefrostAt = 0;
+/** AR21/F11: retardo ventilador post-deshielo (desde fin de resistencia / inicio goteo). */
+static unsigned long lastDefrostHeatOffAt = 0;
+static unsigned long lastReadAt = 0;
 static unsigned long lastDisplaySwitchAt=0, bootAtMs=0;
 static bool   bootDelayDone = false;   // F38 retardo al encender consumido
 static bool   defrostOnStartDone = false; // F09: ya disparado el deshielo de arranque
@@ -259,7 +333,11 @@ static unsigned long g_lastManualDefrostAt    = 0;  // anti-spam F36
 
 static float tCam  = TEMP_ERR_VALUE;
 static float tEvap = TEMP_ERR_VALUE;
-static bool  fault1=true, fault2=true;
+static bool  fault1 = false, fault2 = false;
+static uint8_t ntcBadStreak1 = 0, ntcBadStreak2 = 0;
+static uint8_t ntcGoodStreak1 = 0, ntcGoodStreak2 = 0;
+static bool  ntcReady = false;
+static unsigned long relaySafeUntilMs = 0;
 
 static bool   modoTexto = true;
 static String texto = "BOOT";
@@ -278,12 +356,22 @@ static TaskHandle_t g_netTaskHandle = NULL;
 static TaskHandle_t g_displayTaskHandle = NULL;
 static bool          g_pullNowRequested = false;   // pedido desde serie / params_updated_at
 static unsigned long g_pullFastUntilMs  = 0;     // ventana de pull rápido (botones / AR)
-// Banderas seteadas desde la network task (core 0) y leídas por el loop (core 1)
-// para mostrar un scroll efímero en el display cuando se envió/actualizó.
-static volatile bool g_flashTelemetrySent = false;
-static volatile bool g_flashParamsUpdated = false;
-static bool          g_flashActive        = false;
-static unsigned long g_flashEndsAt        = 0;
+static unsigned long g_pullUrgentUntilMs = 0;    // comando pendiente en nube (pull cada 5 s)
+// Mensajes efímeros en marquesina (7-seg: sin tildes; evitar M/V → N/U en adaptarTexto).
+enum : uint8_t {
+  FP_NONE = 0,
+  FP_WIFI = 1,
+  FP_CALOR = 2,
+  FP_ENVIADO = 3,
+  FP_PARAM = 4,
+  FP_ENVIANDO = 5,
+};
+static volatile uint8_t g_flashPending = FP_NONE;
+static bool          g_flashActive   = false;
+static unsigned long g_flashEndsAt   = 0;
+static bool          g_prevWifiConnected = false;
+static unsigned long g_hotDerateUntilMs  = 0;
+static unsigned long g_lastCalorFlashMs  = 0;
 
 // ============== Event-driven telemetry ======
 // Aparte del ciclo periódico de g_cfg.intervalMs (60 s por default), disparamos
@@ -306,6 +394,40 @@ static Phase prevPhase      = PH_BOOT;
 /** Última temp reportada en TX flash (sonda que manda el termostato según AR07). */
 static float prevTempReported = TEMP_ERR_VALUE;
 
+// ============== UI botones local (parámetros) ======
+static constexpr unsigned long BTN_DEBOUNCE_MS = 35UL;
+static constexpr unsigned long BTN_ENTER_PARAMS_HOLD_MS = 1200UL;
+static constexpr unsigned long BTN_WIFI_PORTAL_HOLD_MS  = 800UL;
+static constexpr unsigned long BTN_WIFI_SET_SOLO_HOLD_MS = 4000UL;
+static constexpr unsigned long BTN_PORTAL_RELEASE_DEBOUNCE_MS = 80UL;
+static constexpr unsigned long PORTAL_WDT_TIMEOUT_MS = 180000UL;
+static constexpr unsigned long BTN_DEFROST_HOLD_MS      = 1200UL;
+static constexpr unsigned long BTN_EDIT_REPEAT_MS       = 280UL;
+enum UiMode { UI_NORMAL, UI_PARAM_SELECT, UI_PARAM_EDIT };
+/** En pantalla normal: 0=temp S1, 1=fase (español), 2=min restantes. VOLVER = sonda 2 aparte. */
+enum NormalDispMode { DISP_TEMP = 0, DISP_PHASE = 1, DISP_REMAIN = 2 };
+static NormalDispMode g_normalDisp = DISP_TEMP;
+static bool g_showSonda2View = false;
+static UiMode g_uiMode = UI_NORMAL;
+static bool g_btnPrev[4] = {false, false, false, false};
+static unsigned long g_btnLastEdgeMs[4] = {0, 0, 0, 0};
+static unsigned long g_btnBothPressedAt = 0;
+static int g_paramCursor = 0;
+static float g_paramEditOriginal = 0.0f;
+/** Tras entrar con UP+DOWN: ignorar toques hasta soltar todos (evita que SET no registre). */
+static bool g_menuWaitRelease = false;
+static unsigned long g_setHeldAt = 0;
+static unsigned long g_portalComboHeldAt = 0;
+static unsigned long g_portalComboReleasedAt = 0;
+static bool g_portalHoldHintShown = false;
+static bool g_portalRunning = false;
+static bool g_setHoldMenuDone = false;
+static unsigned long g_upDefrostHeldAt = 0;
+static bool g_upDefrostHoldFired = false;
+/** UP mantenido: ignora bloqueo F45 una vez (como AR48 inmediato). */
+static bool g_btnDefrostImmediate = false;
+static unsigned long g_editRepeatAt = 0;
+
 static inline void requestImmediateTx(const char *reason) {
   g_immediateTxRequested = true;
   Serial.printf("[TX] flash-tx solicitado por cambio de %s\n", reason);
@@ -317,8 +439,15 @@ static inline void requestFastPullWindow() {
 }
 
 static unsigned long paramsPullIntervalMs(unsigned long nowMs) {
+  if (g_pullUrgentUntilMs != 0 && nowMs < g_pullUrgentUntilMs) return PARAMS_PULL_MS_URGENT;
   if (g_pullFastUntilMs != 0 && nowMs < g_pullFastUntilMs) return PARAMS_PULL_MS_FAST;
   return PARAMS_PULL_MS_NORMAL;
+}
+
+static void requestUrgentPullWindow() {
+  g_pullUrgentUntilMs = millis() + PULL_URGENT_WINDOW_MS;
+  g_pullNowRequested = true;
+  Serial.println(F("[PULL] ventana urgente 5s (comando pendiente en nube, 90s)"));
 }
 
 /** Sonda usada para control (AR07 F53): 0=S1 cámara, 1=S2 evaporador. */
@@ -350,7 +479,11 @@ static bool g_portalSaveRequested = false;
 static unsigned long g_portalStartedAt = 0;
 static WiFiManagerParameter p_module("module_id", "Module ID (alta PRO300)", "", 47);
 static WiFiManagerParameter p_token("api_key", "Device Token (6+ chars)", "", 47);
-static WiFiManagerParameter p_url("api_url", "Ingest URL", "", 199);
+static WiFiManagerParameter p_url(
+  "api_url",
+  "Ingest URL (https://.../functions/v1/ingest-reading)",
+  "https://fohbhymulrmdsgrubtlo.supabase.co/functions/v1/ingest-reading",
+  199);
 
 // ============== TABLAS 7-seg ================
 static const byte num7seg[10] = {
@@ -431,8 +564,7 @@ static void refrescarDisplay() {
 // ============== DISPLAY: TEXTO Y TEMP =======
 static String adaptarTexto(String t) {
   t.toUpperCase();
-  // El 7-seg no tiene diagonales: la M la mostramos como N y la V como U para que
-  // palabras como "ENVIADOS" se lean (queda "ENUIADOS").
+  // El 7-seg no tiene diagonales: M→N y V→U (ej. WIFI OK, ENVIADO, no "ENVIADOS").
   t.replace("M", "N");
   t.replace("V", "U");
   return t;
@@ -487,13 +619,489 @@ static void mostrarError(int idx) {
   bufferDisplay[2] = num7seg[idx];
 }
 
+static void mostrarTextoFijo4(const char *t) {
+  for (int i = 0; i < 4; i++) {
+    char c = (t && t[i]) ? t[i] : ' ';
+    bufferDisplay[i] = mapaChar(c);
+  }
+}
+
+static uint32_t phaseRemainingS() {
+  const uint32_t elapsed = (uint32_t)((millis() - g_phaseStartedAt) / 1000UL);
+  if (g_phaseTotalS > elapsed) return g_phaseTotalS - elapsed;
+  return 0;
+}
+
+/** Etiqueta corta de fase en español (4 caracteres en 7-seg). */
+static const char *phaseDisplayLabel(Phase p) {
+  switch (p) {
+    case PH_DEFROST:      return "DESh";  // deshielo
+    case PH_DRIP:         return "GOTE";  // goteo
+    case PH_POST_DEFROST: return "ESPE";  // espera post-deshielo
+    case PH_NORMAL:       return "FRIO";  // refrigeración
+    case PH_BOOT:         return "INIC";  // arranque
+    case PH_OFF:          return "APAG";
+    case PH_EMERG:        return "ALRM";  // alarma / emergencia
+    default:              return "----";
+  }
+}
+
+static void mostrarFaseActual() {
+  mostrarTextoFijo4(phaseDisplayLabel(g_phase));
+}
+
+/** Minutos restantes del tramo actual (deshielo, goteo, refrigeración…). */
+static void mostrarMinutosRestantesFase() {
+  const uint32_t remS = phaseRemainingS();
+  const float min = remS / 60.0f;
+  mostrarTemperatura(min);
+}
+
+static void refreshNormalDisplay() {
+  if (g_showSonda2View) {
+    if (fault2) mostrarError(2);
+    else mostrarTemperatura(tEvap);
+    return;
+  }
+  switch (g_normalDisp) {
+    case DISP_PHASE:
+      mostrarFaseActual();
+      break;
+    case DISP_REMAIN:
+      mostrarMinutosRestantesFase();
+      break;
+    default:
+      if (fault1) mostrarError(1);
+      else mostrarTemperatura(tCam);
+      break;
+  }
+}
+
+static void requestManualDefrostFromButton() {
+  if (deshielo || dripping) {
+    Serial.println(F("[BTN] Ya en deshielo/goteo, no inicio otro."));
+    return;
+  }
+  g_manualDefrostRequested = true;
+  g_btnDefrostImmediate = true;
+  flashUiMessage("DESh", 800);
+  Serial.println(F("[BTN] Deshielo manual solicitado (UP mantenido)."));
+  if (P.F35 < 0.5f) {
+    Serial.println(F("[BTN] Nota: AR46=0 en parametros; el boton fisico igual fuerza deshielo."));
+  }
+}
+
+static void printLittleFsReport() {
+  if (!ensureFs()) {
+    Serial.println(F("[MEM] LittleFS no disponible."));
+    return;
+  }
+  size_t total = LittleFS.totalBytes();
+  size_t used = LittleFS.usedBytes();
+  Serial.println(F("---- MEMORIA LittleFS (ESP32) ----"));
+  Serial.printf("Total: %u bytes | Usado: %u | Libre: %u\n",
+                (unsigned)total, (unsigned)used, (unsigned)(total - used));
+  auto printFile = [](const char *path) {
+    if (!LittleFS.exists(path)) {
+      Serial.printf("  %s: (no existe)\n", path);
+      return;
+    }
+    File f = LittleFS.open(path, "r");
+    Serial.printf("  %s: %u bytes\n", path, (unsigned)f.size());
+    f.close();
+  };
+  printFile(CFG_PATH);
+  printFile(PARAMS_PATH);
+  printFile(CMDTS_PATH);
+  Serial.println(F("Historial de lecturas: NO se guarda en el ESP."));
+  Serial.println(F("Cada TX va directo a Supabase (ingest-reading); no llena flash local."));
+  Serial.printf("Telemetria cada %lu ms (~%lu puntos/hora por equipo).\n",
+                  (unsigned long)g_cfg.intervalMs,
+                  (unsigned long)(3600000UL / g_cfg.intervalMs));
+  Serial.printf("Fase: %s | Transcurrido: %lus | Total tramo: %lus | Faltan: %lus\n",
+                phaseName(g_phase),
+                (unsigned long)((millis() - g_phaseStartedAt) / 1000UL),
+                (unsigned long)g_phaseTotalS,
+                (unsigned long)phaseRemainingS());
+  Serial.printf("Temp cam=%.1f evap=%.1f | comp=%d vent=%d def=%d drip=%d\n",
+                tCam, tEvap, compresor ? 1 : 0, ventilador ? 1 : 0,
+                deshielo ? 1 : 0, dripping ? 1 : 0);
+  Serial.println(F("--------------------------------"));
+}
+
+static bool btnPressed(int pin) {
+#if BTN_ACTIVE_LOW
+  return digitalRead(pin) == LOW;
+#else
+  return digitalRead(pin) == HIGH;
+#endif
+}
+
+static void syncBtnPrevFromPins() {
+  const int pins[4] = {BTN_UP_PIN, BTN_DOWN_PIN, BTN_SET_PIN, BTN_BACK_PIN};
+  for (int i = 0; i < 4; i++) g_btnPrev[i] = btnPressed(pins[i]);
+}
+
+static bool anyBtnPressed() {
+  return btnPressed(BTN_UP_PIN) || btnPressed(BTN_DOWN_PIN) ||
+         btnPressed(BTN_SET_PIN) || btnPressed(BTN_BACK_PIN);
+}
+
+static void pushFlash(uint8_t kind) {
+  if (kind == FP_NONE) return;
+  const uint8_t cur = g_flashPending;
+  if (cur == FP_NONE || kind < cur) g_flashPending = kind;
+}
+
+static const char *flashMsgText(uint8_t kind) {
+  switch (kind) {
+    case FP_WIFI:     return "WIFI OK   ";
+    case FP_CALOR:    return "CALOR     ";
+    case FP_ENVIADO:  return "ENVIADO   ";
+    case FP_PARAM:    return "PARAM OK  ";
+    case FP_ENVIANDO: return "ENVIANDO  ";
+    default:          return "        ";
+  }
+}
+
+static unsigned long flashMsgDurationMs(uint8_t kind) {
+  switch (kind) {
+    case FP_ENVIANDO: return 1400UL;
+    case FP_WIFI:
+    case FP_CALOR:    return 3200UL;
+    default:          return 3800UL;
+  }
+}
+
+static void flashUiMessage(const char *msg, unsigned long ms = 1200UL) {
+  modoTexto = true;
+  texto = msg;
+  scrollPos = 0;
+  prepararTexto();
+  g_flashActive = true;
+  g_flashEndsAt = millis() + ms;
+}
+
+/** Consume un mensaje pendiente o mantiene el scroll activo. */
+static void serviceUiFlash(unsigned long now) {
+  if (g_portalRunning) return;
+  if (g_flashActive && now < g_flashEndsAt) {
+    if (modoTexto && now - lastScroll >= 300) {
+      lastScroll = now;
+      prepararTexto();
+    }
+    return;
+  }
+  const uint8_t pending = g_flashPending;
+  if (pending != FP_NONE) {
+    g_flashPending = FP_NONE;
+    flashUiMessage(flashMsgText(pending), flashMsgDurationMs(pending));
+    return;
+  }
+  if (g_flashActive) {
+    g_flashActive = false;
+    modoTexto = false;
+  }
+}
+
+/** En 40 °C ambiente el ESP se calienta: bajar potencia WiFi y avisar en display. */
+static void aplicarDeratingPorCalor(unsigned long now) {
+  const float chipC = temperatureRead();
+  const bool hotChip = chipC >= CHIP_TEMP_WARN_C;
+  const bool hotCam  = !fault1 && (tCam >= CAMBIENT_HOT_C);
+  if (hotChip || hotCam) {
+    g_hotDerateUntilMs = now + 120000UL;
+    WiFi.setTxPower(WIFI_POWER_7dBm);
+    if (now - g_lastCalorFlashMs >= 90000UL) {
+      g_lastCalorFlashMs = now;
+      pushFlash(FP_CALOR);
+      Serial.printf("[CALOR] chip=%.0fC sonda=%.1fC → WiFi suave (ventilá el gabinete)\n",
+                    chipC, tCam);
+    }
+  } else if (g_hotDerateUntilMs != 0 && now >= g_hotDerateUntilMs) {
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);
+    g_hotDerateUntilMs = 0;
+  }
+}
+
+static bool consumePressEdge(int pin, int idx, unsigned long nowMs) {
+  const bool cur = btnPressed(pin);
+  const bool prev = g_btnPrev[idx];
+  g_btnPrev[idx] = cur;
+  if (!cur || prev) return false;
+  if (nowMs - g_btnLastEdgeMs[idx] < BTN_DEBOUNCE_MS) return false;
+  g_btnLastEdgeMs[idx] = nowMs;
+  return true;
+}
+
+// Implementación real más abajo (se reutiliza para persistir cambios desde botones).
+static bool saveParams(JsonObject obj);
+
+static void showParamCodeOnDisplay(const char *code) {
+  for (int i = 0; i < 4; i++) bufferDisplay[i] = BLANCO;
+  bufferDisplay[0] = mapaChar('A');
+  bufferDisplay[1] = mapaChar(code[0]);
+  bufferDisplay[2] = mapaChar(code[1]);
+}
+
+static bool saveCurrentParamsToFs() {
+  StaticJsonDocument<4096> doc;
+  JsonObject p = doc.createNestedObject("params");
+  #define STORE(K) p[#K] = P.K
+  STORE(F01); STORE(F02); STORE(F03); STORE(F04); STORE(F05);
+  STORE(F06); STORE(F07); STORE(F08); STORE(F09); STORE(F10);
+  STORE(F11); STORE(F12); STORE(F13); STORE(F14); STORE(F15);
+  STORE(F16); STORE(F17); STORE(F18); STORE(F19); STORE(F20);
+  STORE(F25); STORE(F26); STORE(F27); STORE(F28); STORE(F29);
+  STORE(F30); STORE(F31); STORE(F32); STORE(F33); STORE(F34);
+  STORE(F35); STORE(F36); STORE(F37); STORE(F38); STORE(F39);
+  STORE(F40); STORE(F45); STORE(F46); STORE(F47); STORE(F48);
+  STORE(F49); STORE(F50); STORE(F51); STORE(F52); STORE(F52t);
+  STORE(F53); STORE(F54); STORE(F55);
+  #undef STORE
+  return saveParams(p);
+}
+
+static float clampParamValue(float v, float minV, float maxV) {
+  if (v < minV) v = minV;
+  if (v > maxV) v = maxV;
+  return v;
+}
+
+/** SET + (ABAJO, UP o VOLVER): abre portal. SET+ABAJO es el más fácil en el panel. */
+static bool portalComboHeldNow() {
+  if (!btnPressed(BTN_SET_PIN)) return false;
+  if (btnPressed(BTN_DOWN_PIN)) return true;
+  if (btnPressed(BTN_UP_PIN) && !btnPressed(BTN_DOWN_PIN)) return true;
+  if (btnPressed(BTN_BACK_PIN) && !btnPressed(BTN_UP_PIN) && !btnPressed(BTN_DOWN_PIN)) return true;
+  return false;
+}
+
+static bool handlePortalComboHold(unsigned long now) {
+  if (g_wifiState == WFS_PORTAL || g_portalRunning) return true;
+  if (portalComboHeldNow()) {
+    g_portalComboReleasedAt = 0;
+    if (g_portalComboHeldAt == 0) g_portalComboHeldAt = now;
+    const unsigned long held = now - g_portalComboHeldAt;
+    if (!g_portalHoldHintShown && held >= 300UL) {
+      g_portalHoldHintShown = true;
+      flashUiMessage("WIFI...   ", 900);
+      Serial.println(F("[BTN] Mantené SET+ABAJO (o SET+UP / SET 4s)..."));
+    }
+    if (held >= BTN_WIFI_PORTAL_HOLD_MS) {
+      g_portalComboHeldAt = 0;
+      g_portalHoldHintShown = false;
+      g_uiMode = UI_NORMAL;
+      g_menuWaitRelease = true;
+      syncBtnPrevFromPins();
+      runConfigPortal();
+      Serial.println(F("[BTN] Combo → portal WiFi PRO300-Setup."));
+    }
+    return true;
+  }
+  if (g_portalComboHeldAt != 0) {
+    if (g_portalComboReleasedAt == 0) g_portalComboReleasedAt = now;
+    if (now - g_portalComboReleasedAt >= BTN_PORTAL_RELEASE_DEBOUNCE_MS) {
+      g_portalComboHeldAt = 0;
+      g_portalComboReleasedAt = 0;
+      g_portalHoldHintShown = false;
+    }
+  }
+  return false;
+}
+
+static void handleButtonUi() {
+  const unsigned long now = millis();
+  const bool upHeld = btnPressed(BTN_UP_PIN);
+  const bool downHeld = btnPressed(BTN_DOWN_PIN);
+  const bool setHeld = btnPressed(BTN_SET_PIN);
+
+  if (handlePortalComboHold(now)) return;
+  if (g_wifiState == WFS_PORTAL || g_portalRunning) return;
+
+  if (g_uiMode == UI_NORMAL) {
+    if (!g_flashActive && g_flashPending == FP_NONE && !g_portalRunning) modoTexto = false;
+    const bool upEdgeEarly = consumePressEdge(BTN_UP_PIN, 0, now);
+    const bool downEdgeEarly = consumePressEdge(BTN_DOWN_PIN, 1, now);
+    const bool backEdgeEarly = consumePressEdge(BTN_BACK_PIN, 3, now);
+
+    if (backEdgeEarly && !upHeld && !downHeld && !setHeld) {
+      g_showSonda2View = !g_showSonda2View;
+      refreshNormalDisplay();
+      Serial.printf("[BTN] Sonda 2 (evaporador): %s\n", g_showSonda2View ? "SI" : "NO (vuelve S1/ciclo)");
+      syncBtnPrevFromPins();
+      return;
+    }
+
+    if (upEdgeEarly && (deshielo || dripping)) {
+      g_manualCancelDefrost = true;
+      flashUiMessage("STOP", 900);
+      Serial.println(F("[BTN] UP toque: cancelar deshielo → goteo."));
+      syncBtnPrevFromPins();
+      return;
+    }
+
+    if (downEdgeEarly && !upHeld && !setHeld) {
+      g_showSonda2View = false;
+      g_normalDisp = (NormalDispMode)(((int)g_normalDisp + 1) % 3);
+      refreshNormalDisplay();
+      Serial.printf("[BTN] Vista=%d (0=S1 1=fase 2=min; VOLVER=S2)\n", (int)g_normalDisp);
+      syncBtnPrevFromPins();
+      return;
+    }
+
+    if (upHeld && downHeld && !setHeld) {
+      g_upDefrostHeldAt = 0;
+      g_upDefrostHoldFired = false;
+      g_portalComboHeldAt = 0;
+      g_portalHoldHintShown = false;
+      g_setHeldAt = 0;
+      if (g_btnBothPressedAt == 0) g_btnBothPressedAt = now;
+      if (now - g_btnBothPressedAt >= BTN_ENTER_PARAMS_HOLD_MS) {
+        g_uiMode = UI_PARAM_SELECT;
+        g_paramCursor = 0;
+        g_btnBothPressedAt = 0;
+        g_menuWaitRelease = true;
+        syncBtnPrevFromPins();
+        showParamCodeOnDisplay(g_paramMenu[g_paramCursor].code);
+        flashUiMessage("MENU", 800);
+        Serial.println(F("[BTN] Menu parametros (A01). Soltá todos y usá SET."));
+      }
+    } else if (upHeld && !downHeld && !setHeld) {
+      g_btnBothPressedAt = 0;
+      g_setHeldAt = 0;
+      if (g_upDefrostHeldAt == 0) g_upDefrostHeldAt = now;
+      if (!g_upDefrostHoldFired && (now - g_upDefrostHeldAt >= BTN_DEFROST_HOLD_MS)) {
+        g_upDefrostHoldFired = true;
+        requestManualDefrostFromButton();
+      }
+    } else if (setHeld && !upHeld && !downHeld) {
+      g_upDefrostHeldAt = 0;
+      g_upDefrostHoldFired = false;
+      g_btnBothPressedAt = 0;
+      if (g_setHeldAt == 0) g_setHeldAt = now;
+      const unsigned long setHeldMs = now - g_setHeldAt;
+      if (setHeldMs >= BTN_WIFI_SET_SOLO_HOLD_MS) {
+        g_setHeldAt = 0;
+        g_setHoldMenuDone = false;
+        g_uiMode = UI_NORMAL;
+        g_menuWaitRelease = true;
+        syncBtnPrevFromPins();
+        runConfigPortal();
+        Serial.println(F("[BTN] SET 4s → portal WiFi."));
+        return;
+      }
+      if (setHeldMs >= BTN_ENTER_PARAMS_HOLD_MS && !g_setHoldMenuDone) {
+        g_setHoldMenuDone = true;
+        g_uiMode = UI_PARAM_SELECT;
+        g_paramCursor = 0;
+        g_menuWaitRelease = true;
+        syncBtnPrevFromPins();
+        showParamCodeOnDisplay(g_paramMenu[g_paramCursor].code);
+        flashUiMessage("MENU", 800);
+        Serial.println(F("[BTN] Menu por SET largo (A01). Soltá o seguí 4s para WiFi."));
+      }
+    } else {
+      g_btnBothPressedAt = 0;
+      g_setHeldAt = 0;
+      g_setHoldMenuDone = false;
+      g_upDefrostHeldAt = 0;
+      g_upDefrostHoldFired = false;
+    }
+    syncBtnPrevFromPins();
+    return;
+  }
+
+  if (g_menuWaitRelease) {
+    syncBtnPrevFromPins();
+    if (anyBtnPressed()) return;
+    g_menuWaitRelease = false;
+    Serial.println(F("[BTN] Botones liberados — SET activo."));
+  }
+
+  modoTexto = false;
+  const bool upEdge = consumePressEdge(BTN_UP_PIN, 0, now);
+  const bool downEdge = consumePressEdge(BTN_DOWN_PIN, 1, now);
+  const bool setEdge = consumePressEdge(BTN_SET_PIN, 2, now);
+  const bool backEdge = consumePressEdge(BTN_BACK_PIN, 3, now);
+
+  if (setEdge) {
+    Serial.printf("[BTN] SET GPIO%d | U%d D%d S%d B%d\n",
+                  BTN_SET_PIN,
+                  btnPressed(BTN_UP_PIN) ? 1 : 0,
+                  btnPressed(BTN_DOWN_PIN) ? 1 : 0,
+                  btnPressed(BTN_SET_PIN) ? 1 : 0,
+                  btnPressed(BTN_BACK_PIN) ? 1 : 0);
+  }
+
+  if (g_uiMode == UI_PARAM_SELECT) {
+    if (upEdge) {
+      g_paramCursor = (g_paramCursor + 1) % PARAM_MENU_COUNT;
+    } else if (downEdge) {
+      g_paramCursor = (g_paramCursor - 1 + PARAM_MENU_COUNT) % PARAM_MENU_COUNT;
+    }
+    if (upEdge || downEdge) showParamCodeOnDisplay(g_paramMenu[g_paramCursor].code);
+    if (setEdge) {
+      g_paramEditOriginal = *g_paramMenu[g_paramCursor].value;
+      g_uiMode = UI_PARAM_EDIT;
+      mostrarTemperatura(*g_paramMenu[g_paramCursor].value);
+      flashUiMessage("EDIT", 600);
+      Serial.printf("[BTN] Editando A%s = %.2f\n", g_paramMenu[g_paramCursor].code,
+                    *g_paramMenu[g_paramCursor].value);
+    }
+    if (backEdge) {
+      g_uiMode = UI_NORMAL;
+      g_normalDisp = DISP_TEMP;
+      g_showSonda2View = false;
+      Serial.println(F("[BTN] Saliendo de menu parametros."));
+    }
+    return;
+  }
+
+  if (g_uiMode == UI_PARAM_EDIT) {
+    ParamMenuItem &it = g_paramMenu[g_paramCursor];
+    bool valueChanged = false;
+    if (upEdge) {
+      *it.value = clampParamValue(*it.value + it.step, it.minValue, it.maxValue);
+      valueChanged = true;
+      g_editRepeatAt = now;
+    } else if (downEdge) {
+      *it.value = clampParamValue(*it.value - it.step, it.minValue, it.maxValue);
+      valueChanged = true;
+      g_editRepeatAt = now;
+    } else if (upHeld && now - g_editRepeatAt >= BTN_EDIT_REPEAT_MS) {
+      *it.value = clampParamValue(*it.value + it.step, it.minValue, it.maxValue);
+      valueChanged = true;
+      g_editRepeatAt = now;
+    } else if (downHeld && now - g_editRepeatAt >= BTN_EDIT_REPEAT_MS) {
+      *it.value = clampParamValue(*it.value - it.step, it.minValue, it.maxValue);
+      valueChanged = true;
+      g_editRepeatAt = now;
+    }
+    if (valueChanged) mostrarTemperatura(*it.value);
+    if (setEdge) {
+      const bool ok = saveCurrentParamsToFs();
+      g_uiMode = UI_PARAM_SELECT;
+      showParamCodeOnDisplay(it.code);
+      flashUiMessage(ok ? "SAVE" : "ERR", 900);
+      Serial.printf("[BTN] A%s guardado: %.2f (%s)\n", it.code, *it.value, ok ? "OK" : "ERROR");
+    }
+    if (backEdge) {
+      *it.value = g_paramEditOriginal;
+      g_uiMode = UI_PARAM_SELECT;
+      showParamCodeOnDisplay(it.code);
+      Serial.printf("[BTN] A%s cancelado, vuelve a %.2f\n", it.code, *it.value);
+    }
+  }
+}
+
 // ============== LECTURA NTC =================
 /**
  * AR08 (F54) decide cuántas muestras tomamos por lectura (4–32). Aceptamos
  * más muestras = lectura más estable pero más lenta. Saturamos los extremos
  * para no quedarnos sin tiempo de loop si llega un valor raro de la nube.
  */
-static float leerNTCpromedio(int pin, bool &fault, float offset) {
+static float leerNTCpromedio(int pin, bool &rawFault, float offset) {
   int samples = (int)P.F54;
   if (samples < 4)  samples = 4;
   if (samples > 32) samples = 32;
@@ -504,14 +1112,37 @@ static float leerNTCpromedio(int pin, bool &fault, float offset) {
     if (v > 5 && v < 4090) { acc += v; validas++; }
     delayMicroseconds(200);
   }
-  if (validas < samples / 2) { fault = true; return TEMP_ERR_VALUE; }
+  if (validas < samples / 2) { rawFault = true; return TEMP_ERR_VALUE; }
   int adc = acc / validas;
   float rNTC = R_FIXED * ((float)adc / (4095.0f - (float)adc));
   float tK = 1.0f / ((1.0f / T0K) + (1.0f / BETA) * log(rNTC / R0));
   float tC = tK - 273.15f;
-  if (tC < -45.0f || tC > 80.0f) { fault = true; return TEMP_ERR_VALUE; }
-  fault = false;
+  if (tC < -45.0f || tC > 80.0f) { rawFault = true; return TEMP_ERR_VALUE; }
+  rawFault = false;
   return tC + offset;
+}
+
+static void updateNtcFaultDebounced(bool raw1, bool raw2) {
+  if (raw1) {
+    if (ntcBadStreak1 < 255) ntcBadStreak1++;
+    ntcGoodStreak1 = 0;
+    if (ntcBadStreak1 >= NTC_FAULT_SET_COUNT) fault1 = true;
+  } else {
+    if (ntcGoodStreak1 < 255) ntcGoodStreak1++;
+    ntcBadStreak1 = 0;
+    if (ntcGoodStreak1 >= NTC_FAULT_CLR_COUNT) fault1 = false;
+  }
+  if (raw2) {
+    if (ntcBadStreak2 < 255) ntcBadStreak2++;
+    ntcGoodStreak2 = 0;
+    if (ntcBadStreak2 >= NTC_FAULT_SET_COUNT) fault2 = true;
+  } else {
+    if (ntcGoodStreak2 < 255) ntcGoodStreak2++;
+    ntcBadStreak2 = 0;
+    if (ntcGoodStreak2 >= NTC_FAULT_CLR_COUNT) fault2 = false;
+  }
+  const bool ctrlRawOk = (P.F53 >= 0.5f) ? !raw2 : !raw1;
+  if (ctrlRawOk) ntcReady = true;
 }
 
 // ============== CONTROL helpers =============
@@ -589,13 +1220,13 @@ static void aplicarControl() {
   unsigned long now = millis();
 
   // Cancelación manual del deshielo (botón DEF de la app durante un ciclo):
-  // termina el deshielo, marca lastDefrostAt y pasa al goteo. Si no había
+  // termina el deshielo, marca fin de calor y pasa al goteo.
   // deshielo activo, el flag se descarta silenciosamente.
   if (g_manualCancelDefrost) {
     g_manualCancelDefrost = false;
     if (deshielo) {
       deshielo = false;
-      lastDefrostAt = now;
+      lastDefrostHeatOffAt = now;
       dripping = true;
       dripStartedAt = now;
       if (compresor) { compresor = false; compChangedAt = now; }
@@ -605,17 +1236,23 @@ static void aplicarControl() {
     }
   }
 
-  // F38: retardo al encender — todo OFF hasta cumplir el delay.
+  // Arranque: relés OFF solo durante AR14 (mín. RELAY_BOOT_MIN_MS). Luego sale de INIC
+  // aunque la sonda falle (ver E1/E2 en display y AR34).
+  if (now < relaySafeUntilMs) {
+    compresor = ventilador = deshielo = dripping = false;
+    emergencyComp = false;
+    const uint32_t remS = (uint32_t)((relaySafeUntilMs - now + 999UL) / 1000UL);
+    setPhase(PH_BOOT, remS > 0 ? remS : 1);
+    return;
+  }
+  if (!ntcReady) ntcReady = true;
+
+  // F38: fin del retardo de encendido (AR14); luego puede F09 deshielo al arranque.
   if (!bootDelayDone) {
-    if (now - bootAtMs < (unsigned long)(P.F38 * 1000.0f)) {
-      compresor = ventilador = deshielo = dripping = false;
-      setPhase(PH_BOOT, (uint32_t)P.F38);
-      return;
-    }
     bootDelayDone = true;
     compChangedAt = now;
     lastDefrostAt = now;
-    // F09: deshielo al encender.
+    Serial.printf("[BOOT] Fin retardo AR14=%.0fs — control normal (sonda OK).\n", P.F38);
     if (P.F09 >= 0.5f && !defrostOnStartDone) {
       deshielo = true; defStartedAt = now;
       defrostOnStartDone = true;
@@ -636,6 +1273,15 @@ static void aplicarControl() {
   float tCtrl = controlTemp(ctrlFault);
   if (ctrlFault) {
     deshielo = false; dripping = false;
+    // Primeros segundos tras encender: no ciclar relés por ADC inestable (no quedarse en INIC).
+    if ((now - bootAtMs) < SENSOR_FAULT_GRACE_MS) {
+      if (compresor) { compresor = false; compChangedAt = now; }
+      ventilador = false;
+      deshielo = false;
+      emergencyComp = false;
+      setPhase(PH_OFF, 0);
+      return;
+    }
     if (P.F55 < 0.5f) {
       // AR34 = 0: apagar todo.
       if (compresor) { compresor = false; compChangedAt = now; }
@@ -674,16 +1320,19 @@ static void aplicarControl() {
   // El comando manual `force_defrost` solo puentea el bloqueo de arranque
   // F45 si AR48 (F37) = 1 ("deshielo inmediato al pedir"). Si está en 0, el
   // pedido manual respeta el F45 igual que el deshielo por intervalo.
-  bool manualBypassStartup = g_manualDefrostRequested && (P.F37 >= 0.5f);
+  bool manualBypassStartup =
+      g_btnDefrostImmediate || (g_manualDefrostRequested && (P.F37 >= 0.5f));
   bool startDefrost = !deshielo && !dripping &&
       (manualBypassStartup ||
        (!defrostBlockedByStartup &&
         (defrostByInterval || forceDefrost || defrostByIce || g_manualDefrostRequested)));
   if (g_manualDefrostRequested && startDefrost) {
     g_manualDefrostRequested = false;
+    g_btnDefrostImmediate = false;
   } else if (g_manualDefrostRequested && (deshielo || dripping)) {
     // Ya hay un ciclo activo, descartamos el pedido manual.
     g_manualDefrostRequested = false;
+    g_btnDefrostImmediate = false;
     Serial.println(F("[CMD] force_defrost ignorado (ya en deshielo o goteo)."));
   }
   // Si llegamos acá con g_manualDefrostRequested aún true significa que F45
@@ -708,7 +1357,7 @@ static void aplicarControl() {
     bool finPorTiempo = (now - defStartedAt) >= (unsigned long)(P.F07 * 60.0f * 1000.0f);
     if (finPorTiempo || finPorTemp) {
       deshielo = false;
-      lastDefrostAt = now;
+      lastDefrostHeatOffAt = now;
       dripping = true;
       dripStartedAt = now;
       // Si veníamos por gas caliente, apagamos compresor al cerrar el ciclo.
@@ -729,6 +1378,8 @@ static void aplicarControl() {
     ventilador = (P.F51 >= 0.5f);
     if ((now - dripStartedAt) >= (unsigned long)(P.F39 * 60.0f * 1000.0f)) {
       dripping = false;
+      lastDefrostAt = now;
+      Serial.println(F("[DEF] Goteo OK → cuenta AR10 (intervalo) desde ahora."));
     } else {
       setPhase(PH_DRIP, (uint32_t)(P.F39 * 60.0f));
       return;
@@ -759,7 +1410,7 @@ static void aplicarControl() {
 
   // Ventilador: F51 continuo, F11 retardo post-deshielo, F12 umbral evap
   unsigned long postDefDelayMs = (unsigned long)(P.F11 * 60.0f * 1000.0f);
-  bool postDefGate = (now - lastDefrostAt) >= postDefDelayMs;
+  bool postDefGate = (now - lastDefrostHeatOffAt) >= postDefDelayMs;
   bool evapOK = fault2 ? true : (tEvap <= P.F12);
   bool fanLogic = P.F51 >= 0.5f ? true : (compresor && postDefGate && evapOK);
   if (doorCutsFan) fanLogic = false;
@@ -774,7 +1425,7 @@ static void aplicarControl() {
     // entrar a la fase (no que arrastre los minutos del goteo + retardo de
     // ventilador del ciclo previo). `g_phaseStartedAt` queda en millis() al
     // momento de la transición; el "Faltan" se calcula en enviarTelemetria()
-    // como F06*60 - (millis() - lastDefrostAt) y se manda en phase_total_s
+    // como F06*60 - (millis() - lastDefrostAt) (lastDefrostAt = fin goteo)
     // como elapsed + remaining para que la card lo muestre correcto.
     setPhase(PH_NORMAL, (uint32_t)(P.F06 * 60.0f));
   }
@@ -925,8 +1576,6 @@ static bool saveParams(JsonObject obj) {
 // ============== Comandos manuales (LittleFS) ==============
 // Persistimos el `ts` del último comando aplicado para que un reboot no lo
 // vuelva a ejecutar.
-static const char *CMDTS_PATH = "/cmdts.txt";
-
 static void loadLastCmdTs() {
   if (!ensureFs() || !LittleFS.exists(CMDTS_PATH)) return;
   File f = LittleFS.open(CMDTS_PATH, "r");
@@ -1098,10 +1747,23 @@ static void pullParamsFromCloud() {
   {
     JsonVariant cmdVar = doc["pending_command"];
     if (cmdVar.is<JsonObject>()) {
-      Serial.println(F("[PULL] respuesta trae pending_command, lo proceso."));
-      applyPendingCommand(cmdVar.as<JsonObject>());
+      JsonObject cmd = cmdVar.as<JsonObject>();
+      const char *ts = cmd["ts"] | "";
+      if (ts[0] && g_lastCmdTs == ts) {
+        Serial.println(F("[PULL] pending_command ya aplicado (mismo ts), fin ventana urgente."));
+        g_pullUrgentUntilMs = 0;
+      } else {
+        Serial.println(F("[PULL] respuesta trae pending_command, lo proceso."));
+        applyPendingCommand(cmd);
+        if (ts[0] && g_lastCmdTs == ts) {
+          g_pullUrgentUntilMs = 0;
+        } else {
+          requestUrgentPullWindow();
+        }
+      }
     } else {
       Serial.println(F("[PULL] respuesta sin pending_command."));
+      g_pullUrgentUntilMs = 0;
     }
   }
 
@@ -1133,78 +1795,142 @@ static void pullParamsFromCloud() {
                 (int)obj.size(), upd);
   Serial.printf("       F01=%.1f  F02=%.1f  F06=%.0fmin  F17=%.0fs  F18=%.0fs\n",
                 P.F01, P.F02, P.F06, P.F17, P.F18);
-  g_flashParamsUpdated = true;
+  pushFlash(FP_PARAM);
 }
 
 // ============== Portal WiFiManager ==========
-static void copyPortalConfigAndSave() {
-  strlcpy(g_cfg.moduleId, p_module.getValue(), sizeof(g_cfg.moduleId));
-  strlcpy(g_cfg.apiKey,   p_token.getValue(),  sizeof(g_cfg.apiKey));
-  const char *u = p_url.getValue();
-  if (u && strncmp(u, "https://", 8) == 0 && strstr(u, "/functions/v1/")) {
-    strlcpy(g_cfg.apiUrl, u, sizeof(g_cfg.apiUrl));
-  }
-  saveConfig();
-  Serial.println(F("[CFG] Guardado desde portal."));
-}
-/**
- * Abre el portal en modo no-bloqueante. El loop principal sigue corriendo
- * (display, watchdog, lectura de sondas, comandos serie), y procesa el portal
- * con `wm.process()` hasta que dispara la callback de save o se cumple el
- * timeout local que controlamos nosotros.
- */
-static void runConfigPortal() {
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.disconnect(true, true);
-  delay(150);
-  wm.setBreakAfterConfig(true);
-  wm.setConfigPortalTimeout(PORTAL_TIMEOUT_SEC);
-  wm.setConfigPortalBlocking(false);
-  wm.startConfigPortal(AP_NAME);
-  g_wifiState = WFS_PORTAL;
-  g_portalStartedAt = millis();
-  modoTexto = true;
-  texto = "CONECTAR A RED PRO300-SETUP   ";
-  scrollPos = 0;
-  prepararTexto();
-  Serial.printf("[WiFi] Portal '%s' abierto (modo no bloqueante, %lu s).\n", AP_NAME, PORTAL_TIMEOUT_SEC);
-  Serial.println(F("[WiFi] Conéctate con el celular al SSID, abrí 192.168.4.1 y completá WiFi + Module ID + Token."));
+static void portalWdtRelax(bool relax) {
+#if defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5
+  esp_task_wdt_config_t cfg = {
+    .timeout_ms     = relax ? PORTAL_WDT_TIMEOUT_MS : 30000,
+    .idle_core_mask = 0,
+    .trigger_panic  = true,
+  };
+  esp_task_wdt_reconfigure(&cfg);
+#else
+  (void)relax;
+#endif
 }
 
-/** Llamada continua desde loop() mientras g_wifiState == WFS_PORTAL. */
-static void processPortal() {
-  wm.process();
+static void copyPortalConfigAndSave() {
+  const char *mid = p_module.getValue();
+  const char *tok = p_token.getValue();
+  const char *u   = p_url.getValue();
+  if (mid && mid[0]) strlcpy(g_cfg.moduleId, mid, sizeof(g_cfg.moduleId));
+  if (tok && tok[0]) strlcpy(g_cfg.apiKey, tok, sizeof(g_cfg.apiKey));
+  if (u && strncmp(u, "https://", 8) == 0 && strstr(u, "/functions/v1/")) {
+    strlcpy(g_cfg.apiUrl, u, sizeof(g_cfg.apiUrl));
+  } else if (u && u[0]) {
+    Serial.println(F("[CFG] URL ignorada (debe ser https://.../functions/v1/...)"));
+  }
+  saveConfig();
+  Serial.printf("[CFG] Guardado: module=%s url=%s\n", g_cfg.moduleId, g_cfg.apiUrl);
+}
+
+static bool connectSavedWifi(unsigned long timeoutMs) {
+  Serial.printf("[WiFi] Conectando (máx. %lu ms)...\n", timeoutMs);
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
+  if (WiFi.SSID().length() == 0) {
+    Serial.println(F("[WiFi] No hay SSID guardado — abrí el portal y guardá de nuevo."));
+    return false;
+  }
+  Serial.printf("[WiFi] SSID guardado: %s\n", WiFi.SSID().c_str());
+  WiFi.disconnect(false);
+  delay(100);
+  WiFi.begin();
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - t0) < timeoutMs) {
+    delay(250);
+    yield();
+    esp_task_wdt_reset();
+    const wl_status_t st = WiFi.status();
+    if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL) {
+      Serial.printf("[WiFi] Falló conexión (status=%d). Revisá SSID/clave.\n", (int)st);
+      break;
+    }
+  }
+  const bool ok = (WiFi.status() == WL_CONNECTED);
+  if (ok) {
+    Serial.printf("[WiFi] OK IP=%s RSSI=%d\n",
+                  WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+    g_prevWifiConnected = true;
+    pushFlash(FP_WIFI);
+  } else {
+    Serial.printf("[WiFi] Sin conectar (status=%d).\n", (int)WiFi.status());
+  }
+  return ok;
+}
+
+/**
+ * Portal bloqueante (display sigue en displayTask). WiFiManager guarda SSID/clave
+ * en flash al pulsar Save y prueba la conexión antes de volver.
+ */
+static void runConfigPortal() {
+  Serial.println(F("[WiFi] Abriendo portal (bloqueante)..."));
+  portalWdtRelax(true);
+  g_wifiState = WFS_PORTAL;
+  g_portalRunning = true;
+  g_portalSaveRequested = false;
+
+  wm.stopConfigPortal();
+  WiFi.persistent(true);
+  WiFi.setAutoReconnect(true);
+  WiFi.setSleep(false);
+  WiFi.disconnect(true, false);
+  delay(200);
+  WiFi.mode(WIFI_AP_STA);
+
+  wm.setBreakAfterConfig(true);
+  wm.setConfigPortalTimeout(PORTAL_TIMEOUT_SEC);
+  wm.setConfigPortalBlocking(true);
+  wm.setConnectTimeout(45);
+  wm.setSaveConnectTimeout(45);
+  wm.setMinimumSignalQuality(-1);
+  wm.setShowPassword(true);
+  wm.setCaptivePortalEnable(true);
+
+  modoTexto = true;
+  texto = "WIFI PRO300-SETUP 192.168.4.1 ";
+  scrollPos = 0;
+  prepararTexto();
+  Serial.printf("[WiFi] Celular → red '%s' → http://192.168.4.1 → Save\n", AP_NAME);
+
+  const bool portalOk = wm.startConfigPortal(AP_NAME);
+  Serial.printf("[WiFi] Portal cerrado ok=%d status=%d\n", portalOk ? 1 : 0, (int)WiFi.status());
+
   if (g_portalSaveRequested) {
     copyPortalConfigAndSave();
     g_portalSaveRequested = false;
-    Serial.println(F("[WiFi] Config guardada por el portal. Reiniciando para aplicar..."));
-    delay(800);
-    ESP.restart();
   }
-  if (millis() - g_portalStartedAt > PORTAL_TIMEOUT_SEC * 1000UL) {
-    Serial.println(F("[WiFi] Portal: timeout sin cambios. Sigo en control local; reintento WiFi cada 30 s."));
-    wm.stopConfigPortal();
-    g_wifiState = WFS_RUNNING;
+
+  wm.stopConfigPortal();
+  WiFi.softAPdisconnect(true);
+  g_portalRunning = false;
+  g_wifiState = WFS_RUNNING;
+  portalWdtRelax(false);
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("[WiFi] Tras guardar no conectó; reintento STA..."));
+    connectSavedWifi(30000UL);
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    pushFlash(FP_WIFI);
+  } else {
     modoTexto = false;
+    Serial.println(F("[WiFi] Revisá: 2.4 GHz, clave correcta, sin espacios extra en SSID."));
   }
 }
-static bool connectSavedWifi() {
-  Serial.printf("[WiFi] Probando WiFi guardado (máx. %lu ms)...\n", WIFI_BOOT_CONNECT_MS);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin();
-  unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - t0) < WIFI_BOOT_CONNECT_MS) {
-    delay(200);
-    yield();
-    esp_task_wdt_reset();
-  }
-  return WiFi.status() == WL_CONNECTED;
-}
+
 static void setupWifi() {
   WiFi.setSleep(false);
   WiFi.persistent(true);
-  wm.setConnectTimeout(15);
-  wm.setMinimumSignalQuality(8);
+  WiFi.setAutoReconnect(true);
+  wm.setConnectTimeout(45);
+  wm.setSaveConnectTimeout(45);
+  wm.setMinimumSignalQuality(-1);
   wm.setSaveConfigCallback([]() { g_portalSaveRequested = true; });
   p_module.setValue(g_cfg.moduleId, sizeof(g_cfg.moduleId) - 1);
   p_token.setValue(g_cfg.apiKey,    sizeof(g_cfg.apiKey)    - 1);
@@ -1221,11 +1947,14 @@ static void setupWifi() {
     runConfigPortal();
     return;
   }
-  if (!connectSavedWifi()) {
+  if (!connectSavedWifi(WIFI_BOOT_CONNECT_MS)) {
     Serial.println(F("[WiFi] No conectó en boot. Sigo control local; reintento cada 30 s."));
+    g_prevWifiConnected = false;
   } else {
     Serial.printf("[WiFi] OK: SSID=%s IP=%s RSSI=%d\n",
       WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+    g_prevWifiConnected = true;
+    pushFlash(FP_WIFI);
   }
   g_wifiState = WFS_RUNNING;
 }
@@ -1235,6 +1964,7 @@ static void setupWifi() {
 static void enviarTelemetria() {
   if (WiFi.status() != WL_CONNECTED) return;
   if (strlen(g_cfg.moduleId) == 0 || strlen(g_cfg.apiKey) == 0) return;
+  pushFlash(FP_ENVIANDO);
   HTTPClient http;
   http.setTimeout(8000);
   http.begin(g_cfg.apiUrl);
@@ -1256,7 +1986,7 @@ static void enviarTelemetria() {
   uint32_t phaseTotalS = g_phaseTotalS;
   if (g_phase == PH_NORMAL) {
     // El "Faltan" en refrigeración es el tiempo hasta el próximo deshielo
-    // por intervalo (F06 minutos desde lastDefrostAt). Lo calculamos al
+    // por intervalo (F06 min desde fin de goteo = lastDefrostAt). Calculamos al
     // vuelo y reportamos `phase_total_s = elapsed + remaining` para que la
     // app, que hace `remaining = total - elapsed`, dé el countdown real sin
     // arrastrar al "Transcurrido" los minutos del goteo + retardo previo.
@@ -1294,13 +2024,16 @@ static void enviarTelemetria() {
   http.end();
   if (code != 200) return;
 
-  g_flashTelemetrySent = true;
+  pushFlash(FP_ENVIADO);
 
   // Atajo de propagación: si el server nos cuenta que `params_updated_at` del
   // combistato es más nuevo que el que tenemos, pedimos un pull inmediato.
   // Así editás un AR en la app y a los pocos segundos lo aplica el equipo.
   StaticJsonDocument<512> doc;
   if (deserializeJson(doc, resp) == DeserializationError::Ok) {
+    if (doc["pull_params_now"] | false) {
+      requestUrgentPullWindow();
+    }
     const char *pu = doc["params_updated_at"] | "";
     if (pu[0] && g_paramsUpdatedAt != pu) {
       Serial.printf("[TX] Detecté params nuevos (%s vs %s) → forzando pull.\n",
@@ -1332,7 +2065,8 @@ static void printConfig() {
   Serial.printf("AR10 F06 int defrost  = %.0f min\n", P.F06);
   Serial.printf("AR11 F07 max defrost  = %.0f min\n", P.F07);
   Serial.printf("AR12 F08 fin defrost  = %.1f\n", P.F08);
-  Serial.printf("AR14 F38 boot delay   = %.0f s\n", P.F38);
+  Serial.printf("AR14 F38 boot delay   = %.0f s (min %lu s en relés)\n",
+                P.F38, (unsigned long)(RELAY_BOOT_MIN_MS / 1000UL));
   Serial.printf("AR15 F39 goteo        = %.0f min\n", P.F39);
   Serial.printf("AR20 F10 fan en def   = %.0f\n", P.F10);
   Serial.printf("AR21 F11 ret fan post = %.0f min\n", P.F11);
@@ -1351,12 +2085,25 @@ static void leerSerial() {
   if (dato.length() == 0) return;
   String lower = dato; lower.toLowerCase();
 
-  if (lower == "portal")  { runConfigPortal(); return; }
+  if (lower == "portal" || lower == "wifi")  { runConfigPortal(); return; }
   if (lower == "reset")   { Serial.println(F("Reseteando config...")); resetConfig(); return; }
   if (lower == "config")  { printConfig(); return; }
   if (lower == "reboot")  { ESP.restart(); return; }
   if (lower == "temp")    { modoTexto = false; return; }
   if (lower == "pull")    { Serial.println(F("[PULL] solicitando pull a la task de red...")); g_pullNowRequested = true; return; }
+  if (lower == "btns" || lower == "buttons") {
+    Serial.printf("Botones (1=apretado): UP=%d DOWN=%d SET=%d BACK=%d | modo=%d disp=%d\n",
+                  btnPressed(BTN_UP_PIN) ? 1 : 0,
+                  btnPressed(BTN_DOWN_PIN) ? 1 : 0,
+                  btnPressed(BTN_SET_PIN) ? 1 : 0,
+                  btnPressed(BTN_BACK_PIN) ? 1 : 0,
+                  (int)g_uiMode, (int)g_normalDisp);
+    return;
+  }
+  if (lower == "mem" || lower == "diag" || lower == "status") {
+    printLittleFsReport();
+    return;
+  }
   if (lower == "off") {
     compresor = ventilador = deshielo = false;
     modoTexto = true; texto = "OFF"; scrollPos = 0; prepararTexto();
@@ -1408,15 +2155,27 @@ static void networkTask(void *param) {
   for (;;) {
     esp_task_wdt_reset();
 
-    if (g_wifiState == WFS_RUNNING) {
+    if (g_wifiState == WFS_RUNNING && !g_portalRunning) {
+      const bool wifiOk = (WiFi.status() == WL_CONNECTED);
+      if (wifiOk && !g_prevWifiConnected) {
+        g_prevWifiConnected = true;
+        pushFlash(FP_WIFI);
+        Serial.printf("[WiFi] Conectado: %s IP=%s\n",
+                      WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+      } else if (!wifiOk && g_prevWifiConnected) {
+        g_prevWifiConnected = false;
+        Serial.println(F("[WiFi] Desconectado."));
+      }
+
       // Reintentar WiFi si se cayó.
-      if (WiFi.status() != WL_CONNECTED) {
+      if (!wifiOk) {
         if (lastRetry == 0 || (millis() - lastRetry) >= 30000UL) {
           lastRetry = millis();
-          if (WiFi.SSID().length() > 0) {
-            Serial.println(F("[WiFi] Reintentando (task)..."));
-            WiFi.reconnect();
-          }
+          Serial.println(F("[WiFi] Reintentando (task)..."));
+          WiFi.disconnect(false);
+          delay(80);
+          WiFi.mode(WIFI_STA);
+          WiFi.begin();
         }
       } else {
         // TX baseline cada g_cfg.intervalMs (60 s) + TX inmediato cuando el
@@ -1426,7 +2185,11 @@ static void networkTask(void *param) {
         // queda pendiente y se sirve en el próximo tick (200 ms).
         const unsigned long nowMs = millis();
         bool sendNow = false;
-        if (nowMs - lastTel >= g_cfg.intervalMs) {
+        unsigned long telEvery = g_cfg.intervalMs;
+        if (temperatureRead() >= CHIP_TEMP_WARN_C) {
+          telEvery = max(telEvery, 120000UL);
+        }
+        if (nowMs - lastTel >= telEvery) {
           sendNow = true;
         }
         if (g_immediateTxRequested) {
@@ -1465,7 +2228,18 @@ void setup() {
   pinMode(STROBE_PIN, OUTPUT);
   digitalWrite(STROBE_PIN, LOW);
   pinMode(PIN_FORCE_PORTAL, INPUT_PULLUP);
+  pinMode(BTN_UP_PIN, INPUT_PULLUP);
+  pinMode(BTN_DOWN_PIN, INPUT_PULLUP);
+  pinMode(BTN_SET_PIN, INPUT_PULLUP);
+  pinMode(BTN_BACK_PIN, INPUT_PULLUP);
   if (DOOR_PIN >= 0) pinMode(DOOR_PIN, INPUT_PULLUP);
+  syncBtnPrevFromPins();
+  Serial.printf("[BTN] Pines UP=%d DOWN=%d SET=%d BACK=%d (reposo U%d D%d S%d B%d)\n",
+                BTN_UP_PIN, BTN_DOWN_PIN, BTN_SET_PIN, BTN_BACK_PIN,
+                btnPressed(BTN_UP_PIN) ? 1 : 0,
+                btnPressed(BTN_DOWN_PIN) ? 1 : 0,
+                btnPressed(BTN_SET_PIN) ? 1 : 0,
+                btnPressed(BTN_BACK_PIN) ? 1 : 0);
   analogReadResolution(12);
 
   SPI.begin(CLOCK_PIN, -1, DATA_PIN, -1);
@@ -1477,7 +2251,7 @@ void setup() {
   SPI.endTransaction();
 
   Serial.println();
-  Serial.println(F("S.G PRO300 booteando..."));
+  Serial.println(F("AR Monitoreo PRO300 booteando..."));
   Serial.println(F("[FW] Fase1: TX 60s + eventos + deltaT + pull 60s/10s"));
   ensureFs();
   loadConfig();
@@ -1501,36 +2275,25 @@ void setup() {
   esp_task_wdt_add(NULL);
 
   bootAtMs = millis();
+  {
+    unsigned long holdMs = (unsigned long)(P.F38 * 1000.0f);
+    if (holdMs < RELAY_BOOT_MIN_MS) holdMs = RELAY_BOOT_MIN_MS;
+    relaySafeUntilMs = bootAtMs + holdMs;
+  }
+  ntcReady = false;
+  ntcBadStreak1 = ntcBadStreak2 = 0;
+  ntcGoodStreak1 = ntcGoodStreak2 = 0;
+  fault1 = fault2 = false;
   bootDelayDone = false;
   defrostOnStartDone = false;
   emergencyChangedAt = bootAtMs;
   compChangedAt = bootAtMs;
   lastDefrostAt = bootAtMs;
+  lastDefrostHeatOffAt = bootAtMs;
 
   texto = "BOOT"; prepararTexto();
 
-  setupWifi();
-  if (g_wifiState != WFS_PORTAL) modoTexto = false;
-
-  // Si ya está conectado al arrancar, marcamos pull inmediato para que la task
-  // de red lo levante en cuanto comience (no bloqueamos el setup con HTTP).
-  if (WiFi.status() == WL_CONNECTED) {
-    g_pullNowRequested = true;
-  }
-
-  // Network task en core 0 para que los POST/HTTPS no congelen el display.
-  xTaskCreatePinnedToCore(
-    networkTask,        // función
-    "net",              // nombre
-    8192,               // stack
-    NULL,               // parámetro
-    1,                  // prioridad (loop = 1 por default)
-    &g_netTaskHandle,   // handle
-    0                   // core 0
-  );
-
-  // Display task en core 1 con prioridad mayor que loopTask. Refresca el
-  // multiplex cada 1 ms sin que el resto del firmware le robe ciclos.
+  // Display antes del portal de boot para que la marquesina no quede negra.
   xTaskCreatePinnedToCore(
     displayTask,
     "disp",
@@ -1538,23 +2301,41 @@ void setup() {
     NULL,
     2,
     &g_displayTaskHandle,
-    1                   // core 1, junto al loop pero con prio más alta
+    1
+  );
+
+  setupWifi();
+  if (!g_portalRunning) modoTexto = false;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    g_pullNowRequested = true;
+  }
+
+  xTaskCreatePinnedToCore(
+    networkTask,
+    "net",
+    8192,
+    NULL,
+    1,
+    &g_netTaskHandle,
+    0
   );
 }
 
 void loop() {
   esp_task_wdt_reset();
   leerSerial();
-
-  if (g_wifiState == WFS_PORTAL) processPortal();
+  handleButtonUi();
 
   // Refresco del display vive ahora en displayTask (core 1, prio 2).
   // El loop solo se ocupa de control, NTC, marquesinas y portal.
 
   if (millis() - lastReadAt >= 1000) {
     lastReadAt = millis();
-    tCam  = leerNTCpromedio(NTC1_PIN, fault1, P.F03);
-    tEvap = leerNTCpromedio(NTC2_PIN, fault2, P.F04);
+    bool rawF1 = false, rawF2 = false;
+    tCam  = leerNTCpromedio(NTC1_PIN, rawF1, P.F03);
+    tEvap = leerNTCpromedio(NTC2_PIN, rawF2, P.F04);
+    updateNtcFaultDebounced(rawF1, rawF2);
     leerPuerta();
     aplicarControl();
     applyManualOverride();
@@ -1588,43 +2369,18 @@ void loop() {
       prevPhase = g_phase;
     }
     checkTempDeltaForImmediateTx();
+    aplicarDeratingPorCalor(millis());
   }
 
-  // ---- Mensajes efímeros en marquesina (TX OK / AR actualizados) ----
-  // Se disparan desde networkTask en core 0; el loop arma el scroll y vuelve a
-  // temperatura cuando vence el timeout. No se activan durante el portal.
-  if (g_wifiState != WFS_PORTAL) {
-    if (g_flashTelemetrySent) {
-      g_flashTelemetrySent = false;
-      g_flashActive = true;
-      modoTexto = true;
-      texto = "DATOS ENVIADOS   ";
-      scrollPos = 0;
-      prepararTexto();
-      g_flashEndsAt = millis() + 3500UL;
-    } else if (g_flashParamsUpdated) {
-      g_flashParamsUpdated = false;
-      g_flashActive = true;
-      modoTexto = true;
-      texto = "DATOS CARGADOS   ";
-      scrollPos = 0;
-      prepararTexto();
-      g_flashEndsAt = millis() + 3500UL;
-    }
-  }
-  if (g_flashActive && millis() >= g_flashEndsAt) {
-    g_flashActive = false;
-    modoTexto = false;
-  }
+  serviceUiFlash(millis());
 
-  if (modoTexto && millis() - lastScroll >= 300) {
-    lastScroll = millis();
-    prepararTexto();
-  }
-  if (!modoTexto && millis() - lastDisplaySwitchAt >= 1000) {
+  if (g_uiMode == UI_PARAM_SELECT) {
+    showParamCodeOnDisplay(g_paramMenu[g_paramCursor].code);
+  } else if (g_uiMode == UI_PARAM_EDIT) {
+    mostrarTemperatura(*g_paramMenu[g_paramCursor].value);
+  } else if (!modoTexto && millis() - lastDisplaySwitchAt >= 1000) {
     lastDisplaySwitchAt = millis();
-    if (fault1) mostrarError(1);
-    else        mostrarTemperatura(tCam);
+    refreshNormalDisplay();
   }
 
   // OJO: la telemetría, pull de AR y reintento de WiFi viven ahora en

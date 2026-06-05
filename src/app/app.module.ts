@@ -13,12 +13,15 @@ import { ResetPasswordComponent } from './reset-password/reset-password.componen
 import { DashboardComponent } from './dashboard/dashboard.component';
 import { ChartAnalysisComponent } from './chart-analysis/chart-analysis.component';
 import { CombistatoSettingsComponent } from './combistato/combistato-settings.component';
+import { Pro400SettingsComponent } from './pro400/pro400-settings.component';
 import { CombistatoChartComponent } from './combistato-chart/combistato-chart.component';
 import { Pr500SettingsComponent } from './pr500/pr500-settings.component';
 import { Pr500ChartComponent } from './pr500-chart/pr500-chart.component';
 import { InicioPageComponent } from './inicio/inicio-page.component';
 import { AyudaPageComponent } from './ayuda/ayuda-page.component';
 import { HerramientasPageComponent } from './herramientas/herramientas-page.component';
+import { ComunidadPageComponent } from './comunidad/comunidad-page.component';
+import { PresupuestosPageComponent } from './presupuestos/presupuestos-page.component';
 import { environment } from '../environments/environment';
 
 export function rootErrorHandlerFactory(): ErrorHandler {
@@ -39,12 +42,15 @@ export function rootErrorHandlerFactory(): ErrorHandler {
     DashboardComponent,
     ChartAnalysisComponent,
     CombistatoSettingsComponent,
+    Pro400SettingsComponent,
     CombistatoChartComponent,
     Pr500SettingsComponent,
     Pr500ChartComponent,
     InicioPageComponent,
     AyudaPageComponent,
     HerramientasPageComponent,
+    ComunidadPageComponent,
+    PresupuestosPageComponent,
   ],
   imports: [
     BrowserModule,

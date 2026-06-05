@@ -3,8 +3,8 @@
     <p class="herr-hero__kicker">Herramientas de campo</p>
     <h1 class="herr-hero__title">Refrigeración de campo</h1>
     <p class="herr-hero__lead">
-      Tabla P–T, recalentamiento, subenfriamiento, <strong>carga de cámara (kW / HP)</strong> y dimensionado
-      <strong>Danfoss T2 / TE2</strong> + <strong>TE5 / TEX</strong>. Independiente del PR500.
+      P–T, recalentamiento, subenfriamiento, <strong>PR500 en vivo</strong>, filtro ΔT, conversor de unidades,
+      carga de cámara, Danfoss TXV y <strong>bitácora de visita</strong> en la ficha del equipo.
     </p>
   </header>
 
@@ -13,7 +13,13 @@
       Tabla P–T
     </button>
     <button type="button" class="herr-tabs__btn" [class.herr-tabs__btn--active]="activeTab === 'sh'" (click)="setTab('sh')">
-      Recalentamiento y subenfriamiento
+      Recalent. / subenf.
+    </button>
+    <button type="button" class="herr-tabs__btn" [class.herr-tabs__btn--active]="activeTab === 'units'" (click)="setTab('units')">
+      Conversor
+    </button>
+    <button type="button" class="herr-tabs__btn" [class.herr-tabs__btn--active]="activeTab === 'visita'" (click)="setTab('visita')">
+      Visita
     </button>
     <button type="button" class="herr-tabs__btn" [class.herr-tabs__btn--active]="activeTab === 'camara'" (click)="setTab('camara')">
       Carga cámara (kW / HP)
@@ -116,6 +122,58 @@
       Medí succión y línea de líquido con el mismo refrigerante. Calcula <strong>recalentamiento</strong> (succión) y
       <strong>subenfriamiento</strong> (líquido antes de la válvula) y sugerencias orientativas de diagnóstico.
     </p>
+
+    <details class="herr-cloud-opt" *ngIf="hasCloudImport">
+      <summary class="herr-cloud-opt__summary">Opcional: lecturas desde equipos en la nube</summary>
+      <p class="herr-cloud-opt__lead">
+        Solo rellena las calculadoras en esta pantalla. <strong>No cambia firmware ni parámetros</strong> del equipo.
+      </p>
+
+      <div class="herr-cloud-opt__block" *ngIf="pr500List.length">
+        <h3 class="herr-subpanel__title">PR500 — presión y succión</h3>
+        <label class="herr-field herr-field--span2">
+          <span class="herr-field__label">Central PR500</span>
+          <select class="herr-field__input" [(ngModel)]="pr500PickId">
+            <option value="">— Elegir —</option>
+            <option *ngFor="let p of pr500List" [value]="p.id">{{ p.name }}{{ p.online ? '' : ' (offline)' }}</option>
+          </select>
+        </label>
+        <button type="button" class="herr-btn herr-btn--ghost" [disabled]="!pr500PickId" (click)="applyPr500ToSuperheat()">
+          Aplicar a recalentamiento
+        </button>
+      </div>
+
+      <div class="herr-cloud-opt__block" *ngIf="combistatoList.length">
+        <h3 class="herr-subpanel__title">PRO300 — sondas S1 / S2</h3>
+        <p class="herr-subpanel__hint">No mide presión de manifold. S1 útil para T° de cámara; S2 para evaporador/deshielo.</p>
+        <label class="herr-field herr-field--span2">
+          <span class="herr-field__label">Combistato PRO300</span>
+          <select class="herr-field__input" [(ngModel)]="pro300PickId">
+            <option value="">— Elegir —</option>
+            <option *ngFor="let c of combistatoList" [value]="c.id">{{ c.name }}{{ c.online ? '' : ' (offline)' }}</option>
+          </select>
+        </label>
+        <button type="button" class="herr-btn herr-btn--ghost" [disabled]="!pro300PickId" (click)="applyPro300Temps()">
+          Aplicar temperaturas (cámara)
+        </button>
+      </div>
+
+      <div class="herr-cloud-opt__block" *ngIf="pro400CloudDevices.length">
+        <h3 class="herr-subpanel__title">PRO400 — sonda en panel</h3>
+        <label class="herr-field herr-field--span2">
+          <span class="herr-field__label">Panel PRO400</span>
+          <select class="herr-field__input" [(ngModel)]="pro400PickId">
+            <option value="">— Elegir —</option>
+            <option *ngFor="let d of pro400CloudDevices" [value]="d.id">{{ d.name }}{{ d.online ? '' : ' (offline)' }}</option>
+          </select>
+        </label>
+        <button type="button" class="herr-btn herr-btn--ghost" [disabled]="!pro400PickId" (click)="applyPro400Temps()">
+          Aplicar temperatura (cámara)
+        </button>
+      </div>
+
+      <p class="herr-result__hint" *ngIf="cloudImportHint">{{ cloudImportHint }}</p>
+    </details>
 
     <label class="herr-field herr-field--span2">
       <span class="herr-field__label">Refrigerante</span>
@@ -229,7 +287,207 @@
       <p class="herr-result__hint">{{ sc.hint }}</p>
     </article>
 
+    <h2 class="herr-subpanel__title">Filtro deshidratador (ΔT)</h2>
+    <p class="herr-subpanel__hint">Sondas en línea de líquido: una antes y otra después del filtro (misma condición de carga).</p>
+    <div class="herr-controls herr-controls--grid">
+      <label class="herr-field">
+        <span class="herr-field__label">T antes del filtro (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="filtroInDraft" inputmode="decimal" placeholder="Ej. 32" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">T después del filtro (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="filtroOutDraft" inputmode="decimal" placeholder="Ej. 30" />
+      </label>
+    </div>
+    <article
+      class="herr-result"
+      *ngIf="filterDeltaResult as fd"
+      [class.herr-result--ok]="fd.severity === 'ok'"
+      [class.herr-result--low]="fd.severity === 'warn'"
+      [class.herr-result--high]="fd.severity === 'critical'"
+    >
+      <h3 class="herr-result__title">ΔT filtro = {{ fmt(fd.deltaC, 1) }} K</h3>
+      <p class="herr-result__hint">{{ fd.hint }}</p>
+    </article>
+
     <ng-container *ngTemplateOutlet="fichaSave; context: { mode: 'sh' }"></ng-container>
+  </section>
+
+  <section class="herr-panel" *ngIf="activeTab === 'units'" aria-label="Conversor de unidades">
+    <p class="herr-panel__intro">Convertí presión, temperatura o potencia frigorífica en un solo paso (valores orientativos).</p>
+    <div class="herr-controls herr-controls--grid">
+      <label class="herr-field">
+        <span class="herr-field__label">Magnitud</span>
+        <select class="herr-field__input" [(ngModel)]="unitCategory">
+          <option value="pressure">Presión</option>
+          <option value="temp">Temperatura</option>
+          <option value="power">Potencia frigorífica</option>
+        </select>
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Valor</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="unitValueDraft" inputmode="decimal" />
+      </label>
+      <label class="herr-field" *ngIf="unitCategory === 'pressure'">
+        <span class="herr-field__label">Unidad de entrada</span>
+        <select class="herr-field__input" [(ngModel)]="unitPressureFrom">
+          <option value="bar_g">bar g</option>
+          <option value="bar_a">bar a</option>
+          <option value="psi_g">psi g</option>
+          <option value="psi_a">psi a</option>
+          <option value="kpa_g">kPa g</option>
+        </select>
+      </label>
+      <label class="herr-field" *ngIf="unitCategory === 'temp'">
+        <span class="herr-field__label">Unidad de entrada</span>
+        <select class="herr-field__input" [(ngModel)]="unitTempFrom">
+          <option value="c">°C</option>
+          <option value="f">°F</option>
+          <option value="k">K</option>
+        </select>
+      </label>
+      <label class="herr-field" *ngIf="unitCategory === 'power'">
+        <span class="herr-field__label">Unidad de entrada</span>
+        <select class="herr-field__input" [(ngModel)]="unitPowerFrom">
+          <option value="kw">kW</option>
+          <option value="tr">TR</option>
+          <option value="hp">HP</option>
+          <option value="btu_h">BTU/h</option>
+        </select>
+      </label>
+    </div>
+    <div class="herr-table-wrap" *ngIf="unitConvertRows.length">
+      <table class="herr-table">
+        <caption class="herr-table__caption">Equivalencias</caption>
+        <thead>
+          <tr>
+            <th scope="col">Unidad</th>
+            <th scope="col">Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of unitConvertRows">
+            <td>{{ row.label }}</td>
+            <td><strong>{{ row.value }}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="herr-panel" *ngIf="activeTab === 'visita'" aria-label="Bitácora de visita">
+    <p class="herr-panel__intro">
+      Registrá mediciones de obra en la <strong>ficha del equipo</strong> (historial + presiones y recalentamiento en la ficha).
+    </p>
+    <div class="herr-ficha" *ngIf="fichaEnabled">
+      <div class="herr-controls herr-controls--grid">
+        <label class="herr-field">
+          <span class="herr-field__label">Panel</span>
+          <select class="herr-field__input" [(ngModel)]="fichaDeviceId" (ngModelChange)="onFichaDeviceChange()">
+            <option value="">— Elegir panel —</option>
+            <option *ngFor="let d of cloudDevices" [value]="d.id">{{ d.name }}</option>
+          </select>
+        </label>
+        <label class="herr-field">
+          <span class="herr-field__label">Ficha</span>
+          <select
+            class="herr-field__input"
+            [(ngModel)]="fichaId"
+            (ngModelChange)="onFichaIdChange()"
+            [disabled]="fichaLoading || !fichaRows.length"
+          >
+            <option value="">— Elegir ficha —</option>
+            <option *ngFor="let f of fichaRows" [value]="f.id">{{ f.label }}</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <p class="herr-disclaimer herr-disclaimer--tight" *ngIf="!fichaEnabled">
+      Necesitás un panel PRO400 en nube con ficha de equipo para guardar visitas.
+    </p>
+
+    <div class="herr-controls herr-controls--grid" *ngIf="fichaId">
+      <label class="herr-field herr-field--span2">
+        <span class="herr-field__label">Fecha y hora de visita</span>
+        <input type="datetime-local" class="herr-field__input" [(ngModel)]="visitAtDraft" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">P. baja (bar g)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="visitPbDraft" inputmode="decimal" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">P. alta (bar g)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="visitPaDraft" inputmode="decimal" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Recalentamiento (K)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="visitShDraft" inputmode="decimal" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Subenfriamiento (K)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="visitScDraft" inputmode="decimal" />
+      </label>
+      <label class="herr-field">
+        <span class="herr-field__label">Filtro ΔT (K)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="visitFilterDtDraft" inputmode="decimal" />
+      </label>
+      <label class="herr-field herr-field--span2">
+        <span class="herr-field__label">Observaciones</span>
+        <textarea class="herr-field__input" rows="3" [(ngModel)]="visitNoteDraft" placeholder="Estado del equipo, trabajos realizados…"></textarea>
+      </label>
+    </div>
+    <details class="herr-cloud-opt" *ngIf="hasCloudImport && fichaId">
+      <summary class="herr-cloud-opt__summary">Opcional: referencia desde equipos en la nube</summary>
+      <p class="herr-cloud-opt__lead">Agrega una línea en observaciones con la última telemetría (sin modificar el equipo).</p>
+      <div class="herr-controls herr-controls--grid">
+        <label class="herr-field" *ngIf="pr500List.length">
+          <span class="herr-field__label">PR500</span>
+          <select class="herr-field__input" [(ngModel)]="pr500PickId">
+            <option value="">—</option>
+            <option *ngFor="let p of pr500List" [value]="p.id">{{ p.name }}</option>
+          </select>
+        </label>
+        <label class="herr-field" *ngIf="combistatoList.length">
+          <span class="herr-field__label">PRO300</span>
+          <select class="herr-field__input" [(ngModel)]="pro300PickId">
+            <option value="">—</option>
+            <option *ngFor="let c of combistatoList" [value]="c.id">{{ c.name }}</option>
+          </select>
+        </label>
+        <label class="herr-field" *ngIf="pro400CloudDevices.length">
+          <span class="herr-field__label">PRO400</span>
+          <select class="herr-field__input" [(ngModel)]="pro400PickId">
+            <option value="">—</option>
+            <option *ngFor="let d of pro400CloudDevices" [value]="d.id">{{ d.name }}</option>
+          </select>
+        </label>
+      </div>
+      <button type="button" class="herr-btn herr-btn--ghost" (click)="appendCloudTempsToVisit()">
+        Agregar a observaciones
+      </button>
+    </details>
+
+    <div class="herr-visit-actions" *ngIf="fichaId">
+      <button type="button" class="herr-btn herr-btn--ghost" (click)="fillVisitFromCalculators()">
+        Copiar desde calculadoras
+      </button>
+      <button type="button" class="herr-btn herr-btn--primary" [disabled]="fichaSaving" (click)="saveFieldVisit()">
+        Guardar visita
+      </button>
+    </div>
+
+    <h2 class="herr-subpanel__title" *ngIf="fichaId">Historial en esta ficha</h2>
+    <p class="herr-subpanel__hint" *ngIf="fichaId && visitLogLoading">Cargando…</p>
+    <ul class="herr-visit-log" *ngIf="fichaId && !visitLogLoading">
+      <li class="herr-visit-log__item" *ngFor="let log of visitLogs">
+        <div class="herr-visit-log__meta">
+          <time>{{ visitLogLabel(log.occurredAt) }}</time>
+          <button type="button" class="herr-visit-log__del" (click)="deleteVisitLog(log)">Eliminar</button>
+        </div>
+        <pre class="herr-visit-log__note">{{ log.note }}</pre>
+      </li>
+      <li class="herr-subpanel__hint" *ngIf="!visitLogs.length">Sin visitas registradas aún.</li>
+    </ul>
   </section>
 
   <section class="herr-panel" *ngIf="activeTab === 'camara'" aria-label="Carga frigorífica de cámara">
@@ -556,7 +814,12 @@
         </label>
         <label class="herr-field">
           <span class="herr-field__label">Ficha</span>
-          <select class="herr-field__input" [(ngModel)]="fichaId" [disabled]="fichaLoading || !fichaRows.length">
+          <select
+            class="herr-field__input"
+            [(ngModel)]="fichaId"
+            (ngModelChange)="onFichaIdChange()"
+            [disabled]="fichaLoading || !fichaRows.length"
+          >
             <option value="">— Elegir ficha —</option>
             <option *ngFor="let f of fichaRows" [value]="f.id">{{ f.label }}</option>
           </select>

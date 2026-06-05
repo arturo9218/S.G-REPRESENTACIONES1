@@ -96,7 +96,7 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
         key: 'F06',
         code: 'AR10',
         label: 'Intervalo entre deshielos (min)',
-        help: 'Tiempo entre fin de un deshielo (o arranque) y el siguiente deshielo programado.',
+        help: 'Minutos en refrigeración tras terminar el goteo (AR15) antes del próximo deshielo. No incluye deshielo ni goteo.',
         step: 1,
       },
       {

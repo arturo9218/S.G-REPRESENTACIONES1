@@ -1,0 +1,291 @@
+<div class="pre">
+  <header class="pre-hero">
+    <p class="pre-hero__kicker">Presupuestos</p>
+    <h1 class="pre-hero__title">Presupuesto técnico profesional</h1>
+    <p class="pre-hero__lead">
+      Relevá el circuito frigorífico por partes (evaporador, condensador / compresor, líneas), cargá tu logo y
+      datos del técnico, y exportá un PDF para el cliente.
+    </p>
+  </header>
+
+  <p class="pre-error" *ngIf="loadError" role="alert">{{ loadError }}</p>
+  <p class="pre-loading" *ngIf="loading && !loadError">Cargando presupuestos…</p>
+
+  <div class="pre-layout" *ngIf="!loadError">
+    <aside class="pre-list" aria-label="Mis presupuestos">
+      <div class="pre-list__head">
+        <h2 class="pre-list__title">Mis presupuestos</h2>
+        <button type="button" class="pre-btn pre-btn--primary pre-btn--sm" (click)="startNew()">+ Nuevo</button>
+      </div>
+      <p class="pre-list__empty" *ngIf="!loading && !list.length">Todavía no tenés presupuestos guardados.</p>
+      <button
+        type="button"
+        class="pre-list__item"
+        *ngFor="let row of list"
+        [class.pre-list__item--active]="editId === row.id"
+        (click)="loadRow(row)"
+      >
+        <span class="pre-list__item-name">{{ listLabel(row) }}</span>
+        <span class="pre-list__item-meta">{{ listMeta(row) }}</span>
+      </button>
+    </aside>
+
+    <section class="pre-editor" aria-label="Editor de presupuesto">
+      <!-- Datos profesionales -->
+      <div class="pre-block">
+        <h2 class="pre-block__title">Tu empresa y técnico</h2>
+        <p class="pre-block__hint">Aparecen en el encabezado del PDF. Podés guardarlos como predeterminados.</p>
+        <div class="pre-pro">
+          <div class="pre-pro__logo">
+            <div class="pre-pro__logo-preview" *ngIf="professional.logoDataUrl">
+              <img [src]="professional.logoDataUrl" alt="Logo" />
+            </div>
+            <div class="pre-pro__logo-placeholder" *ngIf="!professional.logoDataUrl">Sin logo</div>
+            <label class="pre-btn pre-btn--ghost pre-btn--sm">
+              Subir logo
+              <input type="file" accept="image/png,image/jpeg,image/webp" hidden (change)="onLogoSelected($event)" />
+            </label>
+            <button type="button" class="pre-btn pre-btn--ghost pre-btn--sm" *ngIf="professional.logoDataUrl" (click)="clearLogo()">
+              Quitar
+            </button>
+          </div>
+          <div class="pre-pro__fields">
+            <label class="pre-field">
+              <span>Empresa / taller</span>
+              <input type="text" [(ngModel)]="professional.companyName" placeholder="Nombre comercial" />
+            </label>
+            <label class="pre-field">
+              <span>Técnico responsable *</span>
+              <input type="text" [(ngModel)]="professional.technicianName" placeholder="Nombre y apellido" />
+            </label>
+            <label class="pre-field">
+              <span>Matrícula / registro</span>
+              <input type="text" [(ngModel)]="professional.technicianLicense" />
+            </label>
+            <label class="pre-field">
+              <span>Teléfono técnico</span>
+              <input type="tel" [(ngModel)]="professional.technicianPhone" />
+            </label>
+            <label class="pre-field">
+              <span>Email técnico</span>
+              <input type="email" [(ngModel)]="professional.technicianEmail" />
+            </label>
+            <button type="button" class="pre-btn pre-btn--ghost pre-btn--sm" (click)="saveAsDefaultProfile()">
+              Guardar como mis datos por defecto
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tipo de sistema -->
+      <div class="pre-block">
+        <h2 class="pre-block__title">Tipo de instalación *</h2>
+        <div class="pre-sys-grid">
+          <button
+            type="button"
+            class="pre-sys-card"
+            *ngFor="let t of systemTypes"
+            [class.pre-sys-card--active]="systemType === t.id"
+            (click)="selectSystemType(t.id)"
+          >
+            <span class="pre-sys-card__label">{{ t.label }}</span>
+            <span class="pre-sys-card__hint">{{ t.hint }}</span>
+          </button>
+        </div>
+        <label class="pre-field pre-field--full" *ngIf="systemType === 'otro'">
+          <span>Descripción del sistema</span>
+          <input type="text" [(ngModel)]="systemTypeOther" placeholder="Ej. vitrina, túnel de congelado…" />
+        </label>
+        <div class="pre-editor__grid pre-editor__grid--3">
+          <label class="pre-field">
+            <span>Refrigerante</span>
+            <input type="text" [(ngModel)]="refrigerant" placeholder="R404A, R448A, R134a…" />
+          </label>
+          <label class="pre-field">
+            <span>Capacidad / potencia</span>
+            <input type="text" [(ngModel)]="nominalCapacity" placeholder="HP, kW, m³…" />
+          </label>
+          <label class="pre-field">
+            <span>Referencia</span>
+            <input type="text" [(ngModel)]="referenceCode" />
+          </label>
+        </div>
+      </div>
+
+      <!-- Circuito frigorífico -->
+      <div class="pre-block">
+        <h2 class="pre-block__title">Circuito frigorífico — relevamiento</h2>
+        <p class="pre-block__hint">
+          Documentá cómo está compuesto cada tramo del circuito y qué problema presenta cada componente.
+        </p>
+        <label class="pre-field pre-field--full">
+          <span>Problema general reportado por el cliente</span>
+          <textarea rows="2" [(ngModel)]="circuitSurvey.generalProblem"></textarea>
+        </label>
+        <label class="pre-field pre-field--full">
+          <span>Diagnóstico / observaciones técnicas</span>
+          <textarea rows="2" [(ngModel)]="circuitSurvey.generalDiagnosis"></textarea>
+        </label>
+
+        <article class="pre-circuit" *ngFor="let sec of circuitSurvey.sections">
+          <header class="pre-circuit__head">
+            <h3>{{ sec.title }}</h3>
+            <p>{{ sec.key === 'evaporador' ? 'Lado baja presión' : sec.key === 'condensador_compresor' ? 'Compresión y descarga' : 'Tuberías y controles' }}</p>
+          </header>
+          <label class="pre-field pre-field--full">
+            <span>Composición — cómo está armado</span>
+            <textarea
+              rows="2"
+              [(ngModel)]="sec.composition"
+              placeholder="Ej. 2 serpentines, forzador techo, TXV Danfoss, deshielo eléctrico…"
+            ></textarea>
+          </label>
+          <label class="pre-field">
+            <span>Problema en esta sección</span>
+            <textarea rows="2" [(ngModel)]="sec.problemReported"></textarea>
+          </label>
+          <label class="pre-field">
+            <span>Trabajo propuesto</span>
+            <textarea rows="2" [(ngModel)]="sec.workProposed"></textarea>
+          </label>
+
+          <div class="pre-comp-table" role="table" [attr.aria-label]="'Componentes ' + sec.title">
+            <div class="pre-comp-table__row pre-comp-table__row--head" role="row">
+              <span role="columnheader">Componente</span>
+              <span role="columnheader">Presente</span>
+              <span role="columnheader">Estado</span>
+              <span role="columnheader">Notas</span>
+            </div>
+            <div class="pre-comp-table__row" role="row" *ngFor="let c of sec.components">
+              <span class="pre-comp-table__name" role="cell">{{ c.label }}</span>
+              <span role="cell">
+                <input
+                  type="checkbox"
+                  [checked]="c.present"
+                  (change)="onComponentPresent(sec, c.key, $any($event.target).checked)"
+                  [attr.aria-label]="'Presente: ' + c.label"
+                />
+              </span>
+              <span role="cell">
+                <select
+                  [ngModel]="c.status"
+                  (ngModelChange)="onComponentStatus(sec, c.key, $event)"
+                >
+                  <option *ngFor="let st of componentStatuses" [ngValue]="st.id">{{ st.label }}</option>
+                </select>
+              </span>
+              <span role="cell">
+                <input
+                  type="text"
+                  [ngModel]="c.notes"
+                  (ngModelChange)="onComponentNotes(sec, c.key, $event)"
+                  placeholder="Detalle"
+                />
+              </span>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <!-- Cliente e ítems -->
+      <div class="pre-block">
+        <h2 class="pre-block__title">Cliente y cotización</h2>
+        <div class="pre-editor__grid">
+          <label class="pre-field">
+            <span>Estado</span>
+            <select [(ngModel)]="status">
+              <option *ngFor="let s of statusOptions" [ngValue]="s.value">{{ s.label }}</option>
+            </select>
+          </label>
+          <label class="pre-field pre-field--wide">
+            <span>Cliente *</span>
+            <input type="text" [(ngModel)]="clientName" />
+          </label>
+          <label class="pre-field">
+            <span>Teléfono</span>
+            <input type="tel" [(ngModel)]="clientPhone" />
+          </label>
+          <label class="pre-field">
+            <span>Email</span>
+            <input type="email" [(ngModel)]="clientEmail" />
+          </label>
+          <label class="pre-field pre-field--wide">
+            <span>Dirección / obra</span>
+            <input type="text" [(ngModel)]="siteAddress" />
+          </label>
+          <label class="pre-field pre-field--full">
+            <span>Resumen del trabajo</span>
+            <textarea rows="2" [(ngModel)]="workDescription"></textarea>
+          </label>
+        </div>
+
+        <div class="pre-lines">
+          <div class="pre-lines__head">
+            <h3>Ítems presupuestados</h3>
+            <button type="button" class="pre-btn pre-btn--ghost pre-btn--sm" (click)="addLine()">+ Línea</button>
+          </div>
+          <div class="pre-line" *ngFor="let item of items">
+            <input class="pre-line__desc" type="text" [(ngModel)]="item.description" placeholder="Descripción" />
+            <input class="pre-line__qty" type="number" min="0" step="0.01" [(ngModel)]="item.quantity" />
+            <input class="pre-line__unit" type="text" [(ngModel)]="item.unit" placeholder="u." />
+            <input class="pre-line__price" type="number" min="0" step="0.01" [(ngModel)]="item.unitPrice" />
+            <span class="pre-line__total">{{ formatMoney(lineTotal(item)) }}</span>
+            <button
+              type="button"
+              class="pre-line__del"
+              (click)="removeLine(item.id)"
+              [disabled]="items.length <= 1"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <div class="pre-totals">
+          <label class="pre-field">
+            <span>Moneda</span>
+            <select [(ngModel)]="currency">
+              <option value="ARS">ARS</option>
+              <option value="USD">USD</option>
+            </select>
+          </label>
+          <label class="pre-field">
+            <span>Descuento %</span>
+            <input type="number" min="0" max="100" step="0.5" [(ngModel)]="discountPercent" />
+          </label>
+          <label class="pre-field">
+            <span>IVA %</span>
+            <input type="number" min="0" max="100" step="0.5" [(ngModel)]="taxPercent" />
+          </label>
+          <label class="pre-field">
+            <span>Válido hasta</span>
+            <input type="date" [(ngModel)]="validUntil" />
+          </label>
+          <div class="pre-totals__box">
+            <p>Subtotal: <strong>{{ formatMoney(totals.subtotal) }}</strong></p>
+            <p *ngIf="totals.discountAmount > 0">Descuento: <strong>-{{ formatMoney(totals.discountAmount) }}</strong></p>
+            <p>IVA: <strong>{{ formatMoney(totals.taxAmount) }}</strong></p>
+            <p class="pre-totals__grand">Total: <strong>{{ formatMoney(totals.total) }}</strong></p>
+          </div>
+        </div>
+
+        <label class="pre-field pre-field--full">
+          <span>Observaciones (condiciones, garantía)</span>
+          <textarea rows="2" [(ngModel)]="notes"></textarea>
+        </label>
+      </div>
+
+      <div class="pre-actions">
+        <button type="button" class="pre-btn pre-btn--primary" (click)="save()" [disabled]="saving">
+          {{ saving ? 'Guardando…' : (editId ? 'Guardar cambios' : 'Guardar presupuesto') }}
+        </button>
+        <button type="button" class="pre-btn pre-btn--ghost" (click)="exportPdf()" [disabled]="exporting">
+          {{ exporting ? 'Generando…' : 'Exportar PDF profesional' }}
+        </button>
+        <button type="button" class="pre-btn pre-btn--danger" *ngIf="editId" (click)="removeCurrent()">
+          Eliminar
+        </button>
+      </div>
+    </section>
+  </div>
+</div>

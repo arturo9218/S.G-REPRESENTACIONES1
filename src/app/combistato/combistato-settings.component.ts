@@ -70,9 +70,12 @@ export class CombistatoSettingsComponent implements OnChanges {
     if (!this.model) return;
     // Mostramos SIEMPRE lo que tipeó el usuario; el modelo solo se actualiza si
     // hay un número finito. Eso permite tipear "-" → "-1" → "-18" sin que el
-    // input se borre/revierta entre keystrokes.
-    this.drafts[key as string] = v;
-    const n = parseFloat(String(v).replace(',', '.'));
+    // input se borre/revierta entre keystrokes. En móvil, inputmode=decimal no
+    // trae tecla "-" — usamos inputmode=text en el template.
+    const cleaned = String(v).replace(',', '.').trim();
+    this.drafts[key as string] = cleaned;
+    if (cleaned === '-' || cleaned === '+') return;
+    const n = parseFloat(cleaned);
     if (Number.isFinite(n)) {
       this.model[key] = n;
     }

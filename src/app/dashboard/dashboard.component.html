@@ -88,6 +88,31 @@
       <button
         type="button"
         class="shell__nav-item"
+        [class.shell__nav-item--active]="shellRoute === 'comunidad'"
+        [attr.aria-current]="shellRoute === 'comunidad' ? 'page' : null"
+        (click)="scrollToSection('comunidad')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        <span>Comunidad</span>
+      </button>
+      <button
+        type="button"
+        class="shell__nav-item"
+        [class.shell__nav-item--active]="shellRoute === 'presupuestos'"
+        [attr.aria-current]="shellRoute === 'presupuestos' ? 'page' : null"
+        (click)="scrollToSection('presupuestos')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+        </svg>
+        <span>Presupuestos</span>
+      </button>
+      <button
+        type="button"
+        class="shell__nav-item"
         [class.shell__nav-item--active]="shellRoute === 'settings'"
         [attr.aria-current]="shellRoute === 'settings' ? 'page' : null"
         (click)="scrollToSection('settings')"
@@ -165,7 +190,7 @@
       </div>
     </header>
 
-    <div class="topbar-sub" *ngIf="shellRoute !== 'inicio' && shellRoute !== 'ayuda' && shellRoute !== 'herramientas' && shellRoute !== 'devices' && hasAnyEquipment && lastDataRefreshLabel" role="status">
+    <div class="topbar-sub" *ngIf="shellRoute !== 'inicio' && shellRoute !== 'ayuda' && shellRoute !== 'herramientas' && shellRoute !== 'comunidad' && shellRoute !== 'presupuestos' && shellRoute !== 'devices' && hasAnyEquipment && lastDataRefreshLabel" role="status">
       <span class="topbar-sub__text">
         Última lectura en datos: <strong>{{ lastDataRefreshLabel }}</strong>
       </span>
@@ -190,6 +215,8 @@
         (goAlerts)="scrollToSection('alerts')"
         (goAyuda)="scrollToSection('ayuda')"
         (goHerramientas)="scrollToSection('herramientas')"
+        (goComunidad)="scrollToSection('comunidad')"
+        (goPresupuestos)="scrollToSection('presupuestos')"
         (addEquipment)="openAddEquipment($event)"
         (openFleetRow)="openInicioFleetRow($event)"
       ></app-inicio-page>
@@ -201,7 +228,11 @@
         (fichaSaved)="onHerramientasFichaSaved($event)"
       ></app-herramientas-page>
 
-      <ng-container *ngIf="shellRoute !== 'inicio' && shellRoute !== 'ayuda' && shellRoute !== 'herramientas' && shellRoute !== 'settings' && shellRoute !== 'equipment'">
+      <app-comunidad-page *ngIf="shellRoute === 'comunidad'"></app-comunidad-page>
+
+      <app-presupuestos-page *ngIf="shellRoute === 'presupuestos'"></app-presupuestos-page>
+
+      <ng-container *ngIf="shellRoute !== 'inicio' && shellRoute !== 'ayuda' && shellRoute !== 'herramientas' && shellRoute !== 'comunidad' && shellRoute !== 'presupuestos' && shellRoute !== 'settings' && shellRoute !== 'equipment'">
       <section id="section-kpi" class="kpi-row" aria-label="Resumen" *ngIf="!isDeviceSoloView">
         <article class="kpi-card">
           <div class="kpi-card__icon kpi-card__icon--slate">
@@ -689,21 +720,62 @@
                           >°C</span
                         >
                       </span>
-                      <div class="device-card__sensor-foot">
-                        <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
-                        <a
-                          class="device-card__chart-link"
-                          [routerLink]="['/chart']"
-                          [queryParams]="{ deviceId: d.id }"
-                          (click)="$event.stopPropagation()"
-                          title="Ver gráfico"
-                          aria-label="Ver gráfico de temperaturas"
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                            <path d="M3 3v18h18" />
-                            <path d="M7 16l4-4 3 3 5-6" />
-                          </svg>
-                        </a>
+                      <div class="device-card__sensor-foot" [class.device-card__sensor-foot--relays]="d.equipmentKind === 'pro400'">
+                        <ng-container *ngIf="d.equipmentKind === 'pro400'; else deviceFootDefault">
+                          <span
+                            class="device-card__relay-pill device-card__relay-pill--static"
+                            [class.device-card__relay-pill--on]="d.lastCompOn === true || d.lastDefrostOn === true"
+                            title="Relé (compresor o deshielo)"
+                            >REL</span
+                          >
+                          <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
+                          <a
+                            class="device-card__chart-link"
+                            [routerLink]="['/chart']"
+                            [queryParams]="{ deviceId: d.id }"
+                            (click)="$event.stopPropagation()"
+                            title="Ver gráfico"
+                            aria-label="Ver gráfico"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                              <path d="M3 3v18h18" />
+                              <path d="M7 16l4-4 3 3 5-6" />
+                            </svg>
+                          </a>
+                        </ng-container>
+                        <ng-template #deviceFootDefault>
+                          <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
+                          <a
+                            class="device-card__chart-link"
+                            [routerLink]="['/chart']"
+                            [queryParams]="{ deviceId: d.id }"
+                            (click)="$event.stopPropagation()"
+                            title="Ver gráfico"
+                            aria-label="Ver gráfico de temperaturas"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                              <path d="M3 3v18h18" />
+                              <path d="M7 16l4-4 3 3 5-6" />
+                            </svg>
+                          </a>
+                        </ng-template>
+                      </div>
+                    </div>
+                    <div
+                      class="device-card__defrost-strip"
+                      *ngIf="d.equipmentKind === 'pro400' && d.lastPhase"
+                      [attr.data-phase]="d.lastPhase"
+                    >
+                      <span class="device-card__defrost-pill">
+                        {{ combistatoPhaseLabel(d.lastPhase) }}
+                      </span>
+                      <div class="device-card__defrost-info">
+                        <ng-container *ngIf="devicePro400PhaseHasTimer(d)">
+                          <span><strong>Transcurrido</strong> {{ formatMinSec(d.lastPhaseElapsedS) }}</span>
+                          <span *ngIf="devicePro400PhaseRemainingS(d) != null"
+                            ><strong>Faltan</strong> {{ formatMinSec(devicePro400PhaseRemainingS(d)) }}</span
+                          >
+                        </ng-container>
                       </div>
                     </div>
                   </ng-container>
@@ -2760,8 +2832,17 @@
             </fieldset>
           </article>
 
+          <app-pro400-settings
+            *ngIf="selectedDevice?.equipmentKind === 'pro400'"
+            [deviceId]="selectedDeviceId"
+            [canEdit]="!selectedDeviceCloudReadOnly"
+          ></app-pro400-settings>
+
           <article id="section-settings" class="card" aria-labelledby="settings-notify-heading">
             <h2 id="settings-notify-heading" class="card__title card__title--sm">Notificaciones temperatura y corriente</h2>
+            <p class="card__hint card__hint--tight" *ngIf="selectedDevice?.equipmentKind === 'pro400'">
+              Alarmas push: definí <strong>mínimo y máximo</strong> del sensor 1. El equipo envía temperatura; si sale del rango, la app notifica.
+            </p>
             <div class="notify-panel" *ngIf="selectedDevice as sd; else noDeviceSelectedSettings">
               <p class="notify-panel__device">{{ sd.name }}</p>
               <fieldset class="notify-panel-fieldset" [disabled]="selectedDeviceCloudReadOnly">

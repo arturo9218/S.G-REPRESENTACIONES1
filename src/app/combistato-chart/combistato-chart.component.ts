@@ -8,6 +8,7 @@ import {
   ViewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
 import { environment } from '../../environments/environment';
@@ -131,6 +132,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   fullscreenRoot!: ElementRef<HTMLElement>;
 
   private sub?: Subscription;
+  private realtimeChannel: RealtimeChannel | null = null;
   private readonly onFullscreenChange = (): void => {
     this.zone.run(() => {
       this.isFullscreenUi = isCurrentFullscreen(this.fullscreenRoot?.nativeElement ?? null);
@@ -162,6 +164,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.sub?.unsubscribe();
+    this.teardownRealtime();
     document.removeEventListener('fullscreenchange', this.onFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', this.onFullscreenChange as EventListener);
     const el = this.fullscreenRoot?.nativeElement;
@@ -283,6 +286,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     }
     this.loading = true;
     this.error = '';
+    this.teardownRealtime();
     try {
       const session = await this.auth.getSession();
       if (!session?.user) {
@@ -338,9 +342,72 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
         this.chartZoomHi = 1;
       }
       this.rebuildChartGeometry();
+      this.setupRealtime();
     } finally {
       this.loading = false;
     }
+  }
+
+  private teardownRealtime(): void {
+    if (this.realtimeChannel != null) {
+      void this.auth.client.removeChannel(this.realtimeChannel);
+      this.realtimeChannel = null;
+    }
+  }
+
+  private setupRealtime(): void {
+    this.teardownRealtime();
+    const id = this.combistatoId;
+    if (!id || !environment.deviceCloudSync || !isSupabaseConfigured()) return;
+    this.realtimeChannel = this.auth.client
+      .channel(`combistato-chart:${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'combistato_readings',
+          filter: `combistato_id=eq.${id}`,
+        },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          this.zone.run(() => this.appendRealtimeReading(row));
+        }
+      )
+      .subscribe();
+  }
+
+  private appendRealtimeReading(row: Record<string, unknown>): void {
+    const id = typeof row['id'] === 'number' ? row['id'] : Number(row['id']);
+    const createdAt = typeof row['created_at'] === 'string' ? row['created_at'] : '';
+    const temp1 = typeof row['temp1_c'] === 'number' ? row['temp1_c'] : null;
+    if (!Number.isFinite(id) || !createdAt || temp1 == null) return;
+
+    const fromD = this.parseLocalInput(this.filterFrom);
+    const toD = this.parseLocalInput(this.filterTo);
+    const at = new Date(createdAt).getTime();
+    if (fromD && toD && (at < fromD.getTime() || at > toD.getTime())) return;
+
+    if (this.readings.some((r) => r.id === id)) return;
+
+    const reading: CombistatoReadingRow = {
+      id,
+      combistato_id: this.combistatoId!,
+      created_at: createdAt,
+      temp1_c: temp1,
+      temp2_c: typeof row['temp2_c'] === 'number' ? row['temp2_c'] : null,
+      comp_on: row['comp_on'] === true,
+      fan_on: row['fan_on'] === true,
+      defrost_on: row['defrost_on'] === true,
+      door_open: row['door_open'] === true,
+    };
+
+    this.readings = [...this.readings, reading];
+    if (this.readings.length > MAX_FETCH) {
+      this.readings = this.readings.slice(this.readings.length - MAX_FETCH);
+    }
+    this.downsample();
+    this.rebuildChartGeometry();
   }
 
   private downsample(): void {

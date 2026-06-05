@@ -1,0 +1,54 @@
+<article class="card card--combistato" *ngIf="deviceId">
+  <h2 class="card__title card__title--sm">PRO400 — parámetros AR01–AR26</h2>
+  <p class="card__hint card__hint--tight">
+    Códigos <strong>AR</strong> en la app; en el display del equipo verás <strong>A01…A26</strong> (sin AR25 ni AR27).
+    Las <strong>alarmas push</strong> se configuran abajo en «Notificaciones» (mín/máx de temperatura).
+  </p>
+
+  <p class="combistato-status" *ngIf="loading">Cargando…</p>
+
+  <fieldset class="notify-panel-fieldset" *ngIf="model as m" [disabled]="!canEdit || loading || saving">
+    <ng-container *ngFor="let sec of sections">
+      <details class="combistato-details" [open]="sec.id === 'termo'">
+        <summary class="combistato-details__summary">{{ sec.title }}</summary>
+        <p class="combistato-section-intro" *ngIf="sec.intro">{{ sec.intro }}</p>
+        <div class="notify-panel notify-panel__grid combistato-details__grid">
+          <label class="notify-panel__field notify-panel__field--param" *ngFor="let f of sec.fields">
+            <span class="notify-panel__field-label">
+              <span class="param-code">{{ f.code }}</span>
+              <span class="param-label-text">{{ f.label }}</span>
+            </span>
+            <span class="param-help" *ngIf="f.help">{{ f.help }}</span>
+            <input
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              [ngModel]="drafts[f.key + '']"
+              (ngModelChange)="onDraftChange(f.key, $event)"
+              (blur)="onFieldBlur(f.key)"
+              [name]="'p4-' + sec.id + '-' + (f.key + '')"
+            />
+          </label>
+        </div>
+      </details>
+    </ng-container>
+  </fieldset>
+
+  <p
+    class="sensor-labels-feedback"
+    *ngIf="feedback"
+    [class.sensor-labels-feedback--warn]="feedback.includes('No se pudo')"
+  >
+    {{ feedback }}
+  </p>
+
+  <div class="combistato-actions">
+    <button type="button" class="btn btn--secondary" [disabled]="loading" (click)="reload()">Recargar</button>
+    <button type="button" class="btn btn--secondary" [disabled]="!canEdit || loading" (click)="resetDefaults()">
+      Valores por defecto
+    </button>
+    <button type="button" class="btn btn--primary" [disabled]="!canEdit || loading || saving" (click)="save()">
+      {{ saving ? 'Guardando…' : 'Guardar parámetros' }}
+    </button>
+  </div>
+</article>

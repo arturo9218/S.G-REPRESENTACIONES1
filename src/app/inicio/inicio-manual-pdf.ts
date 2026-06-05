@@ -203,7 +203,7 @@ class ManualPdfRenderer {
       this.doc.setFont('helvetica', 'normal');
       this.doc.setFontSize(8);
       this.doc.setTextColor(...COLORS.muted);
-      this.doc.text('S.G Representacion', this.marginL, footerY);
+      this.doc.text('AR Monitoreo', this.marginL, footerY);
 
       const pageLabel = `Pagina ${p} de ${total}`;
       this.doc.setFontSize(8);

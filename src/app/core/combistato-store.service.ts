@@ -1,4 +1,5 @@
 import { Injectable, NgZone } from '@angular/core';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { BehaviorSubject } from 'rxjs';
 import { environment } from '../../environments/environment';
 import {
@@ -31,6 +32,8 @@ export class CombistatoStoreService {
   private userScopeKey = 'anon';
   private readonly subject = new BehaviorSubject<DashboardCombistato[]>([]);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
+  private realtimeChannel: RealtimeChannel | null = null;
+  private realtimeCombistatoIds: string[] = [];
   readonly combistatos$ = this.subject.asObservable();
 
   constructor(
@@ -42,6 +45,7 @@ export class CombistatoStoreService {
       this.userScopeKey = session?.user?.id ?? 'anon';
       if (!session?.user?.id) {
         this.clearCombistatoPoll();
+        this.clearCombistatoRealtime();
       }
       this.zone.run(() => void this.hydrateFromCloud());
     });
@@ -151,17 +155,167 @@ export class CombistatoStoreService {
     }
   }
 
+  private clearCombistatoRealtime(): void {
+    if (this.realtimeChannel != null) {
+      void this.auth.client.removeChannel(this.realtimeChannel);
+      this.realtimeChannel = null;
+    }
+    this.realtimeCombistatoIds = [];
+  }
+
+  private combistatoPollIntervalMs(): number {
+    const env = environment as {
+      combistatoReadingsPollIntervalMs?: number;
+      readingsPollIntervalMs?: number;
+    };
+    if (
+      typeof env.combistatoReadingsPollIntervalMs === 'number' &&
+      env.combistatoReadingsPollIntervalMs >= 10000
+    ) {
+      return env.combistatoReadingsPollIntervalMs;
+    }
+    if (typeof env.readingsPollIntervalMs === 'number' && env.readingsPollIntervalMs >= 2000) {
+      return env.readingsPollIntervalMs;
+    }
+    return 45000;
+  }
+
   private ensureCombistatoPoll(): void {
     if (this.pollHandle != null) return;
     if (!this.cloudEnabled() || this.userScopeKey === 'anon') return;
-    const pollMs =
-      typeof environment.readingsPollIntervalMs === 'number' &&
-      environment.readingsPollIntervalMs >= 2000
-        ? environment.readingsPollIntervalMs
-        : 4000;
+    const pollMs = this.combistatoPollIntervalMs();
     this.pollHandle = setInterval(() => {
       void this.hydrateFromCloud();
     }, pollMs);
+  }
+
+  /** Aplica una fila nueva de combistato_readings al snapshot del panel (sin reconsultar todo). */
+  private applyCombistatoReadingRow(
+    combistatoId: string,
+    row: {
+      created_at?: string;
+      temp1_c?: number | null;
+      temp2_c?: number | null;
+      comp_on?: boolean | null;
+      fan_on?: boolean | null;
+      defrost_on?: boolean | null;
+      door_open?: boolean | null;
+      phase?: string | null;
+      phase_elapsed_s?: number | null;
+      phase_total_s?: number | null;
+      comp_forced_remaining_s?: number | null;
+      fan_forced_remaining_s?: number | null;
+    }
+  ): void {
+    const list = this.subject.value;
+    const idx = list.findIndex((c) => c.id === combistatoId);
+    if (idx < 0) return;
+    const prev = list[idx];
+    const createdAt =
+      typeof row.created_at === 'string' && row.created_at.trim()
+        ? row.created_at.trim()
+        : prev.lastSeenAt;
+    const updated: DashboardCombistato = {
+      ...prev,
+      lastSeenAt: createdAt ?? prev.lastSeenAt,
+      lastSeenLabel: createdAt ? this.formatUpdatedLabel(createdAt) : prev.lastSeenLabel,
+      online: this.combistatoOnlineFromLastSeen(createdAt ?? prev.lastSeenAt),
+      lastTemp1C: typeof row.temp1_c === 'number' ? row.temp1_c : prev.lastTemp1C,
+      lastTemp2C:
+        row.temp2_c === null || row.temp2_c === undefined
+          ? prev.lastTemp2C
+          : typeof row.temp2_c === 'number'
+            ? row.temp2_c
+            : prev.lastTemp2C,
+      lastCompOn: typeof row.comp_on === 'boolean' ? row.comp_on : prev.lastCompOn,
+      lastFanOn: typeof row.fan_on === 'boolean' ? row.fan_on : prev.lastFanOn,
+      lastDefrostOn: typeof row.defrost_on === 'boolean' ? row.defrost_on : prev.lastDefrostOn,
+      lastDoorOpen: typeof row.door_open === 'boolean' ? row.door_open : prev.lastDoorOpen,
+      lastPhase:
+        typeof row.phase === 'string' && row.phase.trim()
+          ? (row.phase.trim() as DashboardCombistato['lastPhase'])
+          : prev.lastPhase,
+      lastPhaseElapsedS:
+        typeof row.phase_elapsed_s === 'number' && Number.isFinite(row.phase_elapsed_s)
+          ? row.phase_elapsed_s
+          : prev.lastPhaseElapsedS,
+      lastPhaseTotalS:
+        typeof row.phase_total_s === 'number' && Number.isFinite(row.phase_total_s)
+          ? row.phase_total_s
+          : prev.lastPhaseTotalS,
+      lastCompForcedRemainingS:
+        typeof row.comp_forced_remaining_s === 'number' &&
+        Number.isFinite(row.comp_forced_remaining_s)
+          ? row.comp_forced_remaining_s
+          : prev.lastCompForcedRemainingS,
+      lastFanForcedRemainingS:
+        typeof row.fan_forced_remaining_s === 'number' &&
+        Number.isFinite(row.fan_forced_remaining_s)
+          ? row.fan_forced_remaining_s
+          : prev.lastFanForcedRemainingS,
+    };
+    const next = list.slice();
+    next[idx] = updated;
+    this.zone.run(() => this.subject.next(next));
+  }
+
+  /**
+   * WebSocket: la UI reacciona en cuanto el ESP inserta (60 s + eventos), sin más polls ni más TX.
+   */
+  private ensureCombistatoRealtime(combistatoIds: string[]): void {
+    if (!this.cloudEnabled() || this.userScopeKey === 'anon' || !combistatoIds.length) {
+      this.clearCombistatoRealtime();
+      return;
+    }
+    const sorted = [...combistatoIds].sort();
+    if (
+      this.realtimeChannel != null &&
+      sorted.length === this.realtimeCombistatoIds.length &&
+      sorted.every((id, i) => id === this.realtimeCombistatoIds[i])
+    ) {
+      return;
+    }
+    this.clearCombistatoRealtime();
+    this.realtimeCombistatoIds = sorted;
+    const idSet = new Set(sorted);
+    this.realtimeChannel = this.auth.client
+      .channel(`combistato-readings:${this.userScopeKey}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'combistato_readings' },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          const cid = row['combistato_id'];
+          if (typeof cid !== 'string' || !idSet.has(cid)) return;
+          this.applyCombistatoReadingRow(cid, {
+            created_at: typeof row['created_at'] === 'string' ? row['created_at'] : undefined,
+            temp1_c: typeof row['temp1_c'] === 'number' ? row['temp1_c'] : null,
+            temp2_c: typeof row['temp2_c'] === 'number' ? row['temp2_c'] : null,
+            comp_on: typeof row['comp_on'] === 'boolean' ? row['comp_on'] : null,
+            fan_on: typeof row['fan_on'] === 'boolean' ? row['fan_on'] : null,
+            defrost_on: typeof row['defrost_on'] === 'boolean' ? row['defrost_on'] : null,
+            door_open: typeof row['door_open'] === 'boolean' ? row['door_open'] : null,
+            phase: typeof row['phase'] === 'string' ? row['phase'] : null,
+            phase_elapsed_s:
+              typeof row['phase_elapsed_s'] === 'number' ? row['phase_elapsed_s'] : null,
+            phase_total_s:
+              typeof row['phase_total_s'] === 'number' ? row['phase_total_s'] : null,
+            comp_forced_remaining_s:
+              typeof row['comp_forced_remaining_s'] === 'number'
+                ? row['comp_forced_remaining_s']
+                : null,
+            fan_forced_remaining_s:
+              typeof row['fan_forced_remaining_s'] === 'number'
+                ? row['fan_forced_remaining_s']
+                : null,
+          });
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.warn('Supabase Realtime combistato_readings: canal en error (se usa poll de respaldo).');
+        }
+      });
   }
 
   private combistatoOnlineFromLastSeen(lastSeenIso: string | null | undefined): boolean {
@@ -276,12 +430,14 @@ export class CombistatoStoreService {
   async hydrateFromCloud(): Promise<void> {
     if (!this.cloudEnabled()) {
       this.clearCombistatoPoll();
+      this.clearCombistatoRealtime();
       this.subject.next([]);
       return;
     }
     const session = await this.auth.getSession();
     if (!session?.user.id) {
       this.clearCombistatoPoll();
+      this.clearCombistatoRealtime();
       this.subject.next([]);
       return;
     }
@@ -369,6 +525,7 @@ export class CombistatoStoreService {
       if (c.deviceToken) this.saveToken(c.id, c.deviceToken);
     }
     this.subject.next(mapped);
+    this.ensureCombistatoRealtime(mapped.map((c) => c.id));
     this.ensureCombistatoPoll();
   }
 

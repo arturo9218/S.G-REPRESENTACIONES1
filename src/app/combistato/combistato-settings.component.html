@@ -20,9 +20,10 @@
             <span class="param-help" *ngIf="f.help">{{ f.help }}</span>
             <input
               type="text"
-              inputmode="decimal"
+              inputmode="text"
               autocomplete="off"
               spellcheck="false"
+              placeholder="ej. -18 o 8.5"
               [ngModel]="drafts[f.key + '']"
               (ngModelChange)="onDraftChange(f.key, $event)"
               (blur)="onFieldBlur(f.key)"

@@ -140,12 +140,30 @@
     </button>
     <button type="button" class="inicio-help__card inicio-help__card--tools" (click)="goHerramientas.emit()">
       <span class="inicio-help__text">
-        <span class="inicio-help__title">P–T, recalentamiento y subenfriamiento</span>
+        <span class="inicio-help__title">Herramientas de campo</span>
         <span class="inicio-help__desc">
-          Tabla P–T, recalentamiento, subenfriamiento y dimensionado Danfoss — independiente del PR500.
+          P–T, recalentamiento, PR500 en vivo, conversor, carga de cámara, Danfoss TXV y bitácora de visita.
         </span>
       </span>
       <span class="inicio-help__cta inicio-help__cta--tools">Abrir herramientas →</span>
+    </button>
+    <button type="button" class="inicio-help__card inicio-help__card--community" (click)="goComunidad.emit()">
+      <span class="inicio-help__text">
+        <span class="inicio-help__title">Comunidad AR Monitoreo</span>
+        <span class="inicio-help__desc">
+          Todos los usuarios registrados pueden mensajearse entre sí en un chat global de la app.
+        </span>
+      </span>
+      <span class="inicio-help__cta inicio-help__cta--community">Abrir comunidad →</span>
+    </button>
+    <button type="button" class="inicio-help__card inicio-help__card--budget" (click)="goPresupuestos.emit()">
+      <span class="inicio-help__text">
+        <span class="inicio-help__title">Presupuestos</span>
+        <span class="inicio-help__desc">
+          Relevamiento del circuito (evaporador, compresor, condensador), logo del técnico y PDF profesional.
+        </span>
+      </span>
+      <span class="inicio-help__cta inicio-help__cta--budget">Abrir presupuestos →</span>
     </button>
   </section>
 

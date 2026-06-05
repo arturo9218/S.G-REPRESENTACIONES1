@@ -284,9 +284,9 @@ const PRO400_PRO300_MANUALS: InicioDeviceManual[] = [
   {
     id: 'pro400',
     title: 'PRO400 — Una sonda',
-    subtitle: 'Temperatura simple en la nube',
+    subtitle: 'Control + temperatura en la nube',
     intro:
-      'Panel con una sonda. En configuración del dispositivo definís nombre, umbrales mínimo/máximo y corrección. No usa códigos AR del PR500 ni del PRO300.',
+      'Controlador de cámara con una sonda. Parámetros **AR01–AR26** en la app (en el equipo **A01–A26**). Alarmas push con mín/máx de temperatura en Notificaciones.',
     blocks: [
       {
         title: 'Uso diario',

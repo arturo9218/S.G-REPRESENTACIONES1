@@ -44,6 +44,8 @@ export class InicioPageComponent {
   @Output() goAlerts = new EventEmitter<void>();
   @Output() goAyuda = new EventEmitter<void>();
   @Output() goHerramientas = new EventEmitter<void>();
+  @Output() goComunidad = new EventEmitter<void>();
+  @Output() goPresupuestos = new EventEmitter<void>();
   @Output() addEquipment = new EventEmitter<InicioEquipmentKind>();
   /** Clic en una fila de «Tus equipos»: ir a Dispositivos y mostrar esa tarjeta. */
   @Output() openFleetRow = new EventEmitter<InicioFleetRow>();
@@ -63,8 +65,8 @@ export class InicioPageComponent {
     {
       kind: 'pro400',
       title: 'PRO400',
-      desc: 'Controlador con una sonda de temperatura.',
-      badge: '1 sonda',
+      desc: 'Controlador 1 sonda: parámetros AR01–AR26 y alarmas por temperatura.',
+      badge: 'AR01–AR26',
     },
     {
       kind: 'pro300',

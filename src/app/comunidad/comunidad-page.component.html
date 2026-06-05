@@ -1,0 +1,67 @@
+<div class="com">
+  <header class="com-hero">
+    <p class="com-hero__kicker">Comunidad</p>
+    <h1 class="com-hero__title">AR Monitoreo — conversación</h1>
+    <p class="com-hero__lead">
+      Todos los usuarios registrados pueden escribirse aquí entre sí. Es un chat global: cualquier
+      mensaje lo ven el resto del equipo en AR Monitoreo.
+    </p>
+  </header>
+
+  <p class="com-error" *ngIf="loadError" role="alert">{{ loadError }}</p>
+  <p class="com-loading" *ngIf="loading && !loadError">Cargando mensajes…</p>
+
+  <div class="com-chat" *ngIf="!loadError">
+    <div class="com-chat__scroll" #scrollBox role="log" aria-live="polite" aria-relevant="additions">
+      <p class="com-chat__empty" *ngIf="!loading && !messages.length">
+        Todavía no hay mensajes. Sé el primero en saludar al equipo.
+      </p>
+      <article
+        class="com-msg"
+        *ngFor="let m of messages"
+        [class.com-msg--mine]="isMine(m)"
+      >
+        <div class="com-msg__head">
+          <strong class="com-msg__author">{{ authorLabel(m) }}</strong>
+          <time class="com-msg__time">{{ timeLabel(m.createdAt) }}</time>
+        </div>
+        <p class="com-msg__body">{{ m.body }}</p>
+        <button
+          type="button"
+          class="com-msg__del"
+          *ngIf="isMine(m)"
+          (click)="remove(m)"
+          title="Eliminar tu mensaje"
+        >
+          Eliminar
+        </button>
+      </article>
+    </div>
+
+    <footer class="com-compose">
+      <label class="com-compose__label" for="com-draft">Tu mensaje</label>
+      <textarea
+        id="com-draft"
+        class="com-compose__input"
+        rows="3"
+        [(ngModel)]="draft"
+        (keydown)="onKeydown($event)"
+        placeholder="Escribí aquí… Enter envía, Shift+Enter nueva línea"
+        [disabled]="sending"
+      ></textarea>
+      <div class="com-compose__actions">
+        <button type="button" class="com-btn com-btn--ghost" (click)="reload()" [disabled]="loading">
+          Actualizar
+        </button>
+        <button
+          type="button"
+          class="com-btn com-btn--primary"
+          (click)="send()"
+          [disabled]="sending || !draft.trim()"
+        >
+          {{ sending ? 'Enviando…' : 'Enviar' }}
+        </button>
+      </div>
+    </footer>
+  </div>
+</div>

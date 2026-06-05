@@ -17,8 +17,13 @@ export const environment = {
   /** Si true y hay sesión, dispositivos y lecturas se sincronizan con Supabase (dispositivo → Function → DB → app). */
   deviceCloudSync: true,
   ingestFunctionPath: '/functions/v1/ingest-reading',
-  /** Intervalo de refresco de lecturas desde la nube (ms). Mínimo 2000 en el store. */
+  /** Intervalo de refresco de lecturas PR500/dispositivos (ms). Mínimo 2000 en el store. */
   readingsPollIntervalMs: 12000,
+  /**
+   * Respaldo si Realtime se cae: poll de combistatos (ms). No acortar para “más tiempo real”:
+   * el ESP ya manda cada 60 s + eventos; más poll solo carga Supabase sin datos nuevos.
+   */
+  combistatoReadingsPollIntervalMs: 45000,
   /** Sin telemetría nueva por este tiempo => se considera desconectado. */
   deviceOfflineAfterMs: 90000,
   /** Si una lectura vieja solo tiene `power_w`, se estima I = P / V (debe coincidir con la tensión nominal configurada en el dispositivo). */

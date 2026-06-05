@@ -28,6 +28,8 @@ const routes: Routes = [
   { path: 'alertas', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'ayuda', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'herramientas', component: DashboardComponent, canActivate: [authGuard] },
+  { path: 'comunidad', component: DashboardComponent, canActivate: [authGuard] },
+  { path: 'presupuestos', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'configuracion', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'chart', component: ChartAnalysisComponent },
   { path: 'chart-combistato', component: CombistatoChartComponent, canActivate: [authGuard] },

@@ -192,7 +192,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
    * Vista según la URL: panel principal, dispositivos, alertas o configuración.
    * Sidebar y barra móvil reflejan este valor (sincronizado en `syncShellRoute`).
    */
-  shellRoute: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'ayuda' | 'herramientas' | 'settings' = 'inicio';
+  shellRoute:
+    | 'inicio'
+    | 'devices'
+    | 'equipment'
+    | 'alerts'
+    | 'ayuda'
+    | 'herramientas'
+    | 'comunidad'
+    | 'presupuestos'
+    | 'settings' = 'inicio';
   /** Desde Inicio: mostrar solo la tarjeta del equipo elegido en Dispositivos. */
   deviceSoloFocus: { kind: 'sensor' | 'pr500' | 'combistato'; entityId: string } | null = null;
   /** Preset al alta: PRO400 (1 sonda), PRO300 (2 sondas) o panel genérico. */
@@ -607,6 +616,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.shellRoute = 'herramientas';
       return;
     }
+    if (path === '/comunidad') {
+      this.shellRoute = 'comunidad';
+      return;
+    }
+    if (path === '/presupuestos') {
+      this.shellRoute = 'presupuestos';
+      return;
+    }
     this.scheduleAlarmHistoryIfVisible();
   }
 
@@ -721,6 +738,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (this.shellRoute === 'inicio') return true;
     if (this.shellRoute === 'ayuda') return true;
     if (this.shellRoute === 'herramientas') return true;
+    if (this.shellRoute === 'comunidad') return true;
+    if (this.shellRoute === 'presupuestos') return true;
     return (
       this.hasDevices ||
       (this.environment.deviceCloudSync === true &&
@@ -2200,7 +2219,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   scrollToSection(
-    section: 'inicio' | 'devices' | 'equipment' | 'alerts' | 'ayuda' | 'herramientas' | 'settings'
+    section:
+      | 'inicio'
+      | 'devices'
+      | 'equipment'
+      | 'alerts'
+      | 'ayuda'
+      | 'herramientas'
+      | 'comunidad'
+      | 'presupuestos'
+      | 'settings'
   ): void {
     const paths: Record<typeof section, string> = {
       inicio: '/inicio',
@@ -2209,6 +2237,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       alerts: '/alertas',
       ayuda: '/ayuda',
       herramientas: '/herramientas',
+      comunidad: '/comunidad',
+      presupuestos: '/presupuestos',
       settings: '/configuracion',
     };
     const path = paths[section];
@@ -2300,6 +2330,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         '/alertas',
         '/ayuda',
         '/herramientas',
+        '/comunidad',
+        '/presupuestos',
         '/configuracion',
       ];
       if (shellPaths.includes(path)) {
@@ -3110,12 +3142,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     if (this.deviceModalMode === 'add') {
       this.addDeviceSubmitting = true;
+      const preset = this.deviceAddPreset;
       try {
         const result = await this.deviceStore.addDeviceFromFormAsync({
           name: v.name ?? '',
           location: v.location ?? '',
           moduleId: v.moduleId ?? '',
           espLocalIp: v.espLocalIp ?? '',
+          equipmentKind:
+            preset === 'pro400' ? 'pro400' : preset === 'generic' ? 'generic' : null,
         });
         if (!result.ok) {
           alert(result.error);
@@ -3124,7 +3159,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
         if (manualTemp != null && !Number.isNaN(manualTemp)) {
           this.deviceStore.recordTemperatureReading(result.id, manualTemp);
         }
-        const preset = this.deviceAddPreset;
         if (preset === 'pro400') {
           await this.deviceStore.updateDeviceSensorLabels(result.id, 'Sonda', '—');
           await this.deviceStore.updateDeviceNotificationConfig(result.id, {
@@ -3265,6 +3299,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return (c.lastPhaseTotalS ?? 0) > 0 || (c.lastPhaseElapsedS ?? 0) > 0;
   }
 
+  devicePro400PhaseHasTimer(d: DashboardDevice): boolean {
+    if (d.equipmentKind !== 'pro400' || !d.lastPhase) return false;
+    return (d.lastPhaseTotalS ?? 0) > 0 || (d.lastPhaseElapsedS ?? 0) > 0;
+  }
+
+  devicePro400PhaseRemainingS(d: DashboardDevice): number | null {
+    if (!this.devicePro400PhaseHasTimer(d)) return null;
+    const total = d.lastPhaseTotalS ?? 0;
+    const elapsed = d.lastPhaseElapsedS ?? 0;
+    if (total <= 0) return null;
+    const rem = total - elapsed;
+    return rem > 0 ? rem : 0;
+  }
+
   /** Tooltip mostrado al pasar el mouse por encima de cada pill (estado + acción). */
   combistatoRelayTooltip(relay: 'comp' | 'fan' | 'def', c: DashboardCombistato): string {
     if (relay === 'def') {
@@ -3287,8 +3335,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /**
    * Click sobre una pill (COMP / VENT / DEF). Muestra un confirm nativo del
    * navegador con el wording exacto de la acción y, si el usuario confirma,
-   * dispara el comando al PRO300 vía `pro300-send-command`. El delay
-   * click→equipo es de 5-30 s gracias a la propagación rápida del PR300.
+   * dispara el comando al PRO300 vía `pro300-send-command`. El equipo suele
+   * recibirlo en 5–25 s (pull de parámetros, sin más telemetría en Supabase).
    */
   async onCombistatoRelayClick(relay: 'comp' | 'fan' | 'def', c: DashboardCombistato): Promise<void> {
     if (!c.id) return;

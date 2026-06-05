@@ -115,6 +115,18 @@
   color: #e2e8f0;
 }
 
+.ayuda-tools__row dd a {
+  display: inline-block;
+  margin-top: 0.35rem;
+  color: #7dd3fc;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ayuda-tools__row dd a:hover {
+  text-decoration: underline;
+}
+
 .ayuda-tools__note {
   margin: 1rem 0 0;
   font-size: 0.8rem;
