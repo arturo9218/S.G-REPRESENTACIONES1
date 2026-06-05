@@ -1,4 +1,7 @@
 -- Campana / contador de no leídos en la lista de contactos. Ejecutar después de 054.
+-- Si falla "cannot change return type", este DROP recrea la función con unread_count.
+
+drop function if exists public.list_chat_contacts();
 
 create or replace function public.list_chat_contacts()
 returns table (user_id uuid, email text, unread_count bigint)
@@ -26,3 +29,6 @@ as $$
     and trim(u.email::text) <> ''
   order by unread_count desc, lower(trim(u.email::text));
 $$;
+
+revoke all on function public.list_chat_contacts() from public;
+grant execute on function public.list_chat_contacts() to authenticated;
