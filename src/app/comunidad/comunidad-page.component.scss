@@ -16,6 +16,74 @@
   cursor: pointer;
 }
 
+.com-alert-hint {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.com-sound {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.com-sound__title {
+  margin: 0 0 6px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.com-sound__hint {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.com-sound__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 10px;
+}
+
+.com-sound__preset {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.com-sound__custom {
+  margin-bottom: 8px;
+}
+
+.com-btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.com-btn--ghost {
+  background: transparent;
+}
+
+.com-btn--sm {
+  padding: 6px 10px;
+  font-size: 0.78rem;
+}
+
 .com-tabs {
   display: flex;
   gap: 8px;

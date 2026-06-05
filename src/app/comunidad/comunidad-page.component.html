@@ -9,6 +9,36 @@
     <button type="button" class="com-alert-btn" (click)="enableAlerts()">
       {{ notifyPermission === 'granted' ? '🔔 Avisos activados' : 'Activar tono y notificaciones' }}
     </button>
+    <p class="com-alert-hint" *ngIf="pushUiState">{{ pushUiState }}</p>
+
+    <section class="com-sound" aria-label="Tono de mensaje">
+      <h2 class="com-sound__title">Tono al recibir mensaje</h2>
+      <p class="com-sound__hint">
+        Cada mensaje privado o de la sala global muestra notificación y reproduce el tono elegido.
+      </p>
+      <div class="com-sound__presets">
+        <label class="com-sound__preset" *ngFor="let p of soundPresets">
+          <input
+            type="radio"
+            name="chatSound"
+            [value]="p.id"
+            [checked]="soundSettings.soundId === p.id"
+            (change)="onSoundPresetChange(p.id)"
+          />
+          <span>{{ p.label }}</span>
+        </label>
+      </div>
+      <div class="com-sound__custom" *ngIf="soundSettings.soundId === 'custom'">
+        <label class="com-btn com-btn--ghost com-btn--sm">
+          Subir mi tono (mp3, wav, ogg…)
+          <input type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a" hidden (change)="onCustomSoundFile($event)" />
+        </label>
+      </div>
+      <button type="button" class="com-btn com-btn--ghost com-btn--sm" (click)="testSound()">
+        Probar tono
+      </button>
+    </section>
+
     <div class="com-tabs" role="tablist">
       <button
         type="button"

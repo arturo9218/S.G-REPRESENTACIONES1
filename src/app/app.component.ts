@@ -3,6 +3,8 @@ import { SwUpdate, VersionReadyEvent } from '@angular/service-worker';
 import { Subscription, fromEvent, interval } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { environment } from '../environments/environment';
+import { AuthService } from './core/auth.service';
+import { ChatRealtimeService } from './core/chat-realtime.service';
 import { ConnectivityService } from './core/connectivity.service';
 import { ToastService, type ToastMessage } from './core/toast.service';
 
@@ -29,7 +31,9 @@ export class AppComponent implements OnInit, OnDestroy {
   constructor(
     private readonly swUpdate: SwUpdate,
     private readonly connectivity: ConnectivityService,
-    private readonly toastService: ToastService
+    private readonly toastService: ToastService,
+    private readonly auth: AuthService,
+    private readonly chatRealtime: ChatRealtimeService
   ) {}
 
   ngOnInit(): void {
@@ -39,6 +43,14 @@ export class AppComponent implements OnInit, OnDestroy {
     });
     this.toastSub = this.toastService.toast$.subscribe((t) => {
       this.toast = t;
+    });
+
+    void this.auth.getSession().then((s) => {
+      if (s) void this.chatRealtime.start();
+    });
+    this.auth.client.auth.onAuthStateChange((_event, session) => {
+      if (session) void this.chatRealtime.start();
+      else this.chatRealtime.stop();
     });
 
     if (!environment.production || !this.swUpdate.isEnabled) {

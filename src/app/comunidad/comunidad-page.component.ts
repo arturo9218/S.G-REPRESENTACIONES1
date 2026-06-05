@@ -6,8 +6,18 @@ import {
   OnInit,
   ViewChild,
 } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
+import {
+  CHAT_SOUND_PRESETS,
+  type ChatNotificationSettings,
+  type ChatSoundPresetId,
+  loadChatNotificationSettings,
+  readCustomSoundFile,
+  saveChatNotificationSettings,
+} from '../core/chat-notification-settings';
 import { ChatNotificationService } from '../core/chat-notification.service';
+import { ChatRealtimeService } from '../core/chat-realtime.service';
 import {
   CommunityChatService,
   type CommunityMessage,
@@ -18,6 +28,7 @@ import {
   type PrivateMessage,
 } from '../core/direct-message.service';
 import { ToastService } from '../core/toast.service';
+import { WebPushService } from '../core/web-push.service';
 
 type ChatMode = 'private' | 'global';
 
@@ -41,16 +52,20 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
   sending = false;
   loadError = '';
   notifyPermission: NotificationPermission | 'unsupported' = 'unsupported';
+  pushUiState = '';
+  soundSettings: ChatNotificationSettings = loadChatNotificationSettings();
+  readonly soundPresets = CHAT_SOUND_PRESETS;
   myUserId = '';
   myEmail = '';
   private scrollPending = false;
-  private globalRealtimeOn = false;
-  private privateRealtimeOn = false;
+  private uiSubs: Subscription[] = [];
 
   constructor(
     private readonly globalChat: CommunityChatService,
     private readonly directChat: DirectMessageService,
     private readonly chatNotify: ChatNotificationService,
+    private readonly chatRealtime: ChatRealtimeService,
+    private readonly webPush: WebPushService,
     private readonly auth: AuthService,
     private readonly toast: ToastService
   ) {}
@@ -70,15 +85,25 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     const session = await this.auth.getSession();
     this.myUserId = session?.user?.id ?? '';
     this.myEmail = (session?.user?.email ?? '').trim().toLowerCase();
+    this.soundSettings = loadChatNotificationSettings();
     this.notifyPermission = await this.chatNotify.ensurePermission();
+    void this.chatRealtime.start();
+    this.uiSubs.push(
+      this.chatRealtime.global$.subscribe((msg) => {
+        if (this.mode === 'global') void this.reloadGlobal(true);
+      }),
+      this.chatRealtime.private$.subscribe((msg) => {
+        if (this.mode === 'private' && this.selectedPeerId === msg.senderId) {
+          void this.reloadPrivate(true);
+        }
+      })
+    );
     await this.loadContacts();
-    this.bindRealtimeListeners();
     await this.reload();
   }
 
   ngOnDestroy(): void {
-    this.globalChat.unsubscribe();
-    this.directChat.unsubscribe();
+    this.uiSubs.forEach((s) => s.unsubscribe());
   }
 
   ngAfterViewChecked(): void {
@@ -91,51 +116,49 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
 
   async enableAlerts(): Promise<void> {
     this.notifyPermission = await this.chatNotify.ensurePermission();
+    const push = await this.webPush.subscribeBackgroundAlerts();
+    this.pushUiState = push.message;
     if (this.notifyPermission === 'granted') {
-      this.toast.success('Avisos y tono activados para mensajes nuevos.');
+      this.toast.success(
+        push.ok
+          ? 'Avisos activos: sonido en la app y notificaciones con la pantalla apagada.'
+          : 'Permiso OK en este navegador. Para segundo plano: ' + push.message
+      );
       this.chatNotify.playIncomingSound();
     } else if (this.notifyPermission === 'denied') {
       this.toast.show(
-        'Permiso bloqueado. En el teléfono: ajustes del navegador → notificaciones para este sitio.',
+        'Permiso bloqueado. En el teléfono: ajustes → notificaciones para AR Monitoreo.',
         'info'
       );
     }
   }
 
-  private bindRealtimeListeners(): void {
-    if (!this.globalRealtimeOn) {
-      this.globalRealtimeOn = true;
-      this.globalChat.subscribeNewMessages((msg) => this.handleGlobalInsert(msg));
-    }
-    if (!this.privateRealtimeOn && this.myUserId) {
-      this.privateRealtimeOn = true;
-      this.directChat.subscribeIncoming(this.myUserId, (msg) => this.handlePrivateInsert(msg));
-    }
+  onSoundPresetChange(id: ChatSoundPresetId): void {
+    this.soundSettings = { ...this.soundSettings, soundId: id };
+    saveChatNotificationSettings(this.soundSettings);
+    if (id !== 'custom') this.chatNotify.playIncomingSound();
   }
 
-  private handleGlobalInsert(msg: CommunityMessage): void {
-    if (msg.userId === this.myUserId) return;
-    if (this.mode === 'global') {
-      void this.reloadGlobal(true);
+  async onCustomSoundFile(ev: Event): Promise<void> {
+    const file = (ev.target as HTMLInputElement).files?.[0];
+    (ev.target as HTMLInputElement).value = '';
+    if (!file) return;
+    const dataUrl = await readCustomSoundFile(file);
+    if (!dataUrl) {
+      this.toast.show('Archivo no válido o muy pesado (máx. ~800 KB). Usá mp3, wav u ogg.', 'info');
+      return;
     }
-    const viewing = this.mode === 'global' && !document.hidden;
-    if (!viewing) {
-      const who = this.emailLabel(msg.authorEmail);
-      void this.chatNotify.notifyMessage(`Comunidad — ${who}`, msg.body, `community-${msg.id}`);
-    }
+    this.soundSettings = {
+      soundId: 'custom',
+      customSoundDataUrl: dataUrl,
+    };
+    saveChatNotificationSettings(this.soundSettings);
+    this.chatNotify.playIncomingSound();
+    this.toast.success('Tono personalizado guardado.');
   }
 
-  private handlePrivateInsert(msg: PrivateMessage): void {
-    if (msg.senderId === this.myUserId) return;
-    if (this.mode === 'private' && this.selectedPeerId === msg.senderId) {
-      void this.reloadPrivate(true);
-    }
-    const viewing =
-      this.mode === 'private' && this.selectedPeerId === msg.senderId && !document.hidden;
-    if (!viewing) {
-      const who = this.emailLabel(msg.senderEmail);
-      void this.chatNotify.notifyMessage(who, msg.body, `dm-${msg.senderId}`);
-    }
+  testSound(): void {
+    this.chatNotify.playIncomingSound();
   }
 
   async setMode(next: ChatMode): Promise<void> {
