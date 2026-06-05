@@ -100,7 +100,8 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
       this.chatRealtime.private$.subscribe((msg) => {
         void this.loadContacts();
         if (this.mode === 'private' && this.selectedPeerId === msg.senderId) {
-          void this.reloadPrivate(true);
+          // Con el chat abierto: marcar leído al instante para que el otro vea ✓✓ Leído.
+          void this.directChat.markReadFromPeer(msg.senderId).then(() => void this.reloadPrivate(true));
         }
       }),
       this.chatRealtime.privateStatus$.subscribe(() => {
