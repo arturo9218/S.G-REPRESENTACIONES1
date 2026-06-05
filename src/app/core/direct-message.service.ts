@@ -7,6 +7,8 @@ export interface ChatContact {
   email: string;
 }
 
+export type PrivateDeliveryStatus = 'sent' | 'delivered' | 'read';
+
 export interface PrivateMessage {
   id: string;
   senderId: string;
@@ -14,11 +16,13 @@ export interface PrivateMessage {
   senderEmail: string;
   body: string;
   createdAt: string;
+  deliveredAt: string | null;
+  readAt: string | null;
 }
 
 @Injectable({ providedIn: 'root' })
 export class DirectMessageService {
-  private incomingChannel: RealtimeChannel | null = null;
+  private syncChannel: RealtimeChannel | null = null;
 
   constructor(
     private readonly auth: AuthService,
@@ -47,7 +51,9 @@ export class DirectMessageService {
 
     const { data, error } = await this.auth.client
       .from('private_messages')
-      .select('id, sender_id, recipient_id, sender_email, body, created_at')
+      .select(
+        'id, sender_id, recipient_id, sender_email, body, created_at, delivered_at, read_at'
+      )
       .or(
         `and(sender_id.eq.${me},recipient_id.eq.${peerId}),and(sender_id.eq.${peerId},recipient_id.eq.${me})`
       )
@@ -86,10 +92,33 @@ export class DirectMessageService {
     return { error: error?.message ?? null };
   }
 
-  subscribeIncoming(myUserId: string, onInsert: (msg: PrivateMessage) => void): void {
+  /** El destinatario confirma que recibió los mensajes de ese contacto. */
+  async markDeliveredFromPeer(peerId: string): Promise<void> {
+    await this.auth.client.rpc('mark_private_messages_delivered', { p_sender_id: peerId });
+  }
+
+  /** El destinatario confirma lectura al ver el chat. */
+  async markReadFromPeer(peerId: string): Promise<void> {
+    await this.auth.client.rpc('mark_private_messages_read', { p_sender_id: peerId });
+  }
+
+  deliveryStatus(msg: PrivateMessage, myUserId: string): PrivateDeliveryStatus {
+    if (msg.senderId !== myUserId) return 'sent';
+    if (msg.readAt) return 'read';
+    if (msg.deliveredAt) return 'delivered';
+    return 'sent';
+  }
+
+  subscribePrivateSync(
+    myUserId: string,
+    handlers: {
+      onIncoming: (msg: PrivateMessage) => void;
+      onStatusChange: () => void;
+    }
+  ): void {
     this.unsubscribe();
-    this.incomingChannel = this.auth.client
-      .channel(`private_messages_in_${myUserId}`)
+    this.syncChannel = this.auth.client
+      .channel(`private_messages_sync_${myUserId}`)
       .on(
         'postgres_changes',
         {
@@ -100,16 +129,35 @@ export class DirectMessageService {
         },
         (payload) => {
           const msg = this.mapRow(payload.new as Record<string, unknown>);
-          this.zone.run(() => onInsert(msg));
+          this.zone.run(() => {
+            void this.markDeliveredFromPeer(msg.senderId).then(() => handlers.onIncoming(msg));
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'private_messages',
+          filter: `sender_id=eq.${myUserId}`,
+        },
+        () => {
+          this.zone.run(() => handlers.onStatusChange());
         }
       )
       .subscribe();
   }
 
+  /** @deprecated Usar subscribePrivateSync */
+  subscribeIncoming(myUserId: string, onInsert: (msg: PrivateMessage) => void): void {
+    this.subscribePrivateSync(myUserId, { onIncoming: onInsert, onStatusChange: () => {} });
+  }
+
   unsubscribe(): void {
-    if (this.incomingChannel) {
-      void this.auth.client.removeChannel(this.incomingChannel);
-      this.incomingChannel = null;
+    if (this.syncChannel) {
+      void this.auth.client.removeChannel(this.syncChannel);
+      this.syncChannel = null;
     }
   }
 
@@ -121,6 +169,8 @@ export class DirectMessageService {
       senderEmail: String(r['sender_email'] ?? ''),
       body: String(r['body'] ?? ''),
       createdAt: r['created_at'] as string,
+      deliveredAt: (r['delivered_at'] as string) ?? null,
+      readAt: (r['read_at'] as string) ?? null,
     };
   }
 }

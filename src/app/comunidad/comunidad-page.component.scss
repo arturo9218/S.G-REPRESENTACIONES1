@@ -314,6 +314,31 @@
   color: #64748b;
 }
 
+.com-msg__receipt {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-left: auto;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+.com-msg__receipt--delivered {
+  color: #94a3b8;
+}
+
+.com-msg__receipt--read {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.com-chat__peer-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: #64748b;
+  font-weight: 400;
+}
+
 .com-msg__body {
   margin: 0;
   font-size: 0.92rem;

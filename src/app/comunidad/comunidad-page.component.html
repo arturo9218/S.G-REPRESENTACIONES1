@@ -97,6 +97,7 @@
       <header class="com-chat__peer">
         <span>Conversación con</span>
         <strong>{{ selectedContact?.email }}</strong>
+        <span class="com-chat__peer-hint">En tus mensajes: ✓ enviado · ✓✓ entregado · ✓✓ leído (azul)</span>
       </header>
       <p class="com-loading" *ngIf="loading">Cargando mensajes…</p>
       <div
@@ -116,6 +117,16 @@
         >
           <div class="com-msg__head">
             <strong class="com-msg__author">{{ emailLabel(m.senderEmail) }}</strong>
+            <span
+              class="com-msg__receipt"
+              *ngIf="isMinePrivate(m)"
+              [class.com-msg__receipt--delivered]="isDeliveryDelivered(m)"
+              [class.com-msg__receipt--read]="isDeliveryRead(m)"
+              [attr.title]="deliveryLabel(m)"
+            >
+              {{ isDeliveryRead(m) || isDeliveryDelivered(m) ? '✓✓' : '✓' }}
+              {{ deliveryLabel(m) }}
+            </span>
             <time class="com-msg__time">{{ timeLabel(m.createdAt) }}</time>
           </div>
           <p class="com-msg__body">{{ m.body }}</p>

@@ -18,6 +18,8 @@ import {
 export class ChatRealtimeService {
   readonly global$ = new Subject<CommunityMessage>();
   readonly private$ = new Subject<PrivateMessage>();
+  /** Emisor: el otro usuario leyó o recibió (actualizar ticks). */
+  readonly privateStatus$ = new Subject<void>();
 
   private myUserId = '';
   private running = false;
@@ -46,8 +48,9 @@ export class ChatRealtimeService {
     this.globalChat.subscribeNewMessages((msg) => {
       this.zone.run(() => this.onGlobal(msg));
     });
-    this.directChat.subscribeIncoming(uid, (msg) => {
-      this.zone.run(() => this.onPrivate(msg));
+    this.directChat.subscribePrivateSync(uid, {
+      onIncoming: (msg) => this.zone.run(() => this.onPrivate(msg)),
+      onStatusChange: () => this.zone.run(() => this.privateStatus$.next()),
     });
   }
 

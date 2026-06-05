@@ -96,6 +96,11 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
         if (this.mode === 'private' && this.selectedPeerId === msg.senderId) {
           void this.reloadPrivate(true);
         }
+      }),
+      this.chatRealtime.privateStatus$.subscribe(() => {
+        if (this.mode === 'private' && this.selectedPeerId) {
+          void this.reloadPrivate(true);
+        }
       })
     );
     await this.loadContacts();
@@ -230,14 +235,36 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     const { rows, error } = await this.directChat.fetchConversation(this.selectedPeerId, 150);
     if (!quiet) this.loading = false;
     if (error) {
-      const hint = error.includes('private_messages')
-        ? ' Ejecutá 052_private_messages.sql en Supabase.'
-        : '';
+      const hint =
+        error.includes('private_messages') || error.includes('delivered_at')
+          ? ' Ejecutá 052 y 054_private_messages_receipts.sql en Supabase.'
+          : '';
       this.loadError = `${error}${hint}`;
       return;
     }
     this.privateMessages = rows;
     this.scrollPending = true;
+    await this.directChat.markReadFromPeer(this.selectedPeerId);
+    const refresh = await this.directChat.fetchConversation(this.selectedPeerId, 150);
+    if (!refresh.error) {
+      this.privateMessages = refresh.rows;
+    }
+  }
+
+  deliveryLabel(m: PrivateMessage): string {
+    const s = this.directChat.deliveryStatus(m, this.myUserId);
+    if (s === 'read') return 'Leído';
+    if (s === 'delivered') return 'Entregado';
+    return 'Enviado';
+  }
+
+  isDeliveryRead(m: PrivateMessage): boolean {
+    return this.directChat.deliveryStatus(m, this.myUserId) === 'read';
+  }
+
+  isDeliveryDelivered(m: PrivateMessage): boolean {
+    const s = this.directChat.deliveryStatus(m, this.myUserId);
+    return s === 'delivered' || s === 'read';
   }
 
   async send(): Promise<void> {
