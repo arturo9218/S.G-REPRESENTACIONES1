@@ -18,10 +18,12 @@
 --      Table: public.private_messages
 --      Events: Insert
 --      Method: POST
---      URL: https://TU_PROYECTO.supabase.co/functions/v1/notify-chat-message
---      Headers:
---        x-chat-push-secret: <CHAT_PUSH_SECRET>
+--      URL (copiar exacto, sin cortar):
+--        https://fohbhymulrmdsgrubtlo.supabase.co/functions/v1/notify-chat-message
+--      Headers (los DOS):
+--        x-chat-push-secret: <CHAT_PUSH_SECRET>   ← obligatorio, sin esto 401
 --        Content-Type: application/json
+--      Secret opcional en Edge Functions: APP_PUBLIC_URL = URL de Vercel (icono en notificación)
 --
 --    Hook B — community_messages
 --      Igual con tabla public.community_messages

@@ -150,9 +150,18 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     else if (this.notifyPermission === 'unsupported') parts.push('Navegador: no soportado');
     else parts.push('Navegador: sin permiso');
     if (!vapidOk) parts.push('FCM: falta VAPID en Vercel');
-    else if (ui === 'active') parts.push('FCM: suscrito');
+    else if (ui === 'active') parts.push('FCM: suscrito en este celular');
     else if (ui === 'unsupported') parts.push('FCM: SW inactivo (usá la app publicada en HTTPS)');
-    else parts.push('FCM: sin suscripción');
+    else parts.push('FCM: sin suscripción — tocá Activar avisos');
+
+    if (this.myUserId) {
+      const { count } = await this.auth.client
+        .from('push_subscriptions')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', this.myUserId);
+      const n = count ?? 0;
+      parts.push(n > 0 ? `Servidor: ${n} dispositivo(s) registrado(s)` : 'Servidor: sin registro push');
+    }
     this.pushDiagLabel = parts.join(' · ');
   }
 

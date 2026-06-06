@@ -23,8 +23,11 @@ Deno.serve(async (req) => {
   }
 
   const secret = Deno.env.get('CHAT_PUSH_SECRET')?.trim();
-  const headerSecret = req.headers.get('x-chat-push-secret')?.trim();
+  const headerSecret =
+    req.headers.get('x-chat-push-secret')?.trim() ??
+    req.headers.get('X-Chat-Push-Secret')?.trim();
   if (!secret || headerSecret !== secret) {
+    console.warn('[notify-chat-message] 401 secret ausente o incorrecto');
     return new Response(JSON.stringify({ error: 'No autorizado' }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -50,10 +53,12 @@ Deno.serve(async (req) => {
     });
   }
 
-  const table = body.table;
-  const record = body.record;
-  if (!record || body.type !== 'INSERT') {
-    return new Response(JSON.stringify({ skipped: 'not_insert' }), {
+  const raw = body as Record<string, unknown>;
+  const table = String(body.table ?? raw['table'] ?? '');
+  const eventType = String(body.type ?? raw['event'] ?? raw['type'] ?? '');
+  const record = (body.record ?? raw['record']) as Record<string, unknown> | undefined;
+  if (!record || eventType.toUpperCase() !== 'INSERT') {
+    return new Response(JSON.stringify({ skipped: 'not_insert', eventType }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -80,7 +85,16 @@ Deno.serve(async (req) => {
       navigate: '/comunidad',
       requireInteraction: false,
     });
-    return new Response(JSON.stringify({ table, ...result }), {
+    const payload = { table, recipientId, ...result };
+    if (result.sent === 0) {
+      console.warn('[notify-chat-message] push no entregado:', payload);
+      return new Response(JSON.stringify(payload), {
+        status: 502,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    console.log('[notify-chat-message] push ok:', payload);
+    return new Response(JSON.stringify(payload), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
