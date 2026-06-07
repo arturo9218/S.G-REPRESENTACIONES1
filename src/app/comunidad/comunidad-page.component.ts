@@ -164,6 +164,17 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     this.pushDiagLabel = parts.join(' · ');
   }
 
+  async testClosedAppPush(): Promise<void> {
+    const push = await this.webPush.sendTestPush();
+    this.pushUiState = push.message;
+    await this.refreshPushDiagnostics();
+    if (push.ok) {
+      this.toast.success(push.message);
+    } else {
+      this.toast.show(push.message, 'info');
+    }
+  }
+
   async enableAlerts(): Promise<void> {
     this.notifyPermission = await this.chatNotify.ensurePermission();
     const push = await this.webPush.subscribeBackgroundAlerts();

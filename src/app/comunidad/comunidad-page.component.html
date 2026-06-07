@@ -7,9 +7,14 @@
       el teléfono suena al llegar un mensaje (como un chat). En Android/Chrome las alertas con pantalla
       apagada usan <strong>Google Firebase (FCM)</strong>, más fiables que solo el navegador abierto.
     </p>
-    <button type="button" class="com-alert-btn" (click)="enableAlerts()">
-      {{ notifyPermission === 'granted' ? '🔔 Avisos + FCM activados' : 'Activar tono y notificaciones (FCM)' }}
-    </button>
+    <div class="com-alert-actions">
+      <button type="button" class="com-alert-btn" (click)="enableAlerts()">
+        {{ notifyPermission === 'granted' ? '🔔 Avisos + FCM activados' : 'Activar tono y notificaciones (FCM)' }}
+      </button>
+      <button type="button" class="com-alert-btn com-alert-btn--test" (click)="testClosedAppPush()">
+        Probar con app cerrada
+      </button>
+    </div>
     <p class="com-alert-hint" *ngIf="pushDiagLabel" role="status">{{ pushDiagLabel }}</p>
     <p class="com-alert-hint" *ngIf="pushUiState">{{ pushUiState }}</p>
 

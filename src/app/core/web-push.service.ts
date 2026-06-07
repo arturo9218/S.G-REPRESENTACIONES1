@@ -139,14 +139,87 @@ export class WebPushService {
       if (error) {
         return { ok: false, message: error.message };
       }
+      const { count, error: verifyErr } = await this.auth.client
+        .from('push_subscriptions')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+      if (verifyErr) {
+        return { ok: false, message: `Suscripción local OK pero no se pudo verificar en servidor: ${verifyErr.message}` };
+      }
+      if (!count) {
+        return {
+          ok: false,
+          message:
+            'El navegador se suscribió pero no quedó guardado en push_subscriptions. Revisá RLS o volvé a iniciar sesión.',
+        };
+      }
       return {
         ok: true,
         message:
-          'Activado. En Supabase (secrets de Edge Functions) tenés que tener el mismo par VAPID que en el front desplegado: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y VAPID_SUBJECT (mailto:tu@email). Si no coinciden, no llega ningún push.',
+          `Activado (${count} dispositivo(s) en servidor). Cerrá la app y usá "Probar con app cerrada". VAPID en Vercel y Supabase deben ser el mismo par.`,
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return { ok: false, message: formatPushSubscribeError(msg) };
+    }
+  }
+
+  /** Envía una notificación de prueba al usuario actual (útil con la app cerrada). */
+  async sendTestPush(): Promise<{ ok: boolean; message: string }> {
+    const session = await this.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      return { ok: false, message: 'Iniciá sesión para probar.' };
+    }
+    const base = environment.supabaseUrl?.replace(/\/$/, '');
+    const anon = environment.supabaseAnonKey?.trim();
+    if (!base || !anon) {
+      return { ok: false, message: 'Falta configuración de Supabase en la app.' };
+    }
+    try {
+      const res = await fetch(`${base}/functions/v1/send-test-push`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          apikey: anon,
+          'Content-Type': 'application/json',
+        },
+      });
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (res.ok && Number(body['sent'] ?? 0) > 0) {
+        return {
+          ok: true,
+          message: 'Push enviado. Cerrá la app ahora y debería aparecer la notificación en unos segundos.',
+        };
+      }
+      const skipped = String(body['skipped'] ?? '');
+      const lastError = String(body['lastError'] ?? '');
+      if (skipped === 'no_subscriptions' || skipped.includes('no_subscriptions')) {
+        return {
+          ok: false,
+          message: 'No hay registro push para tu usuario. Tocá primero "Activar tono y notificaciones (FCM)".',
+        };
+      }
+      if (skipped === 'vapid_not_configured') {
+        return {
+          ok: false,
+          message: 'Faltan VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY en secrets de Supabase Edge Functions.',
+        };
+      }
+      if (lastError.includes('401') || lastError.includes('403')) {
+        return {
+          ok: false,
+          message:
+            'VAPID no coincide entre Vercel y Supabase. La clave pública del build debe ser par de la privada en secrets.',
+        };
+      }
+      return {
+        ok: false,
+        message: `No se pudo entregar (${res.status}): ${skipped || lastError || 'error desconocido'}`,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, message: msg };
     }
   }
 
