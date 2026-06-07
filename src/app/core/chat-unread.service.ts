@@ -15,13 +15,20 @@ export class ChatUnreadService {
   }
 
   clear(): void {
-    this.totalSubject.next(0);
+    this.setTotal(0);
+  }
+
+  /** Actualiza el badge del menú sin volver a pedir contactos. */
+  setTotal(total: number): void {
+    const n = Math.max(0, total);
+    if (n !== this.totalSubject.value) {
+      this.totalSubject.next(n);
+    }
   }
 
   async refresh(): Promise<void> {
     const { rows, error } = await this.directChat.fetchContacts();
     if (error) return;
-    const total = rows.reduce((s, c) => s + c.unreadCount, 0);
-    this.totalSubject.next(total);
+    this.setTotal(rows.reduce((s, c) => s + c.unreadCount, 0));
   }
 }

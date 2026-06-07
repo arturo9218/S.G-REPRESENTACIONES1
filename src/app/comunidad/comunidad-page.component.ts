@@ -95,12 +95,11 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     await this.ensureBackgroundPush();
     void this.chatRealtime.start();
     this.uiSubs.push(
-      this.chatUnread.total$.subscribe(() => void this.loadContacts()),
       this.chatRealtime.global$.subscribe((msg) => {
         if (this.mode === 'global') void this.reloadGlobal(true);
       }),
       this.chatRealtime.private$.subscribe((msg) => {
-        void this.loadContacts();
+        void this.loadContacts(true);
         if (this.mode === 'private' && this.selectedPeerId === msg.senderId) {
           // Con el chat abierto: marcar leído al instante para que el otro vea ✓✓ Leído.
           void this.directChat.markReadFromPeer(msg.senderId).then(() => void this.reloadPrivate(true));
@@ -228,10 +227,10 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     await this.reload();
   }
 
-  async loadContacts(): Promise<void> {
-    this.loadingContacts = true;
+  async loadContacts(quiet = false): Promise<void> {
+    if (!quiet) this.loadingContacts = true;
     const { rows, error } = await this.directChat.fetchContacts();
-    this.loadingContacts = false;
+    if (!quiet) this.loadingContacts = false;
     if (error) {
       const hint =
         error.includes('list_chat_contacts') || error.includes('private_messages')
@@ -243,7 +242,7 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
       return;
     }
     this.contacts = rows;
-    void this.chatUnread.refresh();
+    this.chatUnread.setTotal(rows.reduce((s, c) => s + c.unreadCount, 0));
     if (this.mode === 'private' && !this.selectedPeerId && rows.length) {
       this.selectedPeerId = rows[0].userId;
     }
@@ -306,7 +305,7 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     if (!refresh.error) {
       this.privateMessages = refresh.rows;
     }
-    await this.loadContacts();
+    await this.loadContacts(true);
   }
 
   deliveryLabel(m: PrivateMessage): string {
