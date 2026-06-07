@@ -1,9 +1,23 @@
--- Campana / contador de no leídos en la lista de contactos. Ejecutar después de 054.
--- Si falla "cannot change return type", este DROP recrea la función con unread_count.
+-- Campana / contador de no leídos en la lista de contactos.
+-- Ejecutar después de 052 y 054 (necesita private_messages.read_at).
 
-drop function if exists public.list_chat_contacts();
+-- Borra cualquier versión anterior de la función (2 o 3 columnas).
+do $$
+declare
+  fn regprocedure;
+begin
+  for fn in
+    select p.oid::regprocedure
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = 'list_chat_contacts'
+  loop
+    execute format('drop function if exists %s cascade', fn);
+  end loop;
+end $$;
 
-create or replace function public.list_chat_contacts()
+create function public.list_chat_contacts()
 returns table (user_id uuid, email text, unread_count bigint)
 language sql
 security definer

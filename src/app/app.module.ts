@@ -59,7 +59,8 @@ export function rootErrorHandlerFactory(): ErrorHandler {
     AppRoutingModule,
     ServiceWorkerModule.register('ngsw-worker.js', {
       enabled: environment.serviceWorkerEnabled,
-      registrationStrategy: 'registerWhenStable:30000',
+      /** Inmediato: en Android el push FCM falla si el usuario activa avisos antes de que registre el SW. */
+      registrationStrategy: 'registerImmediately',
     }),
   ],
   providers: [{ provide: ErrorHandler, useFactory: rootErrorHandlerFactory }],

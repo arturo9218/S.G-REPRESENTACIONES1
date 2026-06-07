@@ -65,24 +65,8 @@ create trigger private_messages_fill_email_trg
   for each row
   execute function public.private_messages_fill_email();
 
--- Lista de usuarios registrados para elegir destinatario (sin exponer datos sensibles).
-create or replace function public.list_chat_contacts()
-returns table (user_id uuid, email text)
-language sql
-security definer
-stable
-set search_path = public
-as $$
-  select u.id, lower(trim(u.email::text))
-  from auth.users u
-  where u.id is distinct from auth.uid()
-    and u.email is not null
-    and trim(u.email::text) <> ''
-  order by lower(trim(u.email::text));
-$$;
-
-revoke all on function public.list_chat_contacts() from public;
-grant execute on function public.list_chat_contacts() to authenticated;
+-- list_chat_contacts() → ejecutar 055_chat_contacts_unread.sql después de 054
+-- (evita conflicto de tipos si se re-ejecuta este archivo).
 
 do $$
 begin

@@ -9,7 +9,14 @@
     </p>
     <div class="com-alert-actions">
       <button type="button" class="com-alert-btn" (click)="enableAlerts()">
-        {{ notifyPermission === 'granted' ? '🔔 Avisos + FCM activados' : 'Activar tono y notificaciones (FCM)' }}
+        {{
+          pushRegisteredForUser
+            ? '🔔 Avisos + FCM activados (esta cuenta)'
+            : 'Activar tono y notificaciones (FCM)'
+        }}
+      </button>
+      <button type="button" class="com-alert-btn com-alert-btn--test" (click)="testLocalNotification()">
+        Probar aviso local
       </button>
       <button type="button" class="com-alert-btn com-alert-btn--test" (click)="testClosedAppPush()">
         Probar con app cerrada
@@ -17,9 +24,14 @@
     </div>
     <p class="com-alert-hint" *ngIf="pushDiagLabel" role="status">{{ pushDiagLabel }}</p>
     <p class="com-alert-hint" *ngIf="pushUiState">{{ pushUiState }}</p>
+    <ul class="com-diag-list" *ngIf="pushDiagLines.length">
+      <li *ngFor="let line of pushDiagLines">{{ line }}</li>
+    </ul>
     <p class="com-alert-hint com-alert-hint--android">
       Android: abrí la app en <strong>Chrome</strong> (no WhatsApp) → Activar avisos → Probar con app cerrada →
       <strong>cerrá Chrome</strong> (no solo minimizar) → mirá la barra de arriba o deslizá notificaciones.
+      <strong>Otra cuenta en el mismo celular:</strong> aunque diga «Navegador: permitido», cada usuario debe
+      tocar <strong>Activar</strong> una vez (el registro es por cuenta).
     </p>
 
     <section class="com-sound" aria-label="Tono de mensaje">

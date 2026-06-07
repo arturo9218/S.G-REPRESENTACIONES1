@@ -56,6 +56,9 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
   notifyPermission: NotificationPermission | 'unsupported' = 'unsupported';
   pushUiState = '';
   pushDiagLabel = '';
+  pushDiagLines: string[] = [];
+  /** FCM registrado en servidor para el usuario logueado (no solo permiso del navegador). */
+  pushRegisteredForUser = false;
   soundSettings: ChatNotificationSettings = loadChatNotificationSettings();
   readonly soundPresets = CHAT_SOUND_PRESETS;
   myUserId = '';
@@ -146,9 +149,19 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
         .select('*', { count: 'exact', head: true })
         .eq('user_id', this.myUserId);
       const n = count ?? 0;
+      this.pushRegisteredForUser = n > 0;
       parts.push(n > 0 ? `Servidor: ${n} dispositivo(s) registrado(s)` : 'Servidor: sin registro push');
+    } else {
+      this.pushRegisteredForUser = false;
     }
     this.pushDiagLabel = parts.join(' · ');
+    this.pushDiagLines = await this.webPush.getDiagnostics(this.myUserId);
+  }
+
+  async testLocalNotification(): Promise<void> {
+    const msg = this.webPush.tryLocalNotification();
+    this.pushUiState = msg;
+    this.toast.show(msg, 'info');
   }
 
   async testClosedAppPush(): Promise<void> {
@@ -169,8 +182,10 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
       typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
     await this.refreshPushDiagnostics();
     if (push.ok) {
+      const local = this.webPush.tryLocalNotification();
+      this.pushUiState = `${push.message} | ${local}`;
       this.toast.success(
-        'FCM activo. Tocá "Probar con app cerrada", cerrá Chrome y mirá la barra de notificaciones arriba.'
+        'FCM activo. Si viste la notificación local arriba, el permiso OK. Ahora "Probar con app cerrada".'
       );
       this.chatNotify.playIncomingSound();
     } else if (this.notifyPermission === 'denied') {

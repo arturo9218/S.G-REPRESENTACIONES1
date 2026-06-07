@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     body: 'Si ves esto con la app cerrada, las notificaciones FCM funcionan.',
     tag: 'test-push',
     navigate: '/comunidad',
-    requireInteraction: true,
+      requireInteraction: false,
   });
 
   const payload = { userId: user.id, ...result };

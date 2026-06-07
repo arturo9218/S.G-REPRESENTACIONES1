@@ -30,6 +30,20 @@ function formatPushSubscribeError(raw: string): string {
   return raw;
 }
 
+/** Espera a que ngsw-worker.js esté activo (Android suele tardar unos segundos). */
+async function waitForActiveServiceWorker(maxMs = 25000): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+    return false;
+  }
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg?.active) return true;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return !!(await navigator.serviceWorker.getRegistration())?.active;
+}
+
 /** Reintenta registro FCM ante cortes breves de red (típico en 4G). */
 async function requestSubscriptionWithRetry(
   swPush: SwPush,
@@ -111,7 +125,15 @@ export class WebPushService {
       }
     }
     try {
-      // Android: suscribir FCM antes de otros awaits (el gesto del botón se pierde si tardamos).
+      const swReady = await waitForActiveServiceWorker();
+      if (!swReady) {
+        return {
+          ok: false,
+          message:
+            'El Service Worker (ngsw) no está listo. Recargá la página, esperá 10 s y volvé a tocar Activar avisos. Usá la URL de Vercel en Chrome.',
+        };
+      }
+      // Android: suscribir FCM enseguida tras permiso (mismo toque del botón).
       const sub = await requestSubscriptionWithRetry(this.swPush, pk);
       const {
         data: { user },
@@ -127,18 +149,18 @@ export class WebPushService {
         };
       }
       const { p256dh, auth } = keys;
-      const { error } = await this.auth.client.from('push_subscriptions').upsert(
-        {
-          user_id: user.id,
-          endpoint: sub.endpoint,
-          p256dh,
-          auth,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'endpoint' }
-      );
-      if (error) {
-        return { ok: false, message: error.message };
+      const { error: rpcErr } = await this.auth.client.rpc('register_push_subscription', {
+        p_endpoint: sub.endpoint,
+        p_p256dh: p256dh,
+        p_auth: auth,
+      });
+      if (rpcErr) {
+        const hint =
+          rpcErr.message?.includes('register_push_subscription') ||
+          rpcErr.code === 'PGRST202'
+            ? ' Ejecutá en Supabase el SQL 056_push_subscription_register_rpc.sql.'
+            : '';
+        return { ok: false, message: `${rpcErr.message}${hint}` };
       }
       const { count, error: verifyErr } = await this.auth.client
         .from('push_subscriptions')
@@ -166,6 +188,46 @@ export class WebPushService {
   }
 
   /** Envía una notificación de prueba al usuario actual (útil con la app cerrada). */
+  /** Diagnóstico completo para mostrar en Comunidad (Android). */
+  async getDiagnostics(userId: string): Promise<string[]> {
+    const lines: string[] = [];
+    const pk = environment.vapidPublicKey?.trim() ?? '';
+    lines.push(pk ? `VAPID en build: sí (${pk.length} caracteres)` : 'VAPID en build: NO — redeploy Vercel con VAPID_PUBLIC_KEY');
+    lines.push(`Service Worker módulo: ${this.swPush.isEnabled ? 'activo' : 'inactivo (¿ng serve local?)'}`);
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      lines.push(`SW registrado: ${reg?.active ? 'sí' : 'no — recargá la página'}`);
+    }
+    if (typeof Notification !== 'undefined') {
+      lines.push(`Permiso notificaciones: ${Notification.permission}`);
+    }
+    const ui = await this.getUiState();
+    lines.push(`Suscripción FCM en navegador: ${ui === 'active' ? 'sí' : ui}`);
+    if (userId) {
+      const { count } = await this.auth.client
+        .from('push_subscriptions')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId);
+      lines.push(`Registro en servidor: ${count ?? 0} dispositivo(s)`);
+    }
+    return lines;
+  }
+
+  /** Notificación local inmediata (prueba que Android muestra avisos de este sitio). */
+  tryLocalNotification(): string {
+    if (typeof Notification === 'undefined') return 'Notification API no disponible';
+    if (Notification.permission !== 'granted') return 'Sin permiso — activá avisos primero';
+    try {
+      new Notification('Prueba local AR Monitoreo', {
+        body: 'Si ves esto, el permiso del sitio funciona. El push FCM es aparte.',
+        tag: 'local-test',
+      });
+      return 'Notificación local mostrada (mirá arriba en el celular).';
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  }
+
   async sendTestPush(): Promise<{ ok: boolean; message: string }> {
     const session = await this.auth.getSession();
     const token = session?.access_token;
