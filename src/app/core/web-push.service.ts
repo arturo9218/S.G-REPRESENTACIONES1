@@ -89,21 +89,15 @@ export class WebPushService {
       return {
         ok: false,
         message:
-          'El Service Worker no está activo (ngsw). Revisá que environment.serviceWorkerEnabled sea true y que el build incluya el SW (angular.json → serviceWorker). Tras cambiarlo, recargá la página con Ctrl+F5.',
+          'El Service Worker no está activo (ngsw). Abrí la app publicada en HTTPS (Vercel), no ng serve. Agregá a Inicio en Android si hace falta.',
       };
-    }
-    const {
-      data: { user },
-    } = await this.auth.client.auth.getUser();
-    if (!user) {
-      return { ok: false, message: 'Iniciá sesión para activar avisos en este navegador.' };
     }
     if (typeof window !== 'undefined' && 'Notification' in window) {
       if (Notification.permission === 'denied') {
         return {
           ok: false,
           message:
-            'Las notificaciones están bloqueadas. En el navegador o en Ajustes del sistema, permití notificaciones para este sitio.',
+            'Notificaciones bloqueadas. Android: Ajustes → Apps → Chrome → Notificaciones → permitir. También el sitio en Chrome (candado → permisos).',
         };
       }
       if (Notification.permission === 'default') {
@@ -117,7 +111,14 @@ export class WebPushService {
       }
     }
     try {
+      // Android: suscribir FCM antes de otros awaits (el gesto del botón se pierde si tardamos).
       const sub = await requestSubscriptionWithRetry(this.swPush, pk);
+      const {
+        data: { user },
+      } = await this.auth.client.auth.getUser();
+      if (!user) {
+        return { ok: false, message: 'Iniciá sesión para activar avisos en este celular.' };
+      }
       const keys = keysFromPushSubscription(sub);
       if (!keys) {
         return {

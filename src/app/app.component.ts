@@ -97,14 +97,9 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** Re-suscribe FCM si el usuario ya dio permiso pero no hay fila en push_subscriptions. */
+  /** En Android la suscripción FCM requiere un toque del usuario; no auto-suscribir al abrir. */
   private async ensureBackgroundPush(): Promise<void> {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
-    if (!environment.vapidPublicKey?.trim()) return;
-    const ui = await this.webPush.getUiState();
-    if (ui === 'active') return;
-    await this.webPush.subscribeBackgroundAlerts();
+    /* noop: usar Comunidad → Activar tono y notificaciones (FCM) */
   }
 
   ngOnDestroy(): void {

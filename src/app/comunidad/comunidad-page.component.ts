@@ -92,7 +92,6 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
     this.soundSettings = loadChatNotificationSettings();
     this.notifyPermission = await this.chatNotify.ensurePermission();
     await this.refreshPushDiagnostics();
-    await this.ensureBackgroundPush();
     void this.chatRealtime.start();
     this.uiSubs.push(
       this.chatRealtime.global$.subscribe((msg) => {
@@ -125,18 +124,6 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
       el.scrollTop = el.scrollHeight;
       this.scrollPending = false;
     }
-  }
-
-  /** Si ya hay permiso del navegador, intenta suscribir FCM para avisos con app cerrada. */
-  private async ensureBackgroundPush(): Promise<void> {
-    const vapidOk =
-      typeof environment.vapidPublicKey === 'string' && environment.vapidPublicKey.trim().length > 0;
-    if (!vapidOk || this.notifyPermission !== 'granted') return;
-    const ui = await this.webPush.getUiState();
-    if (ui !== 'none') return;
-    const push = await this.webPush.subscribeBackgroundAlerts();
-    if (push.message) this.pushUiState = push.message;
-    await this.refreshPushDiagnostics();
   }
 
   async refreshPushDiagnostics(): Promise<void> {
@@ -176,22 +163,23 @@ export class ComunidadPageComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   async enableAlerts(): Promise<void> {
-    this.notifyPermission = await this.chatNotify.ensurePermission();
     const push = await this.webPush.subscribeBackgroundAlerts();
     this.pushUiState = push.message;
+    this.notifyPermission =
+      typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
     await this.refreshPushDiagnostics();
-    if (this.notifyPermission === 'granted') {
+    if (push.ok) {
       this.toast.success(
-        push.ok
-          ? 'Avisos activos: tono en la app y push con Google (FCM) aunque la pantalla esté apagada.'
-          : 'Permiso OK en este navegador. Para segundo plano (FCM): ' + push.message
+        'FCM activo. Tocá "Probar con app cerrada", cerrá Chrome y mirá la barra de notificaciones arriba.'
       );
       this.chatNotify.playIncomingSound();
     } else if (this.notifyPermission === 'denied') {
       this.toast.show(
-        'Permiso bloqueado. En el teléfono: ajustes → notificaciones para AR Monitoreo.',
+        'Permiso bloqueado. Android: Ajustes → Apps → Chrome → Notificaciones → Activar.',
         'info'
       );
+    } else {
+      this.toast.show(push.message, 'info');
     }
   }
 
