@@ -1,8 +1,8 @@
 /**
- * Danfoss T2 / TE2 — cartuchos de orificio intercambiables 0X … 06.
- * Capacidades nominales (kW) vs temperatura de evaporación según tablas Danfoss
- * (R-404A / R-507, Tc ≈ 38 °C / 100 °F, recalentamiento de apertura 6 K).
- * Orientativo de taller; confirmar con Coolselector®2 o catálogo Danfoss.
+ * Danfoss T2 / TE2 — cartuchos 0X … 06 (elemento rango N).
+ * Curvas TE2 (kW vs Te): R-134a y R-407C a Tc 25 °C, SH apertura 6 K (−40 … +10 °C).
+ * R-404A y R-22: Te −30 / −10 / 0 °C (taller / catálogo).
+ * R-448A / R-449A: escala vs curva R-404A. Orientativo; confirmar con Coolselector®2.
  */
 
 import {
@@ -27,8 +27,16 @@ export interface DanfossOrificeDef {
   label: string;
 }
 
-/** Temperaturas de evaporación de la tabla Danfoss (°F → °C). */
+/** Temperaturas de evaporación para interpolación (°F típicas Danfoss → °C). */
 export const DANFOSS_EVAP_TEMP_C = [-40, -34.4, -28.9, -23.3, -17.8, -12.2, -6.7, -1.1, 4.4, 10] as const;
+
+/** Curva TE2 completa (R-134a, R-407C): Te −40 … +10 °C, paso 10 K. */
+const TE2_FULL_TEMPS_C = [-40, -30, -20, -10, 0, 10] as const;
+
+/** Curva TE2 corta (R-404A, R-22): Te −30 / −10 / 0 °C. */
+const TE2_SHORT_TEMPS_C = [-30, -10, 0] as const;
+
+const TR_TO_KW = 3.517;
 
 export const DANFOSS_ORIFICES: readonly DanfossOrificeDef[] = [
   { id: '0X', orificeCode: '068-2002', label: '0X' },
@@ -41,81 +49,102 @@ export const DANFOSS_ORIFICES: readonly DanfossOrificeDef[] = [
   { id: '06', orificeCode: '068-2009', label: '06' },
 ];
 
-const TR_TO_KW = 3.517;
-
-/** Capacidad en ton (TR) por orificio y columna DANFOSS_EVAP_TEMP_C. */
-const TR_TABLE: Record<DanfossRefFamily, Record<DanfossOrificeId, readonly number[]>> = {
-  r404a: {
-    '0X': [1 / 6, 1 / 8, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 5, 1 / 5, 1 / 5, 1 / 5],
-    '00': [1 / 3, 1 / 5, 1 / 5, 1 / 4, 1 / 4, 1 / 3, 1 / 3, 1 / 3, 1 / 3, 1 / 3],
-    '01': [3 / 4, 1 / 4, 1 / 3, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 1 / 2, 3 / 4, 3 / 4],
-    '02': [1, 1 / 4, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 1, 1],
-    '03': [1.75, 0.5, 0.5, 0.75, 0.75, 1, 1, 4 / 3, 1.5, 1.75],
-    '04': [2.75, 0.75, 0.75, 0.75, 1, 1, 4 / 3, 1.5, 2, 2 + 1 / 3],
-    '05': [3.75, 1, 1, 1, 1.5, 1.75, 2, 2.5, 3, 3.5],
-    '06': [4.5, 1, 1, 4 / 3, 1.75, 2, 2.5, 3, 3.75, 4],
-  },
-  r134a: {
-    '0X': [1 / 5, 1 / 8, 1 / 8, 1 / 6, 1 / 6, 1 / 6, 1 / 5, 1 / 5, 1 / 5, 1 / 5],
-    '00': [1 / 3, 1 / 8, 1 / 6, 1 / 5, 1 / 5, 1 / 4, 1 / 4, 1 / 4, 1 / 3, 1 / 3],
-    '01': [1 / 2, 1 / 5, 1 / 4, 1 / 4, 1 / 3, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 1 / 2],
-    '02': [3 / 4, 1 / 4, 1 / 4, 1 / 3, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 1 / 2, 3 / 4],
-    '03': [1.5, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 1, 1, 1 + 1 / 4],
-    '04': [1.75, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 1, 1, 1 + 1 / 4, 1 + 1 / 3, 1.5],
-    '05': [2 + 1 / 3, 3 / 4, 3 / 4, 1, 1, 1, 1 + 1 / 3, 1.5, 1.75, 2],
-    '06': [3.75, 1, 1 + 1 / 4, 1 + 1 / 3, 1.5, 2, 2 + 1 / 4, 2.5, 2.75, 3],
-  },
-  r407c: {
-    '0X': [1 / 4, 1 / 5, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4],
-    '00': [1 / 2, 1 / 3, 1 / 3, 2 / 5, 1 / 2, 1 / 2, 1 / 2, 1 / 2, 1 / 2, 1 / 2],
-    '01': [3 / 4, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 3 / 4, 1, 1],
-    '02': [1, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 1, 1, 1],
-    '03': [1.75, 1 / 2, 3 / 4, 3 / 4, 1, 1, 1 + 1 / 3, 1.5, 1.75, 2],
-    '04': [2.5, 3 / 4, 1, 1, 1 + 1 / 3, 1.5, 1.75, 2, 2.5, 3],
-    '05': [3.5, 1, 1 + 1 / 4, 1.5, 1.75, 2, 2.5, 3, 3.5, 4],
-    '06': [4.5, 1 + 1 / 4, 1.5, 1.75, 2, 2.5, 3, 3.75, 4.5, 5],
-  },
-  r22: {
-    '0X': [1 / 4, 1 / 5, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4],
-    '00': [1 / 2, 1 / 4, 1 / 3, 1 / 3, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 1 / 2, 1 / 2],
-    '01': [1, 1 / 4, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 1, 1],
-    '02': [1 + 1 / 3, 1 / 4, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 1, 1],
-    '03': [2 + 1 / 3, 1 / 2, 3 / 4, 3 / 4, 1, 1, 1 + 1 / 3, 1.5, 2, 2 + 1 / 3],
-    '04': [3.5, 3 / 4, 1, 1, 1 + 1 / 3, 1.5, 2, 2.5, 3, 3.5],
-    '05': [4.75, 1, 1 + 1 / 4, 1.5, 1.75, 2, 2.5, 3, 3.5, 4],
-    '06': [5.5, 1 + 1 / 2, 2, 2 + 1 / 3, 2.75, 3, 3.75, 4 + 1 / 3, 5, 5.5],
-  },
-  r448a: {
-    '0X': [1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4],
-    '00': [1 / 2, 1 / 3, 1 / 3, 2 / 5, 1 / 2, 1 / 2, 1 / 2, 1 / 2, 1 / 2, 1 / 2],
-    '01': [3 / 4, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 3 / 4, 1, 1],
-    '02': [1, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 1, 1, 1],
-    '03': [2 + 1 / 3, 4 / 5, 1, 1, 1 + 2 / 5, 1 + 7 / 8, 2, 2 + 1 / 3, 2.5, 2.75],
-    '04': [3.6, 1 + 1 / 5, 1 + 3 / 5, 1 + 3 / 5, 2, 2 + 4 / 5, 3, 3 + 2 / 3, 4, 4.2],
-    '05': [4.6, 1 + 3 / 5, 2, 2, 2 + 3 / 4, 3, 3 + 2 / 3, 4 + 3 / 4, 5 + 1 / 5, 5.8],
-    '06': [5.6, 1 + 4 / 5, 2.5, 3 + 1 / 3, 4.5, 5 + 3 / 4, 6 + 1 / 4, 6.8, 7.2, 7.5],
-  },
-  r449a: {
-    '0X': [1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4, 1 / 4],
-    '00': [1 / 2, 1 / 3, 1 / 3, 2 / 5, 1 / 2, 1 / 2, 1 / 2, 1 / 2, 1 / 2, 1 / 2],
-    '01': [3 / 4, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 3 / 4, 1, 1],
-    '02': [1, 1 / 3, 1 / 3, 1 / 2, 1 / 2, 3 / 4, 3 / 4, 1, 1, 1],
-    '03': [2 + 1 / 5, 4 / 5, 1, 1, 1 + 2 / 5, 1 + 4 / 5, 2, 2 + 2 / 3, 2.5, 2.8],
-    '04': [3.4, 1 + 1 / 4, 1 + 3 / 5, 1 + 3 / 5, 2, 2 + 3 / 4, 3, 3.5, 3.8, 4.2],
-    '05': [4.5, 1 + 3 / 5, 2, 2, 2 + 3 / 4, 3, 3 + 3 / 5, 4 + 3 / 5, 5, 5.5],
-    '06': [5.4, 1 + 7 / 8, 2.5, 3 + 1 / 4, 4 + 1 / 3, 5 + 3 / 5, 6, 6.8, 7.2, 7.8],
-  },
-};
-
-/** Capacidad nominal a Te = 4,4 °C (tabla técnica Danfoss, kW). */
+/** Capacidad nominal a Te = 0 °C (kW). R-134a / R-407C: tabla TE2 Tc 25 °C. */
 export const DANFOSS_NOMINAL_KW: Record<DanfossRefFamily, Record<DanfossOrificeId, number>> = {
-  r404a: { '0X': 0.9, '00': 1.8, '01': 3.5, '02': 4.7, '03': 8, '04': 12.1, '05': 16.7, '06': 19.7 },
-  r134a: { '0X': 0.58, '00': 1, '01': 1.8, '02': 2.2, '03': 3.7, '04': 5.4, '05': 6.9, '06': 8.6 },
-  r407c: { '0X': 0.68, '00': 1.2, '01': 2.1, '02': 2.6, '03': 4.3, '04': 6.4, '05': 8.4, '06': 10.1 },
-  r22: { '0X': 0.92, '00': 1.8, '01': 3.5, '02': 4.8, '03': 8.1, '04': 12.4, '05': 16.5, '06': 19.7 },
-  r448a: { '0X': 0.9, '00': 1.8, '01': 3.5, '02': 4.8, '03': 8.1, '04': 12.6, '05': 16.3, '06': 19.8 },
-  r449a: { '0X': 0.88, '00': 1.7, '01': 3.4, '02': 4.6, '03': 7.9, '04': 12.1, '05': 15.7, '06': 19.1 },
+  r404a: { '0X': 0.38, '00': 0.7, '01': 1.6, '02': 2.1, '03': 4.2, '04': 6.0, '05': 7.7, '06': 9.1 },
+  r134a: { '0X': 0.61, '00': 1.03, '01': 1.72, '02': 2.08, '03': 3.49, '04': 5.15, '05': 6.8, '06': 8.16 },
+  r407c: { '0X': 0.88, '00': 1.69, '01': 3.19, '02': 4.18, '03': 7.07, '04': 10.6, '05': 14.0, '06': 16.8 },
+  r22: { '0X': 0.5, '00': 1.0, '01': 2.5, '02': 3.5, '03': 5.2, '04': 8.0, '05': 10.5, '06': 15.5 },
+  r448a: { '0X': 0.38, '00': 0.7, '01': 1.6, '02': 2.1, '03': 4.3, '04': 6.2, '05': 8.0, '06': 9.2 },
+  r449a: { '0X': 0.37, '00': 0.68, '01': 1.55, '02': 2.05, '03': 4.1, '04': 5.9, '05': 7.6, '06': 9.0 },
 };
+
+/** Curva TE2 (kW) en Te −30 / −10 / 0 °C — R-404A. 0X/00 derivados del nominal × forma de 01. */
+const KW_CURVE_R404A: Record<DanfossOrificeId, readonly [number, number, number]> = {
+  '0X': [0.14, 0.24, 0.38],
+  '00': [0.26, 0.44, 0.7],
+  '01': [0.6, 1.0, 1.6],
+  '02': [0.9, 1.5, 2.1],
+  '03': [1.7, 2.8, 4.2],
+  '04': [2.5, 4.0, 6.0],
+  '05': [3.5, 5.2, 7.7],
+  '06': [4.2, 6.4, 9.1],
+};
+
+/** Curva TE2 (kW) en Te −30 / −10 / 0 °C — R-22. */
+const KW_CURVE_R22: Record<DanfossOrificeId, readonly [number, number, number]> = {
+  '0X': [0.19, 0.38, 0.5],
+  '00': [0.38, 0.63, 1.0],
+  '01': [0.9, 1.8, 2.5],
+  '02': [1.4, 2.5, 3.5],
+  '03': [2.0, 3.8, 5.2],
+  '04': [3.2, 5.5, 8.0],
+  '05': [4.5, 7.2, 10.5],
+  '06': [6.5, 10.2, 15.5],
+};
+
+/** TE2 R-134a, Tc 25 °C, SH apertura 6 K — kW en Te −40 … +10 °C. */
+const KW_CURVE_R134A: Record<DanfossOrificeId, readonly [number, number, number, number, number, number]> = {
+  '0X': [0.48, 0.54, 0.59, 0.62, 0.61, 0.54],
+  '00': [0.52, 0.67, 0.82, 0.95, 1.03, 0.98],
+  '01': [0.7, 0.92, 1.19, 1.48, 1.72, 1.77],
+  '02': [0.78, 1.03, 1.35, 1.73, 2.08, 2.24],
+  '03': [1.31, 1.72, 2.27, 2.89, 3.49, 3.76],
+  '04': [1.89, 2.49, 3.28, 4.21, 5.15, 5.69],
+  '05': [2.5, 3.28, 4.33, 5.57, 6.8, 7.48],
+  '06': [2.98, 3.93, 5.2, 6.69, 8.16, 8.96],
+};
+
+/** TE2 R-407C, Tc 25 °C, SH apertura 6 K — kW en Te −40 … +10 °C. */
+const KW_CURVE_R407C: Record<DanfossOrificeId, readonly [number, number, number, number, number, number]> = {
+  '0X': [0.76, 0.83, 0.88, 0.9, 0.88, 0.81],
+  '00': [0.99, 1.21, 1.42, 1.6, 1.69, 1.63],
+  '01': [1.41, 1.8, 2.27, 2.77, 3.19, 3.31],
+  '02': [1.59, 2.06, 2.67, 3.4, 4.18, 4.64],
+  '03': [2.65, 3.44, 4.46, 5.73, 7.07, 7.85],
+  '04': [3.86, 4.98, 6.44, 8.35, 10.6, 12.5],
+  '05': [5.04, 6.52, 8.46, 11.0, 14.0, 16.3],
+  '06': [5.94, 7.71, 10.1, 13.2, 16.8, 19.4],
+};
+
+function interpolateKwAtTe(xs: readonly number[], values: readonly number[], teC: number): number {
+  if (!xs.length || xs.length !== values.length) return 0;
+  if (teC <= xs[0]) {
+    if (xs.length === 1) return values[0];
+    const slope = (values[1] - values[0]) / (xs[1] - xs[0]);
+    return Math.max(0, values[0] + slope * (teC - xs[0]));
+  }
+  if (teC >= xs[xs.length - 1]) {
+    const i = xs.length - 1;
+    const slope = (values[i] - values[i - 1]) / (xs[i] - xs[i - 1]);
+    return Math.max(0, values[i] + slope * (teC - xs[i]));
+  }
+  for (let i = 0; i < xs.length - 1; i++) {
+    if (teC <= xs[i + 1]) {
+      const t = (teC - xs[i]) / (xs[i + 1] - xs[i]);
+      return lerp(values[i], values[i + 1], t);
+    }
+  }
+  return values[values.length - 1];
+}
+
+function orificeCapacityKwAtTe(family: DanfossRefFamily, orifice: DanfossOrificeId, teC: number): number {
+  if (family === 'r134a') {
+    return interpolateKwAtTe(TE2_FULL_TEMPS_C, KW_CURVE_R134A[orifice], teC);
+  }
+  if (family === 'r407c') {
+    return interpolateKwAtTe(TE2_FULL_TEMPS_C, KW_CURVE_R407C[orifice], teC);
+  }
+  if (family === 'r404a') {
+    return interpolateKwAtTe(TE2_SHORT_TEMPS_C, KW_CURVE_R404A[orifice], teC);
+  }
+  if (family === 'r22') {
+    return interpolateKwAtTe(TE2_SHORT_TEMPS_C, KW_CURVE_R22[orifice], teC);
+  }
+  const r404 = interpolateKwAtTe(TE2_SHORT_TEMPS_C, KW_CURVE_R404A[orifice], teC);
+  const scale = DANFOSS_NOMINAL_KW[family][orifice] / DANFOSS_NOMINAL_KW.r404a[orifice];
+  return r404 * scale;
+}
 
 const REFRIGERANT_FAMILY: Record<string, DanfossRefFamily> = {
   r404a: 'r404a',
@@ -141,24 +170,6 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-function interpolateAtTemp(values: readonly number[], teC: number): number {
-  const xs = DANFOSS_EVAP_TEMP_C;
-  if (teC <= xs[0]) return values[0];
-  if (teC >= xs[xs.length - 1]) return values[values.length - 1];
-  for (let i = 0; i < xs.length - 1; i++) {
-    if (teC <= xs[i + 1]) {
-      const t = (teC - xs[i]) / (xs[i + 1] - xs[i]);
-      return lerp(values[i], values[i + 1], t);
-    }
-  }
-  return values[values.length - 1];
-}
-
-function trTableKw(family: DanfossRefFamily, orifice: DanfossOrificeId, teC: number): number {
-  const tr = interpolateAtTemp(TR_TABLE[family][orifice], teC);
-  return tr * TR_TO_KW;
-}
-
 /** Capacidad del cartucho (kW) para un refrigerante de la app. */
 export function danfossOrificeCapacityKw(
   refrigerantId: string,
@@ -166,9 +177,9 @@ export function danfossOrificeCapacityKw(
   teC: number
 ): number | null {
   const family = danfossFamilyForRefrigerant(refrigerantId);
-  if (family) return trTableKw(family, orifice, teC);
+  if (family) return orificeCapacityKwAtTe(family, orifice, teC);
 
-  const r404 = trTableKw('r404a', orifice, teC);
+  const r404 = orificeCapacityKwAtTe('r404a', orifice, teC);
   const r404Nom = DANFOSS_NOMINAL_KW.r404a[orifice];
   const refNom = estimateNominalKw(refrigerantId, orifice);
   if (refNom == null || r404Nom <= 0) return null;

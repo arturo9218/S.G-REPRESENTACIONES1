@@ -80,6 +80,17 @@ export function formatNum(v: number | null, digits = 2): string {
   return v.toFixed(digits);
 }
 
+/** Parsea borrador de input numérico (coma decimal, signo − unicode, negativos). */
+export function parseDraftNum(raw: string | null | undefined): number | null {
+  const cleaned = String(raw ?? '')
+    .replace(',', '.')
+    .replace(/\u2212/g, '-')
+    .trim();
+  if (!cleaned || cleaned === '-' || cleaned === '+') return null;
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
 export interface SuperheatResult {
   satTempC: number;
   superheatC: number;

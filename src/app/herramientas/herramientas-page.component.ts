@@ -35,6 +35,7 @@ import {
   evaluateSubcooling,
   evaluateSuperheat,
   formatNum,
+  parseDraftNum,
   fromAbsBar,
   satTempFromAbsBar,
   toAbsBar,
@@ -43,11 +44,17 @@ import {
   type SuperheatResult,
 } from './refrigerant-pt.utils';
 import {
+  CHAMBER_DOOR_USAGE,
+  CHAMBER_INSULATION_PRESETS,
+  CHAMBER_PRODUCT_TYPES,
   CHAMBER_USAGE_PRESETS,
   chamberEvapTempC,
   estimateChamberLoad,
+  type ChamberCalcMode,
+  type ChamberDoorUsage,
+  type ChamberInsulationPreset,
   type ChamberLoadResult,
-  type ChamberUsagePreset,
+  type ChamberProductType,
 } from './chamber-load.utils';
 import { danfossOrificeFichaText, sizeTxv, type TxvSizingResult } from './txv-sizing.utils';
 import type { DanfossApplication } from './danfoss-valve-lines.data';
@@ -96,6 +103,9 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
   readonly refrigerantCount = REFRIGERANTS.length;
   readonly danfossValveLines = DANFOSS_VALVE_LINES;
   readonly chamberUsagePresets = CHAMBER_USAGE_PRESETS;
+  readonly chamberProductTypes = CHAMBER_PRODUCT_TYPES;
+  readonly chamberInsulationPresets = CHAMBER_INSULATION_PRESETS;
+  readonly chamberDoorUsageOptions = CHAMBER_DOOR_USAGE;
 
   activeTab: HerramientasTab = 'pt';
 
@@ -128,12 +138,23 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
   txvDistributorDropDraft = '1';
   txvApplication: DanfossApplication = 'refrigeracion';
 
-  camLengthDraft = '5';
-  camWidthDraft = '4';
-  camHeightDraft = '2.8';
+  camCalcMode: ChamberCalcMode = 'completo';
+  camLengthDraft = '4';
+  camWidthDraft = '3';
+  camHeightDraft = '2.5';
   camExteriorDraft = '35';
-  camInteriorDraft = '2';
-  camUsage: ChamberUsagePreset = 'media_verduras';
+  camInteriorDraft = '5';
+  camProductType: ChamberProductType = 'verdura';
+  camInsulation: ChamberInsulationPreset = 'mamposteria';
+  camCustomKDraft = '0.85';
+  camDoorUsage: ChamberDoorUsage = 'medio';
+  camKgDayDraft = '500';
+  camProductInDraft = '25';
+  camOpHoursDraft = '18';
+  camMotorsWDraft = '300';
+  camLightsWDraft = '100';
+  camPeopleWDraft = '0';
+  camMarginDraft = '20';
   camKcalCustomDraft = '110';
 
   unitCategory: UnitCategory = 'pressure';
@@ -285,20 +306,40 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
   }
 
   get chamberLoadResult(): ChamberLoadResult | null {
-    const L = parseFloat(this.camLengthDraft.replace(',', '.'));
-    const A = parseFloat(this.camWidthDraft.replace(',', '.'));
-    const H = parseFloat(this.camHeightDraft.replace(',', '.'));
-    const ext = parseFloat(this.camExteriorDraft.replace(',', '.'));
-    const int = parseFloat(this.camInteriorDraft.replace(',', '.'));
-    const customKcal = parseFloat(this.camKcalCustomDraft.replace(',', '.'));
+    const L = parseDraftNum(this.camLengthDraft);
+    const A = parseDraftNum(this.camWidthDraft);
+    const H = parseDraftNum(this.camHeightDraft);
+    const ext = parseDraftNum(this.camExteriorDraft);
+    const int = parseDraftNum(this.camInteriorDraft);
+    const customK = parseDraftNum(this.camCustomKDraft);
+    const kgDay = parseDraftNum(this.camKgDayDraft);
+    const prodIn = parseDraftNum(this.camProductInDraft);
+    const opH = parseDraftNum(this.camOpHoursDraft);
+    const motorsW = parseDraftNum(this.camMotorsWDraft);
+    const lightsW = parseDraftNum(this.camLightsWDraft);
+    const peopleW = parseDraftNum(this.camPeopleWDraft);
+    const margin = parseDraftNum(this.camMarginDraft);
+    const customKcal = parseDraftNum(this.camKcalCustomDraft);
+    if (L == null || A == null || H == null || ext == null || int == null) return null;
     return estimateChamberLoad({
       lengthM: L,
       widthM: A,
       heightM: H,
       exteriorTempC: ext,
       interiorTempC: int,
-      usage: this.camUsage,
-      kcalPerM3Custom: this.camUsage === 'custom' ? customKcal : undefined,
+      productType: this.camProductType,
+      insulation: this.camInsulation,
+      customKKcalHm2C: this.camInsulation === 'custom_u' ? customK : undefined,
+      doorUsage: this.camDoorUsage,
+      kgProductPerDay: Number.isFinite(kgDay) ? kgDay : 0,
+      productInTempC: Number.isFinite(prodIn) ? prodIn : ext,
+      opHoursPerDay: Number.isFinite(opH) ? opH : 18,
+      motorsW: Number.isFinite(motorsW) ? motorsW : 0,
+      lightsW: Number.isFinite(lightsW) ? lightsW : 0,
+      peopleHeatW: Number.isFinite(peopleW) ? peopleW : 0,
+      safetyMarginPct: Number.isFinite(margin) ? margin : 20,
+      mode: this.camCalcMode,
+      kcalPerM3Custom: this.camCalcMode === 'rapido' ? customKcal : undefined,
     });
   }
 
@@ -409,7 +450,7 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.txvCapacityDraft = String(Math.round(load.kw * 100) / 100);
-    this.txvEvapDraft = String(chamberEvapTempC(load.interiorTempC, this.camUsage));
+    this.txvEvapDraft = String(chamberEvapTempC(load.interiorTempC, this.camProductType));
     this.txvCondDraft = String(load.exteriorTempC);
     this.activeTab = 'txv';
     this.toast.success(`${load.kw.toFixed(2)} kW copiados al dimensionado Danfoss.`);

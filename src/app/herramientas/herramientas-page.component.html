@@ -71,7 +71,7 @@
       <div class="herr-lookup__box">
         <label class="herr-field">
           <span class="herr-field__label">T (°C) → presión</span>
-          <input type="text" class="herr-field__input" [(ngModel)]="lookupTempDraft" inputmode="decimal" placeholder="Ej. -10" />
+          <input type="text" class="herr-field__input" [(ngModel)]="lookupTempDraft" inputmode="text" placeholder="Ej. -10" />
         </label>
         <button type="button" class="herr-btn herr-btn--ghost" (click)="onLookupTemp()">Calcular presión</button>
         <p class="herr-lookup__result" *ngIf="lookupTempResult">{{ lookupTempResult }}</p>
@@ -201,7 +201,7 @@
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Temperatura succión (°C)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="shTempDraft" inputmode="decimal" placeholder="Ej. 5" />
+        <input type="text" class="herr-field__input" [(ngModel)]="shTempDraft" inputmode="text" placeholder="Ej. 5 o -10" />
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Recalentamiento objetivo (°C)</span>
@@ -250,7 +250,7 @@
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Temperatura líquido (°C)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="scTempDraft" inputmode="decimal" placeholder="Ej. 32" />
+        <input type="text" class="herr-field__input" [(ngModel)]="scTempDraft" inputmode="text" placeholder="Ej. 32" />
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Subenfriamiento objetivo (°C)</span>
@@ -326,7 +326,7 @@
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Valor</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="unitValueDraft" inputmode="decimal" />
+        <input type="text" class="herr-field__input" [(ngModel)]="unitValueDraft" [inputmode]="unitCategory === 'temp' ? 'text' : 'decimal'" />
       </label>
       <label class="herr-field" *ngIf="unitCategory === 'pressure'">
         <span class="herr-field__label">Unidad de entrada</span>
@@ -492,39 +492,89 @@
 
   <section class="herr-panel" *ngIf="activeTab === 'camara'" aria-label="Carga frigorífica de cámara">
     <p class="herr-panel__intro">
-      Método rápido de taller: <strong>Volumen (m³) × kcal/h·m³</strong> → BTU/h → <strong>kW</strong> → <strong>HP</strong>.
-      Media temperatura (verduras/lácteos): 100–120 kcal/h·m³ (110 habitual con paneles ~100 mm).
-      Congelados (−18 °C): 150–250 kcal/h·m³.
+      Método de taller: <strong>paredes + producto + infiltración + motores/luces + margen</strong>.
+      También podés usar el modo rápido (m³ × kcal/h·m³) solo como referencia.
     </p>
 
     <div class="herr-controls herr-controls--grid">
+      <label class="herr-field herr-field--wide">
+        <span class="herr-field__label">Método de cálculo</span>
+        <select class="herr-field__input" [(ngModel)]="camCalcMode">
+          <option value="completo">Completo (Q = U×A×ΔT + producto + puerta + …)</option>
+          <option value="rapido">Rápido (volumen × kcal/h·m³)</option>
+        </select>
+      </label>
       <label class="herr-field">
         <span class="herr-field__label">Largo (m)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="camLengthDraft" inputmode="decimal" placeholder="5" />
+        <input type="text" class="herr-field__input" [(ngModel)]="camLengthDraft" inputmode="decimal" placeholder="4" />
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Ancho (m)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="camWidthDraft" inputmode="decimal" placeholder="4" />
+        <input type="text" class="herr-field__input" [(ngModel)]="camWidthDraft" inputmode="decimal" placeholder="3" />
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Alto (m)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="camHeightDraft" inputmode="decimal" placeholder="2,8" />
+        <input type="text" class="herr-field__input" [(ngModel)]="camHeightDraft" inputmode="decimal" placeholder="2,5" />
       </label>
       <label class="herr-field">
         <span class="herr-field__label">T° exterior (°C)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="camExteriorDraft" inputmode="decimal" placeholder="35" />
+        <input type="text" class="herr-field__input" [(ngModel)]="camExteriorDraft" inputmode="text" placeholder="35" />
       </label>
       <label class="herr-field">
         <span class="herr-field__label">T° interior deseada (°C)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="camInteriorDraft" inputmode="decimal" placeholder="2" />
+        <input type="text" class="herr-field__input" [(ngModel)]="camInteriorDraft" inputmode="text" placeholder="Ej. 5 o -18" />
       </label>
       <label class="herr-field">
-        <span class="herr-field__label">Uso de la cámara</span>
-        <select class="herr-field__input" [(ngModel)]="camUsage">
-          <option *ngFor="let p of chamberUsagePresets" [value]="p.id">{{ p.label }}</option>
+        <span class="herr-field__label">Tipo de producto</span>
+        <select class="herr-field__input" [(ngModel)]="camProductType">
+          <option *ngFor="let p of chamberProductTypes" [value]="p.id">{{ p.label }}</option>
         </select>
       </label>
-      <label class="herr-field" *ngIf="camUsage === 'custom'">
+      <label class="herr-field" *ngIf="camCalcMode === 'completo'">
+        <span class="herr-field__label">Aislación del panel</span>
+        <select class="herr-field__input" [(ngModel)]="camInsulation">
+          <option *ngFor="let p of chamberInsulationPresets" [value]="p.id">{{ p.label }}</option>
+        </select>
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'completo' && camInsulation === 'custom_u'">
+        <span class="herr-field__label">K manual (kcal/h·m²·°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camCustomKDraft" inputmode="decimal" placeholder="0,85" />
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'completo'">
+        <span class="herr-field__label">Uso de puerta</span>
+        <select class="herr-field__input" [(ngModel)]="camDoorUsage">
+          <option *ngFor="let d of chamberDoorUsageOptions" [value]="d.id">{{ d.label }}</option>
+        </select>
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'completo' && camProductType !== 'ninguno'">
+        <span class="herr-field__label">Producto (kg/día)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camKgDayDraft" inputmode="decimal" placeholder="500" />
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'completo' && camProductType !== 'ninguno'">
+        <span class="herr-field__label">T° entrada producto (°C)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camProductInDraft" inputmode="decimal" placeholder="25" />
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'completo'">
+        <span class="herr-field__label">Horas operación / día</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camOpHoursDraft" inputmode="decimal" placeholder="18" />
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'completo'">
+        <span class="herr-field__label">Motores evaporador (W)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camMotorsWDraft" inputmode="decimal" placeholder="300" />
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'completo'">
+        <span class="herr-field__label">Luces (W)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camLightsWDraft" inputmode="decimal" placeholder="100" />
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'completo'">
+        <span class="herr-field__label">Personas / otros (W)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camPeopleWDraft" inputmode="decimal" placeholder="0" />
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'completo'">
+        <span class="herr-field__label">Margen de seguridad (%)</span>
+        <input type="text" class="herr-field__input" [(ngModel)]="camMarginDraft" inputmode="decimal" placeholder="20" />
+      </label>
+      <label class="herr-field" *ngIf="camCalcMode === 'rapido'">
         <span class="herr-field__label">kcal/h por m³</span>
         <input type="text" class="herr-field__input" [(ngModel)]="camKcalCustomDraft" inputmode="decimal" placeholder="110" />
       </label>
@@ -548,21 +598,67 @@
       <dl class="herr-result__dl">
         <div>
           <dt>Volumen</dt>
-          <dd><strong>{{ fmt(load.volumeM3, 1) }} m³</strong> · V = L × A × H</dd>
+          <dd><strong>{{ fmt(load.volumeM3, 1) }} m³</strong> · superficie {{ fmt(load.surfaceM2, 1) }} m²</dd>
+        </div>
+        <div *ngIf="camCalcMode === 'completo'">
+          <dt>Panel / producto</dt>
+          <dd>{{ load.insulationLabel }} · K {{ fmt(load.kKcalHm2C, 2) }} kcal/h·m²·°C · {{ load.productLabel }}</dd>
         </div>
         <div>
-          <dt>Coeficiente usado</dt>
-          <dd>{{ fmt(load.kcalPerM3, 0) }} kcal/h·m³ (rango típico {{ load.kcalPerM3Range }})</dd>
-        </div>
-        <div>
-          <dt>Carga</dt>
+          <dt>Carga total</dt>
           <dd>{{ fmt(load.kcalH, 0) }} kcal/h · {{ fmt(load.btuH, 0) }} BTU/h</dd>
         </div>
         <div>
           <dt>ΔT ambiente</dt>
           <dd>{{ fmt(load.exteriorTempC, 0) }} °C − {{ fmt(load.interiorTempC, 0) }} °C = {{ fmt(load.deltaTC, 0) }} °C</dd>
         </div>
+        <div>
+          <dt>Referencia m³</dt>
+          <dd>{{ fmt(load.kcalPerM3, 0) }} kcal/h·m³ (rango típico {{ load.kcalPerM3Range }})</dd>
+        </div>
       </dl>
+
+      <div class="herr-cam-breakdown" *ngIf="camCalcMode === 'completo'">
+        <h3 class="herr-subpanel__title">Desglose de carga (kcal/h)</h3>
+        <table class="herr-cam-table">
+          <thead>
+            <tr>
+              <th>Concepto</th>
+              <th>kcal/h</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Paredes / techo / piso</td>
+              <td>{{ fmt(load.breakdown.wallsKcalH, 0) }}</td>
+            </tr>
+            <tr>
+              <td>Producto</td>
+              <td>{{ fmt(load.breakdown.productKcalH, 0) }}</td>
+            </tr>
+            <tr>
+              <td>Puerta / infiltración ({{ load.doorLabel }})</td>
+              <td>{{ fmt(load.breakdown.infiltrationKcalH, 0) }}</td>
+            </tr>
+            <tr>
+              <td>Motores / luces / personas</td>
+              <td>{{ fmt(load.breakdown.internalKcalH, 0) }}</td>
+            </tr>
+            <tr>
+              <td>Subtotal</td>
+              <td>{{ fmt(load.breakdown.subtotalKcalH, 0) }}</td>
+            </tr>
+            <tr>
+              <td>Margen de seguridad</td>
+              <td>{{ fmt(load.breakdown.safetyMarginKcalH, 0) }}</td>
+            </tr>
+            <tr class="herr-cam-table__total">
+              <td><strong>Total</strong></td>
+              <td><strong>{{ fmt(load.breakdown.totalKcalH, 0) }}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <h3 class="herr-subpanel__title">Cálculo paso a paso</h3>
       <ol class="herr-calc-steps">
@@ -591,6 +687,7 @@
 
     <p class="herr-disclaimer" *ngIf="!chamberLoadResult">
       Ingresá largo, ancho y alto &gt; 0 m y temperaturas válidas.
+      <span *ngIf="camCalcMode === 'completo' && camInsulation === 'custom_u'"> Si usás K manual, debe ser &gt; 0 kcal/h·m²·°C.</span>
     </p>
   </section>
 
@@ -660,11 +757,11 @@
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Te — temp. evaporación (°C)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="txvEvapDraft" inputmode="decimal" placeholder="-10" />
+        <input type="text" class="herr-field__input" [(ngModel)]="txvEvapDraft" inputmode="text" placeholder="-10" />
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Tc — temp. condensación (°C)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="txvCondDraft" inputmode="decimal" placeholder="35" />
+        <input type="text" class="herr-field__input" [(ngModel)]="txvCondDraft" inputmode="text" placeholder="35" />
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Recalentamiento de diseño (K)</span>

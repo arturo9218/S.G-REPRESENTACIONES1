@@ -7,30 +7,36 @@
  * Hardware:
  *   - ESP32 (DOIT DevKit / NodeMCU-32S).
  *   - 2 NTC 10k beta 3950: NTC1 GPIO34 (cámara/ambiente), NTC2 GPIO35 (evaporador).
- *     Divisor a 3.3V con R_fixed=10k (NTC arriba, R a GND).
+ *     Divisor: 3V3 — 10k (R_fixed) — ADC — NTC — GND.
+ *     Si la temp sale invertida, cambiá NTC_R_SERIES_TO_VCC a 0 al inicio del .ino.
  *   - 2x CD4094 en cascada por SPI:
  *       4094 #1 = byte SEGMENTOS (a..g + dp), 7-seg activo en LOW.
- *       4094 #2 = bit 0..4 COM1..COM5 (4 dígitos + fila luces)
+ *       4094 #2 = bit 0..4 COM1..COM5 (4 dígitos + fila de 7 luces)
  *                 bit 5 RELAY COMPRESOR  (activo LOW)
  *                 bit 6 RELAY DESHIELO   (activo LOW)
  *                 bit 7 RELAY VENTILADOR (activo LOW)
+ *     Fila indicadores (COM5, segmento activo LOW):
+ *       1 compresor | 2 forzador (ventilador ON o forzado manual) | 3 deshielo
+ *       | 4 envío (parpadea) | 5 WiFi conectado | 6–7 reservadas
  *   - SPI:  DATA=23 (MOSI), CLOCK=18 (SCK), STROBE=5 (latch).
  *   - DOOR_PIN: opcional. Si tu plaqueta tiene microswitch de puerta cableado
  *               a un GPIO, cambiá `DOOR_PIN` y se activa toda la lógica AR35–AR41.
  *               Con -1 (default) los parámetros se guardan pero no se accionan.
  *   - Botones (un terminal a GPIO, otro a GND; INPUT_PULLUP):
  *       UP=13  DOWN=14  SET=27  BACK=17
- *     (GPIO16 no sirve en muchas ESP32 Dev; no uses 16 para SET.)
+ *     Relés por CD4094 (bits 5/6/7), no por GPIO. Combistato genérico usa SET=16.
  *     Atajos:
  *       UP+DOWN 1,2 s → menú AR | SET+ABAJO 1 s → portal WiFi (también SET+UP/VOLVER o SET 4 s)
  *       UP solo 1,2 s   → deshielo manual | UP toque en deshielo/goteo → parar deshielo
  *       DOWN toque       → alterna: temp S1 / fase (español) / minutos restantes
  *       VOLVER toque      → ver temperatura sonda 2 (evaporador); otra vez vuelve a S1
  *
- * Provisión: portal cautivo WiFiManager con campos para Supabase.
- *   1) Primer arranque (sin config) → AP "PRO300-Setup" abierto por 5 min.
- *   2) GPIO0 (botón BOOT) a GND al energizar → fuerza portal.
- *   3) Comando serie `portal` → abre portal en caliente.
+ * Modo local: el control (sondas, relés, AR, display) arranca SIEMPRE, tenga o no
+ * WiFi / module_id / api_key. La nube es opcional (telemetría y pull de AR).
+ *
+ * Provisión WiFi/nube (solo si el usuario lo pide):
+ *   1) SET+ABAJO 1 s, SET 4 s, o comando serie `portal` → AP "PRO300-Setup".
+ *   2) GPIO0 (botón BOOT) a GND al energizar → fuerza portal en ese arranque.
  *
  *   Campos del portal:
  *     - WiFi SSID / Pass         (lo pone WiFiManager solo)
@@ -66,6 +72,7 @@
 #include <esp_task_wdt.h>
 #include <SPI.h>
 #include <math.h>
+#include "driver/gpio.h"
 
 // Prototipos / constantes usados antes de su definición (Arduino 1.8 no ordena bien el .ino).
 static void runConfigPortal();
@@ -83,12 +90,16 @@ static void printLittleFsReport();
 #define DOOR_PIN         -1    // -1 = sin sensor de puerta; cambialo a un GPIO si lo cableaste
 #define BTN_UP_PIN       13    // botón subir
 #define BTN_DOWN_PIN     14    // botón bajar
-#define BTN_SET_PIN      27    // set / confirmar (NO usar GPIO16: suele fallar en ESP32 Dev)
+#define BTN_SET_PIN      27    // set / confirmar (PRO300; relés van por CD4094, no por este pin)
 #define BTN_BACK_PIN     17    // volver / cancelar
-/** Si tu SET va a 3.3V al apretar (no a GND), poné 1. */
+/** 1 = botón a GND al apretar (pull-up). 0 = botón a 3.3V al apretar (pull-down). */
 #define BTN_ACTIVE_LOW   1
 
 // ============== NTC =========================
+/** 1 = 3V3-10k-ADC-NTC-GND (estándar). 0 = 3V3-NTC-ADC-10k-GND. */
+#ifndef NTC_R_SERIES_TO_VCC
+#define NTC_R_SERIES_TO_VCC 1
+#endif
 static constexpr float R_FIXED = 10000.0f;
 static constexpr float BETA    = 3950.0f;
 static constexpr float T0K     = 298.15f;
@@ -110,6 +121,12 @@ static constexpr uint8_t NTC_FAULT_CLR_COUNT = 2;
 #define BIT_COM3 2
 #define BIT_COM4 3
 #define BIT_COM5 4
+/** Fila de 7 luces (COM5, bits 0..6 del segmento; activo LOW). */
+#define BIT_LED_COMP   0  // 1.ª izq — símbolo compresor
+#define BIT_LED_FORZ   1  // 2.ª — ventilador/forzador ON o forzado manual activo
+#define BIT_LED_DEF    2  // 3.ª — deshielo
+#define BIT_LED_TX     3  // 4.ª — parpadea al enviar telemetría
+#define BIT_LED_CLOUD  4  // 5.ª — encendida = WiFi conectado
 #define BIT_COMP 5
 #define BIT_DEF  6
 #define BIT_FAN  7
@@ -155,7 +172,7 @@ struct Params {
   float F49 = 0.0f;     // AR05 modo: 0=frío, 1=calor
   float F50 = 0.0f;     // AR06 inversión de relés: 0=activo LOW (default), 1=activo HIGH
   float F53 = 0.0f;     // AR07 sonda que controla termostato: 0=S1, 1=S2
-  float F54 = 4.0f;     // AR08 muestras promedio ADC (4–32)
+  float F54 = 16.0f;    // AR08 muestras promedio ADC (4–32)
 
   // Deshielo
   float F05 = 0.0f;     // AR09 tipo de deshielo (0=eléctrico)
@@ -333,10 +350,33 @@ static unsigned long g_lastManualDefrostAt    = 0;  // anti-spam F36
 
 static float tCam  = TEMP_ERR_VALUE;
 static float tEvap = TEMP_ERR_VALUE;
+/** Promedio móvil de lecturas (1/s) para estabilizar el decimal en pantalla. */
+static constexpr int TEMP_ROLL_AVG_N = 8;
+static float tCamRoll[TEMP_ROLL_AVG_N];
+static float tEvapRoll[TEMP_ROLL_AVG_N];
+static uint8_t tRollIdx = 0;
+static uint8_t tRollFill = 0;
+
+static void resetTempRollBuffers() {
+  for (int i = 0; i < TEMP_ROLL_AVG_N; i++) {
+    tCamRoll[i] = TEMP_ERR_VALUE;
+    tEvapRoll[i] = TEMP_ERR_VALUE;
+  }
+  tRollIdx = 0;
+  tRollFill = 0;
+}
+
+static bool tempRollSampleValid(float t) {
+  return t > -80.0f && t < 75.0f;
+}
+
+static volatile bool g_txInProgress = false;
+static constexpr unsigned long TX_LED_BLINK_MS = 280UL;
 static bool  fault1 = false, fault2 = false;
 static uint8_t ntcBadStreak1 = 0, ntcBadStreak2 = 0;
 static uint8_t ntcGoodStreak1 = 0, ntcGoodStreak2 = 0;
 static bool  ntcReady = false;
+static bool  g_ntcBootDiagPending = true;
 static unsigned long relaySafeUntilMs = 0;
 
 static bool   modoTexto = true;
@@ -346,6 +386,7 @@ static int    scrollPos = 0;
 static byte bufferDisplay[4] = {0xFF, 0xFF, 0xFF, 0xFF};
 static int  digitNow = 0;
 static unsigned long lastScroll=0;
+static unsigned long g_portalScrollAt = 0;
 
 // Task dedicada a HTTP (telemetría + pull). Corre en core 0 para no bloquear
 // la multiplexación del display (que está en el loopTask = core 1).
@@ -553,9 +594,13 @@ static void refrescarDisplay() {
     enviar4094(activarCom(digitNow), bufferDisplay[digitNow]);
   } else {
     byte luces = 0xFF;
-    if (compresor)  luces &= ~(1 << 0);
-    if (ventilador) luces &= ~(1 << 1);
-    if (deshielo)   luces &= ~(1 << 2);
+    if (compresor) luces &= ~(1 << BIT_LED_COMP);
+    if (ventilador || OV.compActive || OV.fanActive) luces &= ~(1 << BIT_LED_FORZ);
+    if (deshielo) luces &= ~(1 << BIT_LED_DEF);
+    if (g_txInProgress && ((millis() / TX_LED_BLINK_MS) % 2) == 0) {
+      luces &= ~(1 << BIT_LED_TX);
+    }
+    if (WiFi.status() == WL_CONNECTED) luces &= ~(1 << BIT_LED_CLOUD);
     enviar4094(activarCom(BIT_COM5), luces);
   }
   if (++digitNow > 4) digitNow = 0;
@@ -737,6 +782,33 @@ static bool btnPressed(int pin) {
 #endif
 }
 
+/** Pull explícito: GPIO14/16/17 a veces no levantan bien solo con pinMode(). */
+static void initBtnPin(int pin) {
+  gpio_reset_pin((gpio_num_t)pin);
+  gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT);
+#if BTN_ACTIVE_LOW
+  gpio_set_pull_mode((gpio_num_t)pin, GPIO_PULLUP_ONLY);
+#else
+  gpio_set_pull_mode((gpio_num_t)pin, GPIO_PULLDOWN_ONLY);
+#endif
+}
+
+static void printBtnDiag() {
+  Serial.printf("[BTN] Pines U=%d D=%d S=%d B=%d | activo_%s\n",
+                BTN_UP_PIN, BTN_DOWN_PIN, BTN_SET_PIN, BTN_BACK_PIN,
+                BTN_ACTIVE_LOW ? "bajo" : "alto");
+  Serial.printf("  raw HIGH/LOW: U=%d D=%d S=%d B=%d\n",
+                digitalRead(BTN_UP_PIN), digitalRead(BTN_DOWN_PIN),
+                digitalRead(BTN_SET_PIN), digitalRead(BTN_BACK_PIN));
+  Serial.printf("  logica apretado: U=%d D=%d S=%d B=%d | ui=%d waitRel=%d\n",
+                btnPressed(BTN_UP_PIN) ? 1 : 0,
+                btnPressed(BTN_DOWN_PIN) ? 1 : 0,
+                btnPressed(BTN_SET_PIN) ? 1 : 0,
+                btnPressed(BTN_BACK_PIN) ? 1 : 0,
+                (int)g_uiMode, g_menuWaitRelease ? 1 : 0);
+  Serial.println(F("  Apretá cada botón: raw debe cambiar. Si apretado=HIGH, BTN_ACTIVE_LOW=0."));
+}
+
 static void syncBtnPrevFromPins() {
   const int pins[4] = {BTN_UP_PIN, BTN_DOWN_PIN, BTN_SET_PIN, BTN_BACK_PIN};
   for (int i = 0; i < 4; i++) g_btnPrev[i] = btnPressed(pins[i]);
@@ -782,9 +854,28 @@ static void flashUiMessage(const char *msg, unsigned long ms = 1200UL) {
   g_flashEndsAt = millis() + ms;
 }
 
+/** Marquesina del portal: el loop queda bloqueado en WiFiManager → scroll acá. */
+static void portalDisplayTick(unsigned long now) {
+  if (!g_portalRunning || !modoTexto) return;
+  if (now - g_portalScrollAt >= 300UL) {
+    g_portalScrollAt = now;
+    prepararTexto();
+  }
+}
+
+static void restoreDisplayAfterPortal() {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (g_flashPending == FP_NONE && !g_flashActive) pushFlash(FP_WIFI);
+    return;
+  }
+  modoTexto = false;
+  g_flashActive = false;
+  g_flashPending = FP_NONE;
+  refreshNormalDisplay();
+}
+
 /** Consume un mensaje pendiente o mantiene el scroll activo. */
 static void serviceUiFlash(unsigned long now) {
-  if (g_portalRunning) return;
   if (g_flashActive && now < g_flashEndsAt) {
     if (modoTexto && now - lastScroll >= 300) {
       lastScroll = now;
@@ -923,6 +1014,7 @@ static void handleButtonUi() {
     if (!g_flashActive && g_flashPending == FP_NONE && !g_portalRunning) modoTexto = false;
     const bool upEdgeEarly = consumePressEdge(BTN_UP_PIN, 0, now);
     const bool downEdgeEarly = consumePressEdge(BTN_DOWN_PIN, 1, now);
+    const bool setEdgeEarly = consumePressEdge(BTN_SET_PIN, 2, now);
     const bool backEdgeEarly = consumePressEdge(BTN_BACK_PIN, 3, now);
 
     if (backEdgeEarly && !upHeld && !downHeld && !setHeld) {
@@ -947,6 +1039,17 @@ static void handleButtonUi() {
       refreshNormalDisplay();
       Serial.printf("[BTN] Vista=%d (0=S1 1=fase 2=min; VOLVER=S2)\n", (int)g_normalDisp);
       syncBtnPrevFromPins();
+      return;
+    }
+
+    if (setEdgeEarly && !upHeld && !downHeld) {
+      g_uiMode = UI_PARAM_SELECT;
+      g_paramCursor = 0;
+      g_menuWaitRelease = true;
+      syncBtnPrevFromPins();
+      showParamCodeOnDisplay(g_paramMenu[g_paramCursor].code);
+      flashUiMessage("MENU", 800);
+      Serial.println(F("[BTN] SET toque → menu parametros (A01)."));
       return;
     }
 
@@ -1101,25 +1204,112 @@ static void handleButtonUi() {
  * más muestras = lectura más estable pero más lenta. Saturamos los extremos
  * para no quedarnos sin tiempo de loop si llega un valor raro de la nube.
  */
-static float leerNTCpromedio(int pin, bool &rawFault, float offset) {
+static float rNtcFromAdc(int adc) {
+#if NTC_R_SERIES_TO_VCC
+  return R_FIXED * ((float)adc / (4095.0f - (float)adc));
+#else
+  return R_FIXED * ((4095.0f - (float)adc) / (float)adc);
+#endif
+}
+
+static float tempCFromAdc(int adc) {
+  const float rNTC = rNtcFromAdc(adc);
+  if (rNTC <= 1.0f || rNTC > 500000.0f) return TEMP_ERR_VALUE;
+  const float tK = 1.0f / ((1.0f / T0K) + (1.0f / BETA) * log(rNTC / R0));
+  return tK - 273.15f;
+}
+
+/** Misma lectura ADC con el divisor opuesto (para diagnosticar cableado). */
+static float tempCFromAdcAlt(int adc) {
+#if NTC_R_SERIES_TO_VCC
+  const float rNTC = R_FIXED * ((4095.0f - (float)adc) / (float)adc);
+#else
+  const float rNTC = R_FIXED * ((float)adc / (4095.0f - (float)adc));
+#endif
+  if (rNTC <= 1.0f || rNTC > 500000.0f) return TEMP_ERR_VALUE;
+  const float tK = 1.0f / ((1.0f / T0K) + (1.0f / BETA) * log(rNTC / R0));
+  return tK - 273.15f;
+}
+
+static int leerAdcPromedio(int pin, bool &rawFault) {
   int samples = (int)P.F54;
   if (samples < 4)  samples = 4;
   if (samples > 32) samples = 32;
   long acc = 0;
   int validas = 0;
   for (int i = 0; i < samples; i++) {
-    int v = analogRead(pin);
-    if (v > 5 && v < 4090) { acc += v; validas++; }
-    delayMicroseconds(200);
+    const int v = analogRead(pin);
+    if (v > 8 && v < 4088) { acc += v; validas++; }
+    delayMicroseconds(250);
   }
-  if (validas < samples / 2) { rawFault = true; return TEMP_ERR_VALUE; }
-  int adc = acc / validas;
-  float rNTC = R_FIXED * ((float)adc / (4095.0f - (float)adc));
-  float tK = 1.0f / ((1.0f / T0K) + (1.0f / BETA) * log(rNTC / R0));
-  float tC = tK - 273.15f;
-  if (tC < -45.0f || tC > 80.0f) { rawFault = true; return TEMP_ERR_VALUE; }
+  if (validas < samples / 2) {
+    rawFault = true;
+    return -1;
+  }
+  rawFault = false;
+  return (int)(acc / validas);
+}
+
+static float leerNTCpromedio(int pin, bool &rawFault, float offset) {
+  const int adc = leerAdcPromedio(pin, rawFault);
+  if (rawFault || adc < 0) return TEMP_ERR_VALUE;
+  const float tC = tempCFromAdc(adc);
+  if (!tempRollSampleValid(tC)) {
+    rawFault = true;
+    return TEMP_ERR_VALUE;
+  }
   rawFault = false;
   return tC + offset;
+}
+
+static float promedioMovilTemp(const float *hist, uint8_t fill) {
+  if (fill == 0) return TEMP_ERR_VALUE;
+  float sum = 0.0f;
+  int n = 0;
+  for (uint8_t i = 0; i < fill; i++) {
+    if (tempRollSampleValid(hist[i])) {
+      sum += hist[i];
+      n++;
+    }
+  }
+  return n > 0 ? (sum / (float)n) : TEMP_ERR_VALUE;
+}
+
+static void pushTempRoll(float rawCam, float rawEvap) {
+  if (tempRollSampleValid(rawCam)) tCamRoll[tRollIdx] = rawCam;
+  if (tempRollSampleValid(rawEvap)) tEvapRoll[tRollIdx] = rawEvap;
+  tRollIdx = (uint8_t)((tRollIdx + 1) % TEMP_ROLL_AVG_N);
+  if (tRollFill < TEMP_ROLL_AVG_N) tRollFill++;
+}
+
+static void printNtcSondaLine(const char *label, int pin, int adc, bool rf, float disp, bool fault) {
+  if (adc < 0) {
+    Serial.printf("  %s GPIO%d sin lectura valida (cable suelto?)\n", label, pin);
+    return;
+  }
+  const float tAct = tempCFromAdc(adc);
+  const float tAlt = tempCFromAdcAlt(adc);
+  Serial.printf("  %s GPIO%d ADC=%d R=%.0f ohm T=%.2f C (alt=%.2f C) rawFault=%d disp=%.2f fault=%d\n",
+                label, pin, adc, rNtcFromAdc(adc), tAct, tAlt, rf ? 1 : 0, disp, fault ? 1 : 0);
+  if (adc < 50) {
+    Serial.println(F("       -> ADC muy bajo: revisar cable / pin correcto (S1=34 S2=35)"));
+  } else if (adc > 3900) {
+    Serial.println(F("       -> ADC saturado: corto o divisor mal cableado"));
+  } else if (tAct > -6.0f && tAct < 6.0f && tAlt > 12.0f && tAlt < 40.0f) {
+    Serial.println(F("       -> ~0 C con formula activa pero ~ambiente con alt: cambiar NTC_R_SERIES_TO_VCC"));
+  }
+}
+
+static void printNtcDiag() {
+  bool f1 = false, f2 = false;
+  const int adc1 = leerAdcPromedio(NTC1_PIN, f1);
+  const int adc2 = leerAdcPromedio(NTC2_PIN, f2);
+  Serial.printf("[NTC] divisor activo: %s | AR03=%.1f AR04=%.1f | AR08=%.0f muestras\n",
+                NTC_R_SERIES_TO_VCC ? "3V3-10k-ADC-NTC-GND" : "3V3-NTC-ADC-10k-GND",
+                P.F03, P.F04, P.F54);
+  Serial.println(F("[NTC] Pantalla: SET cicla vista; VOLVER = ver S2. Comando serie: temp"));
+  printNtcSondaLine("S1", NTC1_PIN, adc1, f1, tCam, fault1);
+  printNtcSondaLine("S2", NTC2_PIN, adc2, f2, tEvap, fault2);
 }
 
 static void updateNtcFaultDebounced(bool raw1, bool raw2) {
@@ -1130,7 +1320,10 @@ static void updateNtcFaultDebounced(bool raw1, bool raw2) {
   } else {
     if (ntcGoodStreak1 < 255) ntcGoodStreak1++;
     ntcBadStreak1 = 0;
-    if (ntcGoodStreak1 >= NTC_FAULT_CLR_COUNT) fault1 = false;
+    if (ntcGoodStreak1 >= NTC_FAULT_CLR_COUNT) {
+      if (fault1) resetTempRollBuffers();
+      fault1 = false;
+    }
   }
   if (raw2) {
     if (ntcBadStreak2 < 255) ntcBadStreak2++;
@@ -1139,7 +1332,10 @@ static void updateNtcFaultDebounced(bool raw1, bool raw2) {
   } else {
     if (ntcGoodStreak2 < 255) ntcGoodStreak2++;
     ntcBadStreak2 = 0;
-    if (ntcGoodStreak2 >= NTC_FAULT_CLR_COUNT) fault2 = false;
+    if (ntcGoodStreak2 >= NTC_FAULT_CLR_COUNT) {
+      if (fault2) resetTempRollBuffers();
+      fault2 = false;
+    }
   }
   const bool ctrlRawOk = (P.F53 >= 0.5f) ? !raw2 : !raw1;
   if (ctrlRawOk) ntcReady = true;
@@ -1706,8 +1902,8 @@ static String paramsUrl() {
  */
 static void pullParamsFromCloud() {
   if (WiFi.status() != WL_CONNECTED) { Serial.println(F("[PULL] sin WiFi, salto.")); return; }
-  if (strlen(g_cfg.moduleId) == 0 || strlen(g_cfg.apiKey) == 0) {
-    Serial.println(F("[PULL] sin moduleId/apiKey, salto."));
+  if (!cloudCredentialsReady()) {
+    Serial.println(F("[PULL] sin moduleId/apiKey, salto (modo local)."));
     return;
   }
   String url = paramsUrl();
@@ -1892,9 +2088,10 @@ static void runConfigPortal() {
   wm.setCaptivePortalEnable(true);
 
   modoTexto = true;
-  texto = "WIFI PRO300-SETUP 192.168.4.1 ";
-  scrollPos = 0;
+  texto = "WIFI PRO300 SETUP 192.168.4.1 SAVE ";
+  scrollPos = 4;
   prepararTexto();
+  g_portalScrollAt = millis();
   Serial.printf("[WiFi] Celular → red '%s' → http://192.168.4.1 → Save\n", AP_NAME);
 
   const bool portalOk = wm.startConfigPortal(AP_NAME);
@@ -1916,12 +2113,14 @@ static void runConfigPortal() {
     connectSavedWifi(30000UL);
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    pushFlash(FP_WIFI);
-  } else {
-    modoTexto = false;
+  restoreDisplayAfterPortal();
+  if (WiFi.status() != WL_CONNECTED) {
     Serial.println(F("[WiFi] Revisá: 2.4 GHz, clave correcta, sin espacios extra en SSID."));
   }
+}
+
+static bool cloudCredentialsReady() {
+  return strlen(g_cfg.moduleId) > 0 && strlen(g_cfg.apiKey) >= 6;
 }
 
 static void setupWifi() {
@@ -1939,23 +2138,33 @@ static void setupWifi() {
   wm.addParameter(&p_token);
   wm.addParameter(&p_url);
 
-  bool forcePortal = digitalRead(PIN_FORCE_PORTAL) == LOW;
-  bool noConfig    = strlen(g_cfg.moduleId) == 0 || strlen(g_cfg.apiKey) == 0;
-  if (forcePortal || noConfig) {
-    Serial.println(forcePortal ? F("[WiFi] BOOT a GND → portal forzado.")
-                               : F("[WiFi] Sin config → portal automático."));
+  const bool forcePortal = digitalRead(PIN_FORCE_PORTAL) == LOW;
+  if (forcePortal) {
+    Serial.println(F("[WiFi] BOOT a GND → portal forzado."));
     runConfigPortal();
     return;
   }
-  if (!connectSavedWifi(WIFI_BOOT_CONNECT_MS)) {
-    Serial.println(F("[WiFi] No conectó en boot. Sigo control local; reintento cada 30 s."));
-    g_prevWifiConnected = false;
-  } else {
-    Serial.printf("[WiFi] OK: SSID=%s IP=%s RSSI=%d\n",
-      WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
-    g_prevWifiConnected = true;
-    pushFlash(FP_WIFI);
+
+  if (!cloudCredentialsReady()) {
+    Serial.println(F("[WiFi] Sin module_id/api_key → modo local (portal: SET+ABAJO 1s)."));
   }
+
+  if (WiFi.SSID().length() > 0) {
+    if (!connectSavedWifi(WIFI_BOOT_CONNECT_MS)) {
+      Serial.println(F("[WiFi] No conectó en boot. Control local activo; reintento cada 30 s."));
+      g_prevWifiConnected = false;
+    } else {
+      Serial.printf("[WiFi] OK: SSID=%s IP=%s RSSI=%d\n",
+                    WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+      g_prevWifiConnected = true;
+      if (cloudCredentialsReady()) pushFlash(FP_WIFI);
+    }
+  } else {
+    Serial.println(F("[WiFi] Sin SSID guardado. Control local; WiFi opcional (portal manual)."));
+    g_prevWifiConnected = false;
+    WiFi.mode(WIFI_STA);
+  }
+
   g_wifiState = WFS_RUNNING;
 }
 // Reintento de WiFi vive ahora en networkTask() (core 0).
@@ -1963,8 +2172,8 @@ static void setupWifi() {
 // ============== Telemetría ==================
 static void enviarTelemetria() {
   if (WiFi.status() != WL_CONNECTED) return;
-  if (strlen(g_cfg.moduleId) == 0 || strlen(g_cfg.apiKey) == 0) return;
-  pushFlash(FP_ENVIANDO);
+  if (!cloudCredentialsReady()) return;
+  g_txInProgress = true;
   HTTPClient http;
   http.setTimeout(8000);
   http.begin(g_cfg.apiUrl);
@@ -2022,9 +2231,8 @@ static void enviarTelemetria() {
   if (code > 0) { Serial.print(' '); Serial.println(resp); }
   else          { Serial.println(); }
   http.end();
+  g_txInProgress = false;
   if (code != 200) return;
-
-  pushFlash(FP_ENVIADO);
 
   // Atajo de propagación: si el server nos cuenta que `params_updated_at` del
   // combistato es más nuevo que el que tenemos, pedimos un pull inmediato.
@@ -2090,14 +2298,13 @@ static void leerSerial() {
   if (lower == "config")  { printConfig(); return; }
   if (lower == "reboot")  { ESP.restart(); return; }
   if (lower == "temp")    { modoTexto = false; return; }
+  if (lower == "ntc" || lower == "adc") {
+    printNtcDiag();
+    return;
+  }
   if (lower == "pull")    { Serial.println(F("[PULL] solicitando pull a la task de red...")); g_pullNowRequested = true; return; }
-  if (lower == "btns" || lower == "buttons") {
-    Serial.printf("Botones (1=apretado): UP=%d DOWN=%d SET=%d BACK=%d | modo=%d disp=%d\n",
-                  btnPressed(BTN_UP_PIN) ? 1 : 0,
-                  btnPressed(BTN_DOWN_PIN) ? 1 : 0,
-                  btnPressed(BTN_SET_PIN) ? 1 : 0,
-                  btnPressed(BTN_BACK_PIN) ? 1 : 0,
-                  (int)g_uiMode, (int)g_normalDisp);
+  if (lower == "btns" || lower == "buttons" || lower == "btn") {
+    printBtnDiag();
     return;
   }
   if (lower == "mem" || lower == "diag" || lower == "status") {
@@ -2133,6 +2340,7 @@ static void displayTask(void *param) {
   SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   const TickType_t kPeriod = pdMS_TO_TICKS(1);
   for (;;) {
+    portalDisplayTick(millis());
     refrescarDisplay();
     vTaskDelay(kPeriod);
   }
@@ -2228,19 +2436,17 @@ void setup() {
   pinMode(STROBE_PIN, OUTPUT);
   digitalWrite(STROBE_PIN, LOW);
   pinMode(PIN_FORCE_PORTAL, INPUT_PULLUP);
-  pinMode(BTN_UP_PIN, INPUT_PULLUP);
-  pinMode(BTN_DOWN_PIN, INPUT_PULLUP);
-  pinMode(BTN_SET_PIN, INPUT_PULLUP);
-  pinMode(BTN_BACK_PIN, INPUT_PULLUP);
-  if (DOOR_PIN >= 0) pinMode(DOOR_PIN, INPUT_PULLUP);
+  initBtnPin(BTN_UP_PIN);
+  initBtnPin(BTN_DOWN_PIN);
+  initBtnPin(BTN_SET_PIN);
+  initBtnPin(BTN_BACK_PIN);
+  if (DOOR_PIN >= 0) initBtnPin(DOOR_PIN);
   syncBtnPrevFromPins();
-  Serial.printf("[BTN] Pines UP=%d DOWN=%d SET=%d BACK=%d (reposo U%d D%d S%d B%d)\n",
-                BTN_UP_PIN, BTN_DOWN_PIN, BTN_SET_PIN, BTN_BACK_PIN,
-                btnPressed(BTN_UP_PIN) ? 1 : 0,
-                btnPressed(BTN_DOWN_PIN) ? 1 : 0,
-                btnPressed(BTN_SET_PIN) ? 1 : 0,
-                btnPressed(BTN_BACK_PIN) ? 1 : 0);
+  printBtnDiag();
   analogReadResolution(12);
+  analogSetPinAttenuation(NTC1_PIN, ADC_11db);
+  analogSetPinAttenuation(NTC2_PIN, ADC_11db);
+  resetTempRollBuffers();
 
   SPI.begin(CLOCK_PIN, -1, DATA_PIN, -1);
   // Inicializa los 4094 con todo apagado. Cerramos la transacción para
@@ -2293,7 +2499,7 @@ void setup() {
 
   texto = "BOOT"; prepararTexto();
 
-  // Display antes del portal de boot para que la marquesina no quede negra.
+  // Display antes de WiFi para que el 7-seg no quede negro al arrancar.
   xTaskCreatePinnedToCore(
     displayTask,
     "disp",
@@ -2307,7 +2513,7 @@ void setup() {
   setupWifi();
   if (!g_portalRunning) modoTexto = false;
 
-  if (WiFi.status() == WL_CONNECTED) {
+  if (WiFi.status() == WL_CONNECTED && cloudCredentialsReady()) {
     g_pullNowRequested = true;
   }
 
@@ -2333,9 +2539,19 @@ void loop() {
   if (millis() - lastReadAt >= 1000) {
     lastReadAt = millis();
     bool rawF1 = false, rawF2 = false;
-    tCam  = leerNTCpromedio(NTC1_PIN, rawF1, P.F03);
-    tEvap = leerNTCpromedio(NTC2_PIN, rawF2, P.F04);
+    const float rawCam  = leerNTCpromedio(NTC1_PIN, rawF1, P.F03);
+    const float rawEvap = leerNTCpromedio(NTC2_PIN, rawF2, P.F04);
     updateNtcFaultDebounced(rawF1, rawF2);
+    pushTempRoll(!rawF1 ? rawCam : TEMP_ERR_VALUE, !rawF2 ? rawEvap : TEMP_ERR_VALUE);
+    if (!fault1) tCam  = promedioMovilTemp(tCamRoll, tRollFill);
+    else         tCam  = TEMP_ERR_VALUE;
+    if (!fault2) tEvap = promedioMovilTemp(tEvapRoll, tRollFill);
+    else         tEvap = TEMP_ERR_VALUE;
+    if (g_ntcBootDiagPending && millis() - bootAtMs >= 4000UL) {
+      g_ntcBootDiagPending = false;
+      Serial.println(F("---- Diagnostico NTC al arranque (3 s) ----"));
+      printNtcDiag();
+    }
     leerPuerta();
     aplicarControl();
     applyManualOverride();

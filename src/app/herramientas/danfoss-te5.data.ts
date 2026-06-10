@@ -1,6 +1,7 @@
 /**
- * Danfoss TE5 – TE55 (comercial TEX5 … TEX55) — línea soldadura ODF, elemento rango N.
- * Tablas orientativas catálogo Danfoss TE5–TE55 (R404A/R507, recal. apertura 4 K).
+ * Danfoss TE5 – TE55 (TEX5 … TEX55) — soldadura ODF, elemento rango N.
+ * Nominales orificios 0,5–4: R-134a y R-407C (catálogo Danfoss, kW).
+ * Resto: tablas orientativas R-404A/R507, recal. apertura 4 K.
  */
 
 import {

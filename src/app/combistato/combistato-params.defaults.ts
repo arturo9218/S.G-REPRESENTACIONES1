@@ -49,7 +49,7 @@ export const COMBISTATO_DEFAULTS = {
   F52: 0,
   F52t: -28,
   F53: 0,
-  F54: 4,
+  F54: 16,
   F55: 1,
 };
 

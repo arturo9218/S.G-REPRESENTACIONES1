@@ -75,7 +75,7 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
         key: 'F54',
         code: 'AR08',
         label: 'Muestras promedio ADC',
-        help: 'Cantidad de lecturas consecutivas que se promedian (1–32). Más muestras = lectura más estable y algo más lenta.',
+        help: 'Lecturas ADC que se promedian en cada toma (4–32). Más muestras = decimal más estable. El equipo además promedia las últimas 8 lecturas (1/s) en pantalla.',
         step: 1,
       },
     ],
