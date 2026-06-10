@@ -326,7 +326,7 @@
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Valor</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="unitValueDraft" [inputmode]="unitCategory === 'temp' ? 'text' : 'decimal'" />
+        <input type="text" class="herr-field__input" [(ngModel)]="unitValueDraft" [attr.inputmode]="unitCategory === 'temp' ? 'text' : 'decimal'" />
       </label>
       <label class="herr-field" *ngIf="unitCategory === 'pressure'">
         <span class="herr-field__label">Unidad de entrada</span>

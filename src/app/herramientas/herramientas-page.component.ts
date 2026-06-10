@@ -329,17 +329,23 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
       interiorTempC: int,
       productType: this.camProductType,
       insulation: this.camInsulation,
-      customKKcalHm2C: this.camInsulation === 'custom_u' ? customK : undefined,
+      customKKcalHm2C:
+        this.camInsulation === 'custom_u' && customK != null && Number.isFinite(customK)
+          ? customK
+          : undefined,
       doorUsage: this.camDoorUsage,
-      kgProductPerDay: Number.isFinite(kgDay) ? kgDay : 0,
-      productInTempC: Number.isFinite(prodIn) ? prodIn : ext,
-      opHoursPerDay: Number.isFinite(opH) ? opH : 18,
-      motorsW: Number.isFinite(motorsW) ? motorsW : 0,
-      lightsW: Number.isFinite(lightsW) ? lightsW : 0,
-      peopleHeatW: Number.isFinite(peopleW) ? peopleW : 0,
-      safetyMarginPct: Number.isFinite(margin) ? margin : 20,
+      kgProductPerDay: kgDay != null && Number.isFinite(kgDay) ? kgDay : 0,
+      productInTempC: prodIn != null && Number.isFinite(prodIn) ? prodIn : ext,
+      opHoursPerDay: opH != null && Number.isFinite(opH) ? opH : 18,
+      motorsW: motorsW != null && Number.isFinite(motorsW) ? motorsW : 0,
+      lightsW: lightsW != null && Number.isFinite(lightsW) ? lightsW : 0,
+      peopleHeatW: peopleW != null && Number.isFinite(peopleW) ? peopleW : 0,
+      safetyMarginPct: margin != null && Number.isFinite(margin) ? margin : 20,
       mode: this.camCalcMode,
-      kcalPerM3Custom: this.camCalcMode === 'rapido' ? customKcal : undefined,
+      kcalPerM3Custom:
+        this.camCalcMode === 'rapido' && customKcal != null && Number.isFinite(customKcal)
+          ? customKcal
+          : undefined,
     });
   }
 
