@@ -16,6 +16,8 @@
  *   - GPIO0 a GND al encender -> portal WiFi
  *   - DOOR_PIN: -1 sin sensor, o GPIO (ej. 33) + F26 entrada digital
  *
+ * Serie 115200: ntc | btns | temp | config | pull | portal | defrost
+ *
  * Dependencias: WiFiManager, ArduinoJson v6, core ESP32
  */
 
@@ -34,6 +36,7 @@ static void flashUiMessage(const char *msg, unsigned long ms = 1200UL);
 static void pullParamsFromCloud();
 static bool saveCurrentParamsToFs();
 static void syncTelemetryInterval();
+static void requestImmediateTx();
 
 // ============== PINES =======================
 #define DATA_PIN          23
@@ -251,6 +254,8 @@ static unsigned long g_setHeldAt = 0;
 static bool g_setHoldMenuDone = false;
 
 static float prevTempReported = TEMP_ERR_VALUE;
+/** Ultima temp valida enviada/reutilizable si la sonda falla (mantiene online en nube). */
+static float lastValidTempTx = TEMP_ERR_VALUE;
 static bool prevCompresor = false;
 static bool prevVentilador = false;
 static bool prevDeshielo = false;
@@ -754,6 +759,7 @@ static void applyEma(float raw) {
 }
 
 static void updateFault(bool rawFault) {
+  const bool wasFault = fault1;
   if (rawFault) {
     if (ntcBadStreak < 255) ntcBadStreak++;
     ntcGoodStreak = 0;
@@ -764,6 +770,20 @@ static void updateFault(bool rawFault) {
     if (ntcGoodStreak >= NTC_FAULT_CLR_COUNT) fault1 = false;
   }
   if (!rawFault) ntcReady = true;
+  if (wasFault && !fault1) requestImmediateTx();
+}
+
+/** Temperatura a enviar: actual o ultima valida si la sonda esta en fallo. */
+static bool tempForTelemetry(float &outC) {
+  if (!fault1 && tempSampleValid(tCam)) {
+    outC = tCam;
+    return true;
+  }
+  if (lastValidTempTx > -100.0f && tempSampleValid(lastValidTempTx)) {
+    outC = lastValidTempTx;
+    return true;
+  }
+  return false;
 }
 
 // ============== Puerta (F26) =================
@@ -1210,6 +1230,7 @@ static void handleButtonUi() {
       P.F01 = clampSetpoint(P.F01);
       syncTelemetryInterval();
       const bool ok = saveCurrentParamsToFs();
+      if (ok) requestImmediateTx();
       g_uiMode = UI_PARAM_SELECT;
       showParamCodeOnDisplay(it.code);
       flashUiMessage(ok ? "SAVE" : "ERR", 900);
@@ -1401,32 +1422,42 @@ static void enviarTelemetria() {
   if (WiFi.status() != WL_CONNECTED) return;
   if (!g_cfg.moduleId[0] || !g_cfg.apiKey[0]) return;
 
+  float txTemp = 0.0f;
+  if (!tempForTelemetry(txTemp)) {
+    Serial.println(F("[TX] omitido: sonda fallada sin ultima temp valida"));
+    return;
+  }
+
   pushFlash(FP_ENVIANDO);
   HTTPClient http;
   http.setTimeout(8000);
-  http.begin(g_cfg.apiUrl);
+  if (!http.begin(g_cfg.apiUrl)) return;
   http.addHeader("Content-Type", "application/json");
 
   const uint32_t elapsedS = (uint32_t)((millis() - g_phaseStartedAt) / 1000UL);
-  String body = "{";
-  body += "\"moduleId\":\"" + String(g_cfg.moduleId) + "\",";
-  body += "\"deviceToken\":\"" + String(g_cfg.apiKey) + "\",";
-  if (!fault1) body += "\"temp1_c\":" + String(tCam, 2) + ",";
-  else body += "\"temp1_c\":null,";
-  body += "\"comp_on\":" + String(compresor ? "true" : "false") + ",";
-  body += "\"fan_on\":" + String(ventilador ? "true" : "false") + ",";
-  body += "\"defrost_on\":" + String(deshielo ? "true" : "false") + ",";
-  body += "\"phase\":\"" + String(phaseToJson(g_phase)) + "\",";
-  body += "\"phase_elapsed_s\":" + String(elapsedS) + ",";
-  body += "\"phase_total_s\":" + String(g_phaseTotalS);
-  if (g_paramsUpdatedAt.length() > 0) {
-    body += ",\"params_updated_at\":\"" + g_paramsUpdatedAt + "\"";
-  }
-  body += "}";
+  StaticJsonDocument<512> doc;
+  doc["moduleId"] = g_cfg.moduleId;
+  doc["deviceToken"] = g_cfg.apiKey;
+  doc["temp1_c"] = roundf(txTemp * 100.0f) / 100.0f;
+  doc["comp_on"] = compresor;
+  doc["fan_on"] = ventilador;
+  doc["defrost_on"] = deshielo;
+  if (DOOR_PIN >= 0 && P.F26 >= 0.5f) doc["door_open"] = doorOpen;
+  doc["phase"] = phaseToJson(g_phase);
+  doc["phase_elapsed_s"] = elapsedS;
+  doc["phase_total_s"] = g_phaseTotalS;
+  if (g_paramsUpdatedAt.length() > 0) doc["params_updated_at"] = g_paramsUpdatedAt;
+
+  String body;
+  serializeJson(doc, body);
 
   const int code = http.POST(body);
   const String resp = http.getString();
-  Serial.printf("[TX] POST %d\n", code);
+  if (fault1) {
+    Serial.printf("[TX] POST %d (temp ultima valida %.1f C, sonda en fallo)\n", code, txTemp);
+  } else {
+    Serial.printf("[TX] POST %d\n", code);
+  }
   http.end();
   if (code != 200) return;
 
@@ -1622,6 +1653,7 @@ void loop() {
     const float rawT = leerNTCRaw(raw);
     applyEma(rawT);
     updateFault(raw);
+    if (!raw && !fault1 && tempSampleValid(tCam)) lastValidTempTx = tCam;
     aplicarControl();
     checkTelemetryTriggers();
     aplicarDeratingCalor(millis());

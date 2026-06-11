@@ -1,5 +1,6 @@
 import { PR500_SECTIONS } from '../pr500/pr500-sections';
 import { COMBISTATO_SECTIONS } from '../combistato/combistato-sections';
+import { PRO400_SECTIONS } from '../pro400/pro400-sections';
 
 export interface InicioManualItem {
   term: string;
@@ -280,35 +281,104 @@ function buildPro300DeviceManual(): InicioDeviceManual {
   };
 }
 
-const PRO400_PRO300_MANUALS: InicioDeviceManual[] = [
-  {
+const PRO400_EXAMPLES: Record<string, string> = {
+  AR01: 'Cámara de congelados: AR01 = −20 °C con AR05 = 2 °C de histéresis.',
+  AR02: 'Pantalla marca −18,2 °C y termómetro patrón −18,0 °C → AR02 = +0,2 °C.',
+  AR05: 'AR05 = 1,5 °C: banda estrecha, compresor más sensible; AR05 = 4 °C: ciclos más espaciados.',
+  AR07: 'AR07 = 300 s: mínimo 5 minutos de marcha por ciclo.',
+  AR08: 'AR08 = 180 s: no reencender antes de 3 minutos apagado.',
+  AR09: 'AR09 = 240 min: deshielo automático cada 4 h de refrigeración tras el goteo.',
+  AR10: 'AR10 = 30 min: deshielo corta a los 30 min aunque no haya sonda de evaporador.',
+  AR15: 'Taller: AR15 = 0 (apagar si falla sonda). Planta con producto sensible: AR15 = 1 con AR16/AR17 acordes.',
+  AR21: 'Siempre AR21 = 2 para ver curva en la app; AR22 = 60–120 s según necesidad.',
+  AR23: 'AR23 = 0,5 °C: envía antes si la temperatura se movió medio grado.',
+  AR50: 'Compresor no arranca con relé en reposo: probá AR50 = 1 (o viceversa).',
+};
+
+function buildPro400DeviceManual(): InicioDeviceManual {
+  const paramBlocks: InicioManualBlock[] = PRO400_SECTIONS.map((section) => ({
+    title: section.title,
+    intro: section.intro,
+    items: section.fields.map((field) => ({
+      term: `${field.code} — ${field.label}`,
+      detail: field.help ?? `Parámetro ${field.code}: ${field.label}.`,
+      example: PRO400_EXAMPLES[field.code],
+    })),
+  }));
+
+  const blocks: InicioManualBlock[] = [
+    {
+      title: 'Operación en planta',
+      intro: 'Alta del equipo, alertas y qué ver en la app.',
+      items: [
+        {
+          term: 'Alta y credenciales',
+          detail:
+            'Al agregar un PRO400 en Inicio copiá el ID de módulo y el código de 6 dígitos al portal WiFi del equipo (PRO400-Setup). Sin esos datos no hay curva ni parámetros en la nube.',
+          example: 'Nombre “Cámara norte”, umbrales −22 °C / −15 °C en Notificaciones para congelados.',
+        },
+        {
+          term: 'Telemetría',
+          detail:
+            'La app muestra temperatura (T1), estado del compresor, fase (frío, deshielo, goteo, arranque, emergencia) y minutos restantes. Requiere AR21 = 2 y WiFi estable.',
+        },
+        {
+          term: 'Alertas push',
+          detail:
+            'Configurá mínimo y máximo de temperatura en Notificaciones del equipo. Fuera de rango o sin datos unos minutos genera alerta si las notificaciones están activas.',
+        },
+        {
+          term: 'Un solo relé',
+          detail:
+            'El PRO400 usa un único contactor (compresor y deshielo comparten la misma salida en la plaqueta). No hay relé de ventilador físico: fan_on en la app es estado lógico del control.',
+        },
+      ],
+    },
+    {
+      title: 'Botonera y display',
+      intro: 'Mismas combinaciones que el PRO300 en la plaqueta estándar.',
+      items: [
+        {
+          term: 'Menú parámetros (A01…A50)',
+          detail: 'UP + DOWN ~1,2 s abre el menú. SET en un código entra a editar; SET de nuevo guarda en el equipo y dispara envío a la nube.',
+        },
+        {
+          term: 'Portal WiFi',
+          detail:
+            'SET solo ~4 s, o SET + ABAJO / UP / VOLVER ~0,8 s, o GPIO0 a GND al encender. Configurá red, ID de módulo y token.',
+        },
+        {
+          term: 'Deshielo manual',
+          detail: 'UP solo ~1,2 s inicia deshielo. UP toque durante deshielo o goteo lo cancela.',
+        },
+        {
+          term: 'Vistas del display',
+          detail:
+            'DOWN toque alterna: temperatura → fase (dEF, GOT, bOO, etc.) → minutos restantes de fase. VOLVER vuelve a temperatura. Con sonda fallada muestra E1.',
+        },
+        {
+          term: 'Códigos A vs AR',
+          detail:
+            'En el display 7-seg verás A01, A02, … (firmware). En la app y en este manual son AR01, AR02, … Es el mismo parámetro.',
+          example: 'A09 en el equipo = AR09 intervalo de deshielo en la app.',
+        },
+      ],
+    },
+    ...paramBlocks,
+  ];
+
+  return {
     id: 'pro400',
-    title: 'PRO400 — Una sonda',
-    subtitle: 'Control + temperatura en la nube',
+    title: 'PRO400 — Manual completo (AR01 a AR26 + AR50)',
+    subtitle: 'Controlador de cámara: 1 sonda + un relé compresor/deshielo',
     intro:
-      'Controlador de cámara con una sonda. Parámetros **AR01–AR26** en la app (en el equipo **A01–A26**). Alarmas push con mín/máx de temperatura en Notificaciones.',
-    blocks: [
-      {
-        title: 'Uso diario',
-        items: [
-          {
-            term: 'Conexión',
-            detail:
-              'Al dar de alta copiá ID de módulo y código de 6 dígitos al portal del equipo. Sin eso no hay curva en la app.',
-            example: 'Nombre “Cámara norte”, mínimo −22 °C, máximo −15 °C para congelados.',
-          },
-          {
-            term: 'Alertas',
-            detail: 'Fuera de rango o sin datos unos minutos genera alerta si las notificaciones están activas.',
-          },
-        ],
-      },
-    ],
-  },
-  buildPro300DeviceManual(),
-];
+      'Controlador de cámara con una sonda NTC y un relé en la plaqueta PRO300. En la app verás AR01…AR26 y AR50; en el equipo A01…A26 y A50. Abajo van en el mismo orden que Configuración → PRO400. Ajustá, guardá y verificá la curva en la nube.',
+    blocks,
+  };
+}
 
 export const INICIO_DEVICE_MANUALS: InicioDeviceManual[] = [
   buildPr500DeviceManual(),
-  ...PRO400_PRO300_MANUALS,
+  buildPro400DeviceManual(),
+  buildPro300DeviceManual(),
 ];
