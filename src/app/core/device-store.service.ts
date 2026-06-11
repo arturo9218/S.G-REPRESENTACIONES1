@@ -1888,6 +1888,49 @@ export class DeviceStoreService {
     return { params: mergePro400Params(data?.params) };
   }
 
+  /** Marca un panel existente como PRO400 (AR01–AR26) e inicializa params si faltan. */
+  async upgradeDeviceToPro400(deviceId: string): Promise<{ ok: boolean; error?: string }> {
+    const dev = this.snapshot.find((d) => d.id === deviceId);
+    if (!this.canEditDeviceDataOnCloud(dev)) {
+      return { ok: false, error: 'Solo lectura: no podés cambiar el tipo de equipo.' };
+    }
+    if (!this.isCloudSyncEnabled() || !this.isUuid(deviceId)) {
+      return { ok: false, error: 'Requiere sesión en la nube y un ID de panel UUID.' };
+    }
+    const { data, error: selErr } = await this.auth.client
+      .from('devices')
+      .select('params')
+      .eq('id', deviceId)
+      .maybeSingle();
+    if (selErr) return { ok: false, error: selErr.message };
+    const blob = pro400ToJsonBlob(mergePro400Params(data?.params));
+    const nowIso = new Date().toISOString();
+    const { error } = await this.auth.client
+      .from('devices')
+      .update({
+        equipment_kind: 'pro400',
+        params: blob,
+        sensor_1_label: 'Sonda',
+        sensor_2_label: '—',
+        updated_at: nowIso,
+      })
+      .eq('id', deviceId);
+    if (error) return { ok: false, error: error.message };
+    this.persistDevices(
+      this.snapshot.map((d) =>
+        d.id === deviceId
+          ? {
+              ...d,
+              equipmentKind: 'pro400',
+              sensor1Label: 'Sonda',
+              sensor2Label: '—',
+            }
+          : d
+      )
+    );
+    return { ok: true };
+  }
+
   async savePro400Params(
     deviceId: string,
     blob: Record<string, number>

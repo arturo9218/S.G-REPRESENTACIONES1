@@ -1,18 +1,19 @@
 /**
- * AR Monitoreo — PRO400 (ESP32 + 2× CD4094, 1 sonda)
+ * AR Monitoreo - PRO400 (ESP32 + 2x CD4094, 1 sonda)
  * -----------------------------------------------------------------
  * Variante con display 7-seg. Para NodeMCU/ESP8266 ver firmware/esp8266_pro400/
- * Parámetros F01–F26 + F50 (sin F25 ni F27), sync nube `fetch-pro400-params`.
- * Menú local: códigos A01…A24, A26, A50 en display 7-seg.
+ * Parametros F01-F26 + F50 (sin F25 ni F27), sync nube fetch-pro400-params.
+ * Menu local: codigos A01..A24, A26, A50 en display 7-seg.
  *
- * Hardware:
- *   - NTC1 GPIO34. SPI CD4094: DATA=23, CLOCK=18, STROBE=5
- *   - Un solo relé en 4094#2 bit5 (misma plaqueta PRO300); bit6/7 sin usar
+ * Hardware (1 sola sonda NTC):
+ *   - NTC1 GPIO34. Si marca ~0 C con cable OK: cambiar NTC_R_SERIES_TO_VCC a 0.
+ *   - SPI CD4094: DATA=23, CLOCK=18, STROBE=5
+ *   - Un solo rele en 4094#2 bit5 (misma plaqueta PRO300); bit6/7 sin usar
  *   - PRO400_SINGLE_RELAY: bit5 ON si compresor o deshielo activo
  *   - Botones (igual PRO300): UP=13 DOWN=14 SET=27 BACK=17
- *   - Atajos: UP+DOWN 1,2s menú A | SET+ABAJO/UP/VOLVER 0,8s WiFi | SET 4s WiFi
+ *   - Atajos: UP+DOWN 1,2s menu A | SET+ABAJO/UP/VOLVER 0,8s WiFi | SET 4s WiFi
  *             UP 1,2s deshielo | UP toque en deshielo cancela | DOWN cicla vista
- *   - GPIO0 a GND al encender → portal WiFi
+ *   - GPIO0 a GND al encender -> portal WiFi
  *   - DOOR_PIN: -1 sin sensor, o GPIO (ej. 33) + F26 entrada digital
  *
  * Dependencias: WiFiManager, ArduinoJson v6, core ESP32
@@ -26,6 +27,7 @@
 #include <esp_task_wdt.h>
 #include <SPI.h>
 #include <math.h>
+#include "driver/gpio.h"
 
 static void runConfigPortal();
 static void flashUiMessage(const char *msg, unsigned long ms = 1200UL);
@@ -45,6 +47,16 @@ static void syncTelemetryInterval();
 #define BTN_SET_PIN       27
 #define BTN_BACK_PIN      17
 #define BTN_ACTIVE_LOW    1
+
+/** 1 = 3V3-10k-ADC-NTC-GND (estandar). 0 = 3V3-NTC-ADC-10k-GND. */
+#ifndef NTC_R_SERIES_TO_VCC
+#define NTC_R_SERIES_TO_VCC 1
+#endif
+static constexpr float R_FIXED = 10000.0f;
+static constexpr float BETA = 3950.0f;
+static constexpr float T0K = 298.15f;
+static constexpr float R0 = 10000.0f;
+static constexpr uint8_t NTC_ADC_SAMPLES = 8;
 
 #define BIT_COM1 0
 #define BIT_COM2 1
@@ -80,7 +92,7 @@ struct Cfg {
   uint32_t intervalMs = 60000UL;
 } g_cfg;
 
-/** Defaults = manual PRO400 (°C / s / min según parámetro). */
+/** Defaults = manual PRO400 (C / s / min segun parametro). */
 struct Pro400Params {
   float F01 = 4.0f;
   float F02 = 0.0f;
@@ -242,11 +254,7 @@ static float prevTempReported = TEMP_ERR_VALUE;
 static bool prevCompresor = false;
 static bool prevVentilador = false;
 static bool prevDeshielo = false;
-
-static constexpr float R_FIXED = 10000.0f;
-static constexpr float BETA = 3950.0f;
-static constexpr float T0K = 298.15f;
-static constexpr float R0 = 10000.0f;
+static bool g_ntcBootDiagPending = true;
 
 static constexpr unsigned long BTN_DEBOUNCE_MS = 35UL;
 static constexpr unsigned long BTN_ENTER_PARAMS_HOLD_MS = 1200UL;
@@ -642,21 +650,93 @@ static float clampSetpoint(float sp) {
   return clampParamValue(sp, P.F03, P.F04);
 }
 
-// ============== NTC + EMA ===================
-static float leerNTCRaw(bool &rawFault) {
+// ============== NTC (1 sonda) + EMA ==========
+static bool tempSampleValid(float t) {
+  return t > -80.0f && t < 75.0f;
+}
+
+static float rNtcFromAdc(int adc) {
+#if NTC_R_SERIES_TO_VCC
+  return R_FIXED * ((float)adc / (4095.0f - (float)adc));
+#else
+  return R_FIXED * ((4095.0f - (float)adc) / (float)adc);
+#endif
+}
+
+static float tempCFromAdc(int adc) {
+  const float rNTC = rNtcFromAdc(adc);
+  if (rNTC <= 1.0f || rNTC > 500000.0f) return TEMP_ERR_VALUE;
+  const float tK = 1.0f / ((1.0f / T0K) + (1.0f / BETA) * log(rNTC / R0));
+  return tK - 273.15f;
+}
+
+static float tempCFromAdcAlt(int adc) {
+#if NTC_R_SERIES_TO_VCC
+  const float rNTC = R_FIXED * ((4095.0f - (float)adc) / (float)adc);
+#else
+  const float rNTC = R_FIXED * ((float)adc / (4095.0f - (float)adc));
+#endif
+  if (rNTC <= 1.0f || rNTC > 500000.0f) return TEMP_ERR_VALUE;
+  const float tK = 1.0f / ((1.0f / T0K) + (1.0f / BETA) * log(rNTC / R0));
+  return tK - 273.15f;
+}
+
+static int leerAdcPromedio(int pin, bool &rawFault) {
   long acc = 0;
   int validas = 0;
-  for (int i = 0; i < 8; i++) {
-    int v = analogRead(NTC1_PIN);
-    if (v > 5 && v < 4090) { acc += v; validas++; }
-    delayMicroseconds(200);
+  const int samples = (int)NTC_ADC_SAMPLES;
+  for (int i = 0; i < samples; i++) {
+    const int v = analogRead(pin);
+    if (v > 8 && v < 4088) {
+      acc += v;
+      validas++;
+    }
+    delayMicroseconds(250);
   }
-  if (validas < 4) { rawFault = true; return TEMP_ERR_VALUE; }
-  int adc = acc / validas;
-  float rNTC = R_FIXED * ((float)adc / (4095.0f - (float)adc));
-  float tK = 1.0f / ((1.0f / T0K) + (1.0f / BETA) * log(rNTC / R0));
-  float tC = tK - 273.15f;
-  if (tC < -45.0f || tC > 80.0f) { rawFault = true; return TEMP_ERR_VALUE; }
+  if (validas < samples / 2) {
+    rawFault = true;
+    return -1;
+  }
+  rawFault = false;
+  return (int)(acc / validas);
+}
+
+static void printNtcSondaLine(const char *label, int pin, int adc, bool rf, float disp, bool fault) {
+  if (adc < 0) {
+    Serial.printf("  %s GPIO%d sin lectura valida (cable suelto?)\n", label, pin);
+    return;
+  }
+  const float tAct = tempCFromAdc(adc);
+  const float tAlt = tempCFromAdcAlt(adc);
+  Serial.printf("  %s GPIO%d ADC=%d R=%.0f ohm T=%.2f C (alt=%.2f C) rawFault=%d disp=%.2f fault=%d\n",
+                label, pin, adc, rNtcFromAdc(adc), tAct, tAlt, rf ? 1 : 0, disp, fault ? 1 : 0);
+  if (adc < 50) {
+    Serial.println(F("       -> ADC muy bajo: revisar cable / pin (S1=GPIO34)"));
+  } else if (adc > 3900) {
+    Serial.println(F("       -> ADC saturado: corto o divisor mal cableado"));
+  } else if (tAct > -6.0f && tAct < 6.0f && tAlt > 12.0f && tAlt < 40.0f) {
+    Serial.println(F("       -> ~0 C con formula activa pero ~ambiente con alt: cambiar NTC_R_SERIES_TO_VCC"));
+  }
+}
+
+static void printNtcDiag() {
+  bool rf = false;
+  const int adc = leerAdcPromedio(NTC1_PIN, rf);
+  Serial.printf("[NTC] PRO400 1 sonda | divisor: %s | AR02=%.1f | F18=%.0f\n",
+                NTC_R_SERIES_TO_VCC ? "3V3-10k-ADC-NTC-GND" : "3V3-NTC-ADC-10k-GND",
+                P.F02, P.F18);
+  Serial.println(F("[NTC] Comando serie: ntc | temp = fijar vista temperatura"));
+  printNtcSondaLine("S1", NTC1_PIN, adc, rf, tCam, fault1);
+}
+
+static float leerNTCRaw(bool &rawFault) {
+  const int adc = leerAdcPromedio(NTC1_PIN, rawFault);
+  if (rawFault || adc < 0) return TEMP_ERR_VALUE;
+  const float tC = tempCFromAdc(adc);
+  if (!tempSampleValid(tC)) {
+    rawFault = true;
+    return TEMP_ERR_VALUE;
+  }
   rawFault = false;
   return tC + P.F02;
 }
@@ -743,7 +823,7 @@ static void aplicarControl() {
       ventilador = false;
       compChangedAt = now;
       setPhase(PH_DRIP, DRIP_AFTER_DEFROST_S);
-      Serial.println(F("[BTN] Deshielo cancelado → goteo"));
+      Serial.println(F("[BTN] Deshielo cancelado -> goteo"));
       return;
     }
   }
@@ -761,7 +841,7 @@ static void aplicarControl() {
     bootDelayDone = true;
     compChangedAt = now;
     lastDefrostEndAt = now;
-    Serial.printf("[BOOT] Fin retardo F13=%.0f min (min %lus relés OFF)\n",
+    Serial.printf("[BOOT] Fin retardo F13=%.0f min (min %lus reles OFF)\n",
                   P.F13, (unsigned long)(RELAY_BOOT_MIN_MS / 1000UL));
     if (P.F11 >= 0.5f && !defrostOnStartDone) {
       defrostOnStartDone = true;
@@ -820,7 +900,7 @@ static void aplicarControl() {
       compresor = false;
       ventilador = false;
       setPhase(PH_DRIP, DRIP_AFTER_DEFROST_S);
-      Serial.println(F("[DEF] Fin deshielo → goteo"));
+      Serial.println(F("[DEF] Fin deshielo -> goteo"));
     } else {
       compresor = false;
       ventilador = false;
@@ -835,7 +915,7 @@ static void aplicarControl() {
     if ((now - dripStartedAt) >= DRIP_AFTER_DEFROST_S * 1000UL) {
       dripping = false;
       lastDefrostEndAt = now;
-      Serial.println(F("[DEF] Goteo OK → refrigeracion"));
+      Serial.println(F("[DEF] Goteo OK -> refrigeracion"));
     } else {
       setPhase(PH_DRIP, DRIP_AFTER_DEFROST_S);
       return;
@@ -874,12 +954,39 @@ static void aplicarControl() {
 }
 
 // ============== Botones =====================
+/** Pull explicito: GPIO14/16/17 a veces no levantan bien solo con pinMode(). */
+static void initBtnPin(int pin) {
+  gpio_reset_pin((gpio_num_t)pin);
+  gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT);
+#if BTN_ACTIVE_LOW
+  gpio_set_pull_mode((gpio_num_t)pin, GPIO_PULLUP_ONLY);
+#else
+  gpio_set_pull_mode((gpio_num_t)pin, GPIO_PULLDOWN_ONLY);
+#endif
+}
+
 static bool btnPressed(int pin) {
 #if BTN_ACTIVE_LOW
   return digitalRead(pin) == LOW;
 #else
   return digitalRead(pin) == HIGH;
 #endif
+}
+
+static void printBtnDiag() {
+  Serial.printf("[BTN] Pines U=%d D=%d S=%d B=%d | activo_%s\n",
+                BTN_UP_PIN, BTN_DOWN_PIN, BTN_SET_PIN, BTN_BACK_PIN,
+                BTN_ACTIVE_LOW ? "bajo" : "alto");
+  Serial.printf("  raw HIGH/LOW: U=%d D=%d S=%d B=%d\n",
+                digitalRead(BTN_UP_PIN), digitalRead(BTN_DOWN_PIN),
+                digitalRead(BTN_SET_PIN), digitalRead(BTN_BACK_PIN));
+  Serial.printf("  logica apretado: U=%d D=%d S=%d B=%d | ui=%d waitRel=%d\n",
+                btnPressed(BTN_UP_PIN) ? 1 : 0,
+                btnPressed(BTN_DOWN_PIN) ? 1 : 0,
+                btnPressed(BTN_SET_PIN) ? 1 : 0,
+                btnPressed(BTN_BACK_PIN) ? 1 : 0,
+                (int)g_uiMode, g_menuWaitRelease ? 1 : 0);
+  Serial.println(F("  Apreta cada boton: raw debe cambiar. Si apretado=HIGH, BTN_ACTIVE_LOW=0."));
 }
 
 static void syncBtnPrevFromPins() {
@@ -927,7 +1034,7 @@ static bool handlePortalComboHold(unsigned long now) {
       g_menuWaitRelease = true;
       syncBtnPrevFromPins();
       runConfigPortal();
-      Serial.println(F("[BTN] SET+combo → portal PRO400-Setup"));
+      Serial.println(F("[BTN] SET+combo -> portal PRO400-Setup"));
     }
     return true;
   }
@@ -961,7 +1068,7 @@ static void handleButtonUi() {
     if (backEdgeEarly && !upHeld && !downHeld && !setHeld) {
       g_normalDisp = DISP_TEMP;
       refreshNormalDisplay();
-      Serial.println(F("[BTN] VOLVER → temperatura"));
+      Serial.println(F("[BTN] VOLVER -> temperatura"));
       syncBtnPrevFromPins();
       return;
     }
@@ -997,7 +1104,7 @@ static void handleButtonUi() {
         syncBtnPrevFromPins();
         showParamCodeOnDisplay(g_paramMenu[g_paramCursor].code);
         flashUiMessage("MENU", 800);
-        Serial.println(F("[BTN] UP+DOWN → menú A01"));
+        Serial.println(F("[BTN] UP+DOWN -> menu A01"));
       }
     } else if (upHeld && !downHeld && !setHeld) {
       g_btnBothPressedAt = 0;
@@ -1020,7 +1127,7 @@ static void handleButtonUi() {
         g_menuWaitRelease = true;
         syncBtnPrevFromPins();
         runConfigPortal();
-        Serial.println(F("[BTN] SET 4s → portal WiFi"));
+        Serial.println(F("[BTN] SET 4s -> portal WiFi"));
         return;
       }
       if (setHeldMs >= BTN_ENTER_PARAMS_HOLD_MS && !g_setHoldMenuDone) {
@@ -1031,7 +1138,7 @@ static void handleButtonUi() {
         syncBtnPrevFromPins();
         showParamCodeOnDisplay(g_paramMenu[g_paramCursor].code);
         flashUiMessage("MENU", 800);
-        Serial.println(F("[BTN] SET 1,2s → menú A01"));
+        Serial.println(F("[BTN] SET 1,2s -> menu A01"));
       }
     } else {
       g_btnBothPressedAt = 0;
@@ -1069,7 +1176,7 @@ static void handleButtonUi() {
     if (backEdge) {
       g_uiMode = UI_NORMAL;
       g_normalDisp = DISP_TEMP;
-      Serial.println(F("[BTN] Salir menú"));
+      Serial.println(F("[BTN] Salir menu"));
     }
     return;
   }
@@ -1364,7 +1471,18 @@ static void leerSerial() {
   String lower = s;
   lower.toLowerCase();
   if (lower == "portal" || lower == "wifi") runConfigPortal();
-  else if (lower == "pull") g_pullNowRequested = true;
+  else if (lower == "temp") {
+    modoTexto = false;
+    g_normalDisp = DISP_TEMP;
+    refreshNormalDisplay();
+    return;
+  } else if (lower == "ntc" || lower == "adc") {
+    printNtcDiag();
+    return;
+  } else if (lower == "btns" || lower == "buttons" || lower == "btn") {
+    printBtnDiag();
+    return;
+  } else if (lower == "pull") g_pullNowRequested = true;
   else if (lower == "config") {
     Serial.printf("module=%s sp=%.1f diff=%.1f F09=%.0f F22=%.0f\n",
                   g_cfg.moduleId, P.F01, P.F05, P.F09, P.F22);
@@ -1440,13 +1558,15 @@ void setup() {
   pinMode(STROBE_PIN, OUTPUT);
   digitalWrite(STROBE_PIN, LOW);
   pinMode(PIN_FORCE_PORTAL, INPUT_PULLUP);
-  pinMode(BTN_UP_PIN, INPUT_PULLUP);
-  pinMode(BTN_DOWN_PIN, INPUT_PULLUP);
-  pinMode(BTN_SET_PIN, INPUT_PULLUP);
-  pinMode(BTN_BACK_PIN, INPUT_PULLUP);
-  if (DOOR_PIN >= 0) pinMode(DOOR_PIN, INPUT_PULLUP);
+  initBtnPin(BTN_UP_PIN);
+  initBtnPin(BTN_DOWN_PIN);
+  initBtnPin(BTN_SET_PIN);
+  initBtnPin(BTN_BACK_PIN);
+  if (DOOR_PIN >= 0) initBtnPin(DOOR_PIN);
   syncBtnPrevFromPins();
+  printBtnDiag();
   analogReadResolution(12);
+  analogSetPinAttenuation(NTC1_PIN, ADC_11db);
 
   SPI.begin(CLOCK_PIN, -1, DATA_PIN, -1);
   SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
@@ -1505,6 +1625,11 @@ void loop() {
     aplicarControl();
     checkTelemetryTriggers();
     aplicarDeratingCalor(millis());
+    if (g_ntcBootDiagPending && millis() - bootAtMs >= 4000UL) {
+      g_ntcBootDiagPending = false;
+      Serial.println(F("---- Diagnostico NTC al arranque (4 s) ----"));
+      printNtcDiag();
+    }
   }
 
   if (g_uiMode == UI_PARAM_SELECT) {

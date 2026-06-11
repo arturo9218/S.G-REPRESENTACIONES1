@@ -208,6 +208,7 @@
         [userInitial]="userInitial"
         [deviceCount]="devices.length"
         [combistatoCount]="combistatos.length"
+        [pro400Count]="pro400s.length"
         [pr500Count]="pr500s.length"
         [activeAlerts]="summaryAlerts"
         [accumulatedAlerts]="summaryAlarmEvents"
@@ -725,62 +726,21 @@
                           >°C</span
                         >
                       </span>
-                      <div class="device-card__sensor-foot" [class.device-card__sensor-foot--relays]="d.equipmentKind === 'pro400'">
-                        <ng-container *ngIf="d.equipmentKind === 'pro400'; else deviceFootDefault">
-                          <span
-                            class="device-card__relay-pill device-card__relay-pill--static"
-                            [class.device-card__relay-pill--on]="d.lastCompOn === true || d.lastDefrostOn === true"
-                            title="Relé (compresor o deshielo)"
-                            >REL</span
-                          >
-                          <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
-                          <a
-                            class="device-card__chart-link"
-                            [routerLink]="['/chart']"
-                            [queryParams]="{ deviceId: d.id }"
-                            (click)="$event.stopPropagation()"
-                            title="Ver gráfico"
-                            aria-label="Ver gráfico"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                              <path d="M3 3v18h18" />
-                              <path d="M7 16l4-4 3 3 5-6" />
-                            </svg>
-                          </a>
-                        </ng-container>
-                        <ng-template #deviceFootDefault>
-                          <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
-                          <a
-                            class="device-card__chart-link"
-                            [routerLink]="['/chart']"
-                            [queryParams]="{ deviceId: d.id }"
-                            (click)="$event.stopPropagation()"
-                            title="Ver gráfico"
-                            aria-label="Ver gráfico de temperaturas"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                              <path d="M3 3v18h18" />
-                              <path d="M7 16l4-4 3 3 5-6" />
-                            </svg>
-                          </a>
-                        </ng-template>
-                      </div>
-                    </div>
-                    <div
-                      class="device-card__defrost-strip"
-                      *ngIf="d.equipmentKind === 'pro400' && d.lastPhase"
-                      [attr.data-phase]="d.lastPhase"
-                    >
-                      <span class="device-card__defrost-pill">
-                        {{ combistatoPhaseLabel(d.lastPhase) }}
-                      </span>
-                      <div class="device-card__defrost-info">
-                        <ng-container *ngIf="devicePro400PhaseHasTimer(d)">
-                          <span><strong>Transcurrido</strong> {{ formatMinSec(d.lastPhaseElapsedS) }}</span>
-                          <span *ngIf="devicePro400PhaseRemainingS(d) != null"
-                            ><strong>Faltan</strong> {{ formatMinSec(devicePro400PhaseRemainingS(d)) }}</span
-                          >
-                        </ng-container>
+                      <div class="device-card__sensor-foot">
+                        <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
+                        <a
+                          class="device-card__chart-link"
+                          [routerLink]="['/chart']"
+                          [queryParams]="{ deviceId: d.id }"
+                          (click)="$event.stopPropagation()"
+                          title="Ver gráfico"
+                          aria-label="Ver gráfico de temperaturas"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16l4-4 3 3 5-6" />
+                          </svg>
+                        </a>
                       </div>
                     </div>
                   </ng-container>
@@ -865,6 +825,156 @@
                 </button>
               </div>
             </article>
+          </div>
+
+          <div
+            id="section-pro400-cards"
+            class="device-section"
+            *ngIf="
+              showPro400SectionInView &&
+              (shellRoute === 'devices') &&
+              environment.deviceCloudSync &&
+              deviceStore.isCloudSyncActive() &&
+              pro400sForView.length
+            "
+          >
+            <div class="device-section__head">
+              <div class="device-section__titles">
+                <h2 class="device-section__title">PRO400</h2>
+                <p class="device-section__hint">
+                  Controlador con <strong>una sonda</strong> y un relé (compresor / deshielo). En la app se edita
+                  <strong>AR01–AR26</strong> (+ AR50 hardware). Botón en cada tarjeta →
+                  <strong>Configuración</strong>.
+                </p>
+              </div>
+              <button type="button" class="btn btn--ghost btn--sm" (click)="openAddPro400Modal()">+ PRO400</button>
+            </div>
+            <div class="device-grid">
+              <article
+                class="device-card device-card--combistato"
+                *ngFor="let p of pro400sForView; trackBy: trackByPro400Id"
+                [attr.id]="'fleet-card-pro400-' + p.id"
+                [class.device-card--selected]="p.id === selectedPro400Id"
+                (click)="selectPro400(p.id)"
+              >
+                <header class="device-card__head">
+                  <div class="device-card__head-text">
+                    <h3 class="device-card__name">{{ p.name }}</h3>
+                    <span class="device-card__id">ID panel: {{ p.id }}</span>
+                    <span class="device-card__module" *ngIf="p.moduleId">ID dispositivo: {{ p.moduleId }}</span>
+                  </div>
+                  <div class="device-card__head-actions">
+                    <span class="device-card__status" [class.device-card__status--off]="!p.online">
+                      <span class="device-card__dot"></span>
+                      {{ p.online ? 'Online' : 'Offline' }}
+                    </span>
+                  </div>
+                </header>
+                <div class="device-card__head-line" aria-hidden="true"></div>
+                <div class="device-card__temps" [class.device-card__temps--pending]="p.lastTemp1C == null">
+                  <ng-container *ngIf="p.lastTemp1C != null; else pro400NoTemp">
+                    <div class="device-card__temps-inner device-card__temps-inner--single">
+                      <span class="device-card__sensor-label">Sonda</span>
+                      <span class="device-card__sensor-value" [attr.aria-label]="formatTempCard(p.lastTemp1C)">
+                        <span class="device-card__sensor-value-num">{{ formatTempCardValueOnly(p.lastTemp1C) }}</span>
+                        <span
+                          *ngIf="formatTempCardValueOnly(p.lastTemp1C) !== '—'"
+                          class="device-card__sensor-value-unit"
+                          aria-hidden="true"
+                          >°C</span
+                        >
+                      </span>
+                      <div class="device-card__sensor-foot device-card__sensor-foot--relays">
+                        <span
+                          class="device-card__relay-pill device-card__relay-pill--static"
+                          [class.device-card__relay-pill--on]="p.lastCompOn === true || p.lastDefrostOn === true"
+                          title="Relé (compresor o deshielo)"
+                          >REL</span
+                        >
+                        <span class="device-card__sensor-time">{{ p.lastSeenLabel || p.updatedAtLabel }}</span>
+                        <a
+                          class="device-card__chart-link"
+                          [routerLink]="['/chart']"
+                          [queryParams]="{ deviceId: p.id }"
+                          (click)="$event.stopPropagation()"
+                          title="Ver gráfico"
+                          aria-label="Ver gráfico"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16l4-4 3 3 5-6" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                    <div class="device-card__defrost-strip" *ngIf="p.lastPhase" [attr.data-phase]="p.lastPhase">
+                      <span class="device-card__defrost-pill">{{ combistatoPhaseLabel(p.lastPhase) }}</span>
+                      <div class="device-card__defrost-info">
+                        <ng-container *ngIf="pro400PhaseHasTimer(p)">
+                          <span><strong>Transcurrido</strong> {{ formatMinSec(p.lastPhaseElapsedS) }}</span>
+                          <span *ngIf="pro400PhaseRemainingS(p) != null"
+                            ><strong>Faltan</strong> {{ formatMinSec(pro400PhaseRemainingS(p)) }}</span
+                          >
+                        </ng-container>
+                      </div>
+                    </div>
+                  </ng-container>
+                  <ng-template #pro400NoTemp>
+                    <div class="device-card__temps-inner device-card__temps-inner--empty">
+                      <span class="device-card__sensor-label device-card__sensor-label--muted">
+                        Esperando primera lectura del PRO400
+                      </span>
+                      <span class="device-card__sensor-subline device-card__sensor-subline--hint">
+                        Último envío: {{ p.lastSeenLabel || p.updatedAtLabel }}
+                      </span>
+                    </div>
+                  </ng-template>
+                </div>
+                <footer class="device-card__foot">
+                  <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && p.ownerUserId">
+                    Cuenta {{ formatOwnerUserIdShort(p.ownerUserId) }}
+                  </span>
+                  <span class="device-card__meta">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    {{ p.location }}
+                  </span>
+                </footer>
+                <div class="device-card__actions">
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Parámetros AR01 a AR26 de ' + p.name"
+                    (click)="goPro400Settings(p, $event)"
+                  >
+                    AR01–AR26
+                  </button>
+                  <a
+                    class="device-card__btn device-card__btn--link"
+                    [routerLink]="['/chart']"
+                    [queryParams]="{ deviceId: p.id }"
+                    (click)="$event.stopPropagation()"
+                    title="Gráfico histórico"
+                    >Gráfico</a
+                  >
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Editar nombre de ' + p.name"
+                    (click)="openEditPro400Modal(p); $event.stopPropagation()"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    class="device-card__btn device-card__btn--danger"
+                    [attr.aria-label]="'Eliminar PRO400 ' + p.name"
+                    (click)="confirmDeletePro400(p); $event.stopPropagation()"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </article>
+            </div>
           </div>
 
           <div
@@ -1523,11 +1633,11 @@
             <h2 class="card__title card__title--sm">Elegí qué configurar</h2>
             <p class="card__hint card__hint--tight">
               Tocá un <strong>panel de medición</strong> para umbrales, nombres de sensores, corrección, compartir, etc.
-              Tocá un <strong>PRO300</strong> para editar <strong>AR01–AR48</strong>, o un <strong>PR500</strong> para
-              <strong>AR01–AR28</strong> (presión / etapas). No hace falta que esté online para
-              guardar.
+              Tocá un <strong>PRO400</strong> para <strong>AR01–AR26</strong> (1 sonda), un <strong>PRO300</strong> para
+              <strong>AR01–AR48</strong> (2 sondas), o un <strong>PR500</strong> para <strong>AR01–AR28</strong>
+              (presión / etapas). No hace falta que esté online para guardar.
             </p>
-            <p class="card__empty" *ngIf="!devices.length && !combistatos.length && !pr500s.length">
+            <p class="card__empty" *ngIf="!devices.length && !pro400s.length && !combistatos.length && !pr500s.length">
               No hay equipos cargados. Andá a <strong>Inicio</strong> y usá <strong>Agregar equipo</strong>.
             </p>
             <ng-container *ngIf="devices.length">
@@ -1549,6 +1659,28 @@
                   >
                   <span class="settings-device-tile__meta">{{ d.location }}</span>
                   <span class="settings-device-tile__meta" *ngIf="d.moduleId">Módulo: {{ d.moduleId }}</span>
+                </button>
+              </div>
+            </ng-container>
+            <ng-container *ngIf="pro400s.length && environment.deviceCloudSync && deviceStore.isCloudSyncActive()">
+              <h3 class="settings-hub__group-title">PRO400</h3>
+              <div class="settings-device-grid">
+                <button
+                  type="button"
+                  class="settings-device-tile settings-device-tile--combistato"
+                  *ngFor="let p of pro400s; trackBy: trackByPro400Id"
+                  [class.settings-device-tile--active]="settingsConfigKind === 'pro400' && p.id === selectedPro400Id"
+                  (click)="openSettingsPro400Params(p.id)"
+                >
+                  <span class="settings-device-tile__kind">PRO400</span>
+                  <span class="settings-device-tile__name">{{ p.name }}</span>
+                  <span
+                    class="settings-device-tile__pill"
+                    [class.settings-device-tile__pill--off]="!p.online"
+                    >{{ p.online ? 'Online' : 'Sin conexión' }}</span
+                  >
+                  <span class="settings-device-tile__meta">AR01–AR26 · 1 sonda</span>
+                  <span class="settings-device-tile__meta" *ngIf="p.moduleId">Módulo: {{ p.moduleId }}</span>
                 </button>
               </div>
             </ng-container>
@@ -2837,17 +2969,8 @@
             </fieldset>
           </article>
 
-          <app-pro400-settings
-            *ngIf="selectedDevice?.equipmentKind === 'pro400'"
-            [deviceId]="selectedDeviceId"
-            [canEdit]="!selectedDeviceCloudReadOnly"
-          ></app-pro400-settings>
-
           <article id="section-settings" class="card" aria-labelledby="settings-notify-heading">
             <h2 id="settings-notify-heading" class="card__title card__title--sm">Notificaciones temperatura y corriente</h2>
-            <p class="card__hint card__hint--tight" *ngIf="selectedDevice?.equipmentKind === 'pro400'">
-              Alarmas push: definí <strong>mínimo y máximo</strong> del sensor 1. El equipo envía temperatura; si sale del rango, la app notifica.
-            </p>
             <div class="notify-panel" *ngIf="selectedDevice as sd; else noDeviceSelectedSettings">
               <p class="notify-panel__device">{{ sd.name }}</p>
               <fieldset class="notify-panel-fieldset" [disabled]="selectedDeviceCloudReadOnly">
@@ -3176,6 +3299,27 @@
           </article>
           </ng-container>
 
+          <ng-container *ngIf="settingsConfigKind === 'pro400'">
+            <article
+              id="section-settings-pro400"
+              class="card"
+              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
+            >
+              <div class="card__title-row">
+                <h2 class="card__title card__title--sm">PRO400 — parámetros AR01–AR26</h2>
+                <button type="button" class="btn btn--ghost btn--sm" (click)="openAddPro400Modal()">+ PRO400</button>
+              </div>
+              <p class="card__hint card__hint--tight">
+                Los valores se guardan en la nube por PRO400. Para cambiar de equipo, usá <strong>Volver a la lista</strong>.
+              </p>
+              <app-pro400-settings
+                *ngIf="selectedPro400Id"
+                [deviceId]="selectedPro400Id"
+                [canEdit]="true"
+              ></app-pro400-settings>
+            </article>
+          </ng-container>
+
           <ng-container *ngIf="settingsConfigKind === 'combistato'">
             <article
               id="section-settings-combistato"
@@ -3226,9 +3370,9 @@
         <div class="empty__card">
           <h1 class="empty__title">Sin contenido aún</h1>
           <p class="empty__text">
-            Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, <strong>PRO300</strong> para la
-            configuración (<strong>AR01–AR48</strong>), o <strong>PR500</strong> para presión de proceso
-            (<strong>AR01–AR28</strong>). Son independientes: podés
+            Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, <strong>PRO400</strong>
+            (<strong>AR01–AR26</strong>, 1 sonda), <strong>PRO300</strong> (<strong>AR01–AR48</strong>, 2 sondas), o
+            <strong>PR500</strong> para presión de proceso (<strong>AR01–AR28</strong>). Son independientes: podés
             tener todos los que necesites de cada tipo. Si ya cargaste datos en otro momento, revisá la conexión o
             cerrá sesión y volvé a entrar.
           </p>
@@ -3425,6 +3569,97 @@
         </button>
       </div>
     </form>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="pro400ModalMode"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="pro400-modal-title"
+  (click)="closePro400Modal()"
+>
+  <div class="modal" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="pro400-modal-title" class="modal__title">PRO400</h2>
+      <button type="button" class="modal__close" (click)="closePro400Modal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro" *ngIf="pro400ModalMode === 'add'">
+      Nuevo PRO400 (1 sonda). Conecta igual que un dispositivo: <code>api_url</code>, <code>module_id</code> y
+      <code>api_key</code>.
+    </p>
+    <p class="modal__intro" *ngIf="pro400ModalMode === 'edit'">Editar nombre, ubicación o ID módulo del PRO400.</p>
+    <form class="modal__form" [formGroup]="pro400Form" (ngSubmit)="submitPro400Form()">
+      <label class="modal__field">
+        <span class="modal__label">Nombre <span class="modal__req">*</span></span>
+        <input type="text" class="modal__input" formControlName="name" autocomplete="off" />
+        <span class="modal__err" *ngIf="pro400Form.controls.name.touched && pro400Form.controls.name.hasError('required')"
+          >Nombre requerido.</span
+        >
+        <span class="modal__err" *ngIf="pro400Form.controls.name.touched && pro400Form.controls.name.hasError('minlength')"
+          >Mínimo 2 caracteres.</span
+        >
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">Ubicación</span>
+        <input type="text" class="modal__input" formControlName="location" autocomplete="off" />
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">ID módulo (PRO400)</span>
+        <input type="text" class="modal__input" formControlName="moduleId" autocomplete="off" />
+        <span class="modal__hint">Opcional al crear. Vacío = se genera automático para el portal del equipo.</span>
+      </label>
+      <div class="modal__field" *ngIf="pro400ModalMode === 'edit' && editingPro400?.deviceToken">
+        <span class="modal__label">Código API (6 dígitos)</span>
+        <input type="text" class="modal__input" readonly [value]="editingPro400?.deviceToken" />
+        <span class="modal__hint">Token recargado desde la nube para identificar este PRO400.</span>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" (click)="closePro400Modal()">Cancelar</button>
+        <button type="submit" class="btn btn--primary" [disabled]="addPro400Submitting">
+          {{ addPro400Submitting ? 'Guardando…' : 'Guardar' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="pro400ProvisioningOpen && pro400ProvisioningCredentials as p4cred"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="pro400-provision-title"
+  (click)="closeProvisioningModal()"
+>
+  <div class="modal modal--wide" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="pro400-provision-title" class="modal__title">Configurar el PRO400</h2>
+      <button type="button" class="modal__close" (click)="closeProvisioningModal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro">Copiá estos valores en el portal del PRO400 (mismo método de conexión que dispositivos).</p>
+    <div class="provision-rows">
+      <div class="provision-row">
+        <span class="provision-row__label">api_url</span>
+        <code class="provision-row__val">{{ p4cred.ingestUrl }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(p4cred.ingestUrl)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">module_id</span>
+        <code class="provision-row__val">{{ p4cred.moduleId }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(p4cred.moduleId)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">api_key</span>
+        <code class="provision-row__val">{{ p4cred.deviceToken }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(p4cred.deviceToken)">Copiar</button>
+      </div>
+    </div>
+    <p class="modal__hint">Guardá el código de 6 dígitos: no se puede recuperar desde otro navegador.</p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--primary" (click)="closeProvisioningModal()">Listo</button>
+    </div>
   </div>
 </div>
 

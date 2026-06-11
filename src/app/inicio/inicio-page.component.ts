@@ -14,7 +14,7 @@ export interface InicioFleetRow {
   id: string;
   /** ID real del equipo en la base (UUID). */
   entityId: string;
-  kind: 'sensor' | 'pr500' | 'combistato';
+  kind: 'sensor' | 'pr500' | 'combistato' | 'pro400';
   name: string;
   detail: string;
   online: boolean;
@@ -31,6 +31,7 @@ export class InicioPageComponent {
   @Input() userInitial = '?';
   @Input() deviceCount = 0;
   @Input() combistatoCount = 0;
+  @Input() pro400Count = 0;
   @Input() pr500Count = 0;
   @Input() activeAlerts = 0;
   @Input() accumulatedAlerts = 0;
@@ -95,7 +96,7 @@ export class InicioPageComponent {
   ];
 
   get totalEquipos(): number {
-    return this.deviceCount + this.combistatoCount + this.pr500Count;
+    return this.deviceCount + this.pro400Count + this.combistatoCount + this.pr500Count;
   }
 
   get attentionTop(): DashboardAlert[] {

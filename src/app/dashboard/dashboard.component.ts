@@ -10,6 +10,7 @@ import {
   CombistatoCommandService,
 } from '../core/combistato-command.service';
 import { Pr500StoreService } from '../core/pr500-store.service';
+import { Pro400StoreService } from '../core/pro400-store.service';
 import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
 import {
   ActivityItem,
@@ -19,6 +20,7 @@ import {
   DashboardAlertKind,
   DashboardCombistato,
   DashboardDevice,
+  DashboardPro400,
   DashboardPr500,
   DeviceAlarmEvent,
   HistoryListItem,
@@ -133,6 +135,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private subAdmin: Subscription | null = null;
   private subCombistatos: Subscription | null = null;
   private subPr500: Subscription | null = null;
+  private subPro400: Subscription | null = null;
   /** Vista admin: todos los equipos; permisos reales vienen de Supabase (admin_emails + is_app_admin). */
   isAdminView = false;
   /** Lista de emails admin (solo visible si isAdminView; tabla public.admin_emails). */
@@ -168,11 +171,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
   addPr500Submitting = false;
   pr500s: DashboardPr500[] = [];
   selectedPr500Id: string | null = null;
+  pro400ModalMode: 'add' | 'edit' | null = null;
+  editingPro400Id: string | null = null;
+  addPro400Submitting = false;
+  pro400s: DashboardPro400[] = [];
+  selectedPro400Id: string | null = null;
+  pro400ProvisioningOpen = false;
+  pro400ProvisioningCredentials: { moduleId: string; deviceToken: string; ingestUrl: string } | null =
+    null;
   /**
    * En `/configuracion`: primero se elige equipo en la tarjeta unificada;
    * recién después se muestran parámetros de panel o de combistato.
    */
-  settingsConfigKind: 'none' | 'device' | 'combistato' | 'pr500' = 'none';
+  settingsConfigKind: 'none' | 'device' | 'combistato' | 'pr500' | 'pro400' = 'none';
 
   /** Vista compacta vs ampliada del gráfico de temperaturas */
   chartExpanded = false;
@@ -207,7 +218,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     | 'presupuestos'
     | 'settings' = 'inicio';
   /** Desde Inicio: mostrar solo la tarjeta del equipo elegido en Dispositivos. */
-  deviceSoloFocus: { kind: 'sensor' | 'pr500' | 'combistato'; entityId: string } | null = null;
+  deviceSoloFocus: { kind: 'sensor' | 'pr500' | 'combistato' | 'pro400'; entityId: string } | null =
+    null;
   /** Preset al alta: PRO400 (1 sonda), PRO300 (2 sondas) o panel genérico. */
   deviceAddPreset: 'pro400' | 'pro300' | 'generic' | null = null;
 
@@ -399,6 +411,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     moduleId: ['', [Validators.maxLength(64)]],
   });
 
+  readonly pro400Form = this.fb.group({
+    name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(80)]],
+    location: ['', [Validators.maxLength(120)]],
+    moduleId: ['', [Validators.maxLength(64)]],
+  });
+
   constructor(
     private readonly fb: FormBuilder,
     private readonly auth: AuthService,
@@ -407,6 +425,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     readonly deviceStore: DeviceStoreService,
     readonly combistatoStore: CombistatoStoreService,
     readonly pr500Store: Pr500StoreService,
+    readonly pro400Store: Pro400StoreService,
     private readonly webPush: WebPushService,
     private readonly equipmentSheet: EquipmentSheetService,
     private readonly combistatoCommand: CombistatoCommandService,
@@ -447,8 +466,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.deviceStore.devices$,
       this.combistatoStore.combistatos$,
       this.pr500Store.pr500s$,
+      this.pro400Store.pro400s$,
       this.route.queryParamMap,
-    ]).subscribe(([list, combList, prList, params]) => {
+    ]).subscribe(([list, combList, prList, p4List, params]) => {
       if (this.skipQueryParamDeviceSync) {
         return;
       }
@@ -456,6 +476,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const did = params.get('deviceId');
       const cid = params.get('combistatoId');
       const pid = params.get('pr500Id');
+      const p4id = params.get('pro400Id');
+      const panelList = list.filter((d) => d.equipmentKind !== 'pro400');
 
       if (path === '/configuracion') {
         if (cid && combList.some((c) => c.id === cid)) {
@@ -463,7 +485,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
           if (this.selectedCombistatoId !== cid) {
             this.selectCombistato(cid);
           }
-        } else if (did && list.some((d) => d.id === did)) {
+        } else if (p4id && p4List.some((p) => p.id === p4id)) {
+          this.settingsConfigKind = 'pro400';
+          if (this.selectedPro400Id !== p4id) {
+            this.selectPro400(p4id);
+          }
+        } else if (did && panelList.some((d) => d.id === did)) {
           this.settingsConfigKind = 'device';
           if (this.selectedDeviceId !== did) {
             this.selectDevice(did, false);
@@ -487,9 +514,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
           if (solo) {
             this.deviceSoloFocus = { kind: 'pr500', entityId: pid };
           }
-          if (this.selectedPr500Id !== pid || this.selectedDeviceId || this.selectedCombistatoId) {
+          if (
+            this.selectedPr500Id !== pid ||
+            this.selectedDeviceId ||
+            this.selectedCombistatoId ||
+            this.selectedPro400Id
+          ) {
             this.selectDevice(null, false);
             this.selectCombistato(null);
+            this.selectPro400(null);
             this.selectPr500(pid);
           }
           return;
@@ -498,42 +531,71 @@ export class DashboardComponent implements OnInit, OnDestroy {
           if (solo) {
             this.deviceSoloFocus = { kind: 'combistato', entityId: cid };
           }
-          if (this.selectedCombistatoId !== cid || this.selectedDeviceId || this.selectedPr500Id) {
+          if (
+            this.selectedCombistatoId !== cid ||
+            this.selectedDeviceId ||
+            this.selectedPr500Id ||
+            this.selectedPro400Id
+          ) {
             this.selectDevice(null, false);
             this.selectPr500(null);
+            this.selectPro400(null);
             this.selectCombistato(cid);
           }
           return;
         }
-        if (did && list.some((d) => d.id === did)) {
+        if (p4id && p4List.some((p) => p.id === p4id)) {
+          if (solo) {
+            this.deviceSoloFocus = { kind: 'pro400', entityId: p4id };
+          }
+          if (
+            this.selectedPro400Id !== p4id ||
+            this.selectedDeviceId ||
+            this.selectedPr500Id ||
+            this.selectedCombistatoId
+          ) {
+            this.selectDevice(null, false);
+            this.selectPr500(null);
+            this.selectCombistato(null);
+            this.selectPro400(p4id);
+          }
+          return;
+        }
+        if (did && panelList.some((d) => d.id === did)) {
           if (solo) {
             this.deviceSoloFocus = { kind: 'sensor', entityId: did };
           }
-          if (this.selectedDeviceId !== did || this.selectedPr500Id || this.selectedCombistatoId) {
+          if (
+            this.selectedDeviceId !== did ||
+            this.selectedPr500Id ||
+            this.selectedCombistatoId ||
+            this.selectedPro400Id
+          ) {
             this.selectPr500(null);
             this.selectCombistato(null);
+            this.selectPro400(null);
             this.selectDevice(did, false);
           }
           return;
         }
       }
 
-      if (did && list.some((d) => d.id === did)) {
+      if (did && panelList.some((d) => d.id === did)) {
         if (this.selectedDeviceId !== did) {
           this.selectDevice(did, false);
         }
-      } else if (!this.selectedDeviceId && !pid && !cid && list.length > 0) {
-        const hubSinDevice = path === '/configuracion' && !did;
+      } else if (!this.selectedDeviceId && !pid && !cid && !p4id && panelList.length > 0) {
+        const hubSinDevice = path === '/configuracion' && !did && !p4id;
         if (!hubSinDevice) {
-          this.selectDevice(list[0].id, false);
+          this.selectDevice(panelList[0].id, false);
         }
       }
       // No recargar ficha en cada emisión de devices$ (provocaba bucle y borraba lo que escribías).
     });
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
-      this.devices = list;
-      if (this.selectedDeviceId && !list.some((d) => d.id === this.selectedDeviceId)) {
-        this.selectDevice(list[0]?.id ?? null, false);
+      this.devices = list.filter((d) => d.equipmentKind !== 'pro400');
+      if (this.selectedDeviceId && !this.devices.some((d) => d.id === this.selectedDeviceId)) {
+        this.selectDevice(this.devices[0]?.id ?? null, false);
         return;
       }
       this.syncNotificationFormWithSelected();
@@ -558,6 +620,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.pr500s = list;
       if (this.selectedPr500Id && !list.some((p) => p.id === this.selectedPr500Id)) {
         this.selectedPr500Id = null;
+      }
+    });
+    this.subPro400 = this.pro400Store.pro400s$.subscribe((list) => {
+      this.pro400s = list;
+      if (this.selectedPro400Id && !list.some((p) => p.id === this.selectedPro400Id)) {
+        this.selectedPro400Id = null;
       }
     });
   }
@@ -585,6 +653,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subAdmin?.unsubscribe();
     this.subCombistatos?.unsubscribe();
     this.subPr500?.unsubscribe();
+    this.subPro400?.unsubscribe();
     this.routerSub?.unsubscribe();
     this.chatUnreadSub?.unsubscribe();
     this.routeQuerySub?.unsubscribe();
@@ -716,7 +785,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   /** Paneles PRO400 + PRO300 + PR500 (para buscador y frescura de datos). */
   get hasAnyEquipment(): boolean {
-    return this.devices.length > 0 || this.combistatos.length > 0 || this.pr500s.length > 0;
+    return (
+      this.devices.length > 0 ||
+      this.pro400s.length > 0 ||
+      this.combistatos.length > 0 ||
+      this.pr500s.length > 0
+    );
   }
 
   private matchesEquipmentSearch(...parts: (string | null | undefined)[]): boolean {
@@ -754,7 +828,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.hasDevices ||
       (this.environment.deviceCloudSync === true &&
         this.deviceStore.isCloudSyncActive() &&
-        (this.combistatos.length > 0 || this.pr500s.length > 0))
+        (this.pro400s.length > 0 || this.combistatos.length > 0 || this.pr500s.length > 0))
     );
   }
 
@@ -775,6 +849,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
         detail: `${tempBit} · ${d.updatedAtLabel}`,
         online: d.online,
         hasAlert: deviceHasAlert(d.id, d.name),
+      });
+    }
+    for (const p4 of this.pro400s) {
+      const t1 = p4.lastTemp1C;
+      const tempBit = t1 != null ? `${t1.toFixed(1)} °C` : 'Sin temp.';
+      rows.push({
+        id: `p4-${p4.id}`,
+        entityId: p4.id,
+        kind: 'pro400',
+        name: p4.name,
+        detail: `PRO400 · ${tempBit} · ${p4.lastSeenLabel || p4.updatedAtLabel}`,
+        online: p4.online,
+        hasAlert: deviceHasAlert(p4.id, p4.name) || !p4.online,
       });
     }
     for (const p of this.pr500s) {
@@ -887,6 +974,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.deviceSoloFocus!.kind === 'combistato';
   }
 
+  get showPro400SectionInView(): boolean {
+    if (!this.isDeviceSoloView) return true;
+    return this.deviceSoloFocus!.kind === 'pro400';
+  }
+
   get showPr500SectionInView(): boolean {
     if (!this.isDeviceSoloView) return true;
     return this.deviceSoloFocus!.kind === 'pr500';
@@ -901,6 +993,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (f.kind === 'combistato') {
       return this.combistatos.find((c) => c.id === f.entityId)?.name ?? 'PRO300';
     }
+    if (f.kind === 'pro400') {
+      return this.pro400s.find((p) => p.id === f.entityId)?.name ?? 'PRO400';
+    }
     return this.devices.find((d) => d.id === f.entityId)?.name ?? 'Panel';
   }
 
@@ -911,6 +1006,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (this.isDeviceSoloView) return [];
     return this.filteredDevices;
+  }
+
+  get pro400sForView(): DashboardPro400[] {
+    const f = this.deviceSoloFocus;
+    if (f?.kind === 'pro400') {
+      return this.pro400s.filter((p) => p.id === f.entityId);
+    }
+    if (this.isDeviceSoloView) return [];
+    if (!this.searchQuery.trim()) return this.pro400s;
+    return this.pro400s.filter((p) =>
+      this.matchesEquipmentSearch(p.name, p.location, p.moduleId, p.id)
+    );
   }
 
   get combistatosForView(): DashboardCombistato[] {
@@ -2175,24 +2282,34 @@ export class DashboardComponent implements OnInit, OnDestroy {
       deviceId: string | null;
       combistatoId: string | null;
       pr500Id: string | null;
+      pro400Id: string | null;
       solo: string | null;
     };
 
     if (row.kind === 'pr500') {
       this.selectDevice(null, false);
       this.selectCombistato(null);
+      this.selectPro400(null);
       this.selectPr500(id);
-      queryParams = { deviceId: null, combistatoId: null, pr500Id: id, solo: '1' };
+      queryParams = { deviceId: null, combistatoId: null, pr500Id: id, pro400Id: null, solo: '1' };
     } else if (row.kind === 'combistato') {
       this.selectDevice(null, false);
       this.selectPr500(null);
+      this.selectPro400(null);
       this.selectCombistato(id);
-      queryParams = { deviceId: null, combistatoId: id, pr500Id: null, solo: '1' };
+      queryParams = { deviceId: null, combistatoId: id, pr500Id: null, pro400Id: null, solo: '1' };
+    } else if (row.kind === 'pro400') {
+      this.selectDevice(null, false);
+      this.selectPr500(null);
+      this.selectCombistato(null);
+      this.selectPro400(id);
+      queryParams = { deviceId: null, combistatoId: null, pr500Id: null, pro400Id: id, solo: '1' };
     } else {
       this.selectPr500(null);
       this.selectCombistato(null);
+      this.selectPro400(null);
       this.selectDevice(id, false);
-      queryParams = { deviceId: id, combistatoId: null, pr500Id: null, solo: '1' };
+      queryParams = { deviceId: id, combistatoId: null, pr500Id: null, pro400Id: null, solo: '1' };
     }
 
     void this.router
@@ -2208,7 +2325,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.skipQueryParamDeviceSync = true;
     void this.router
       .navigate(['/dispositivos'], {
-        queryParams: { deviceId: null, combistatoId: null, pr500Id: null, solo: null },
+        queryParams: { deviceId: null, combistatoId: null, pr500Id: null, pro400Id: null, solo: null },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2217,7 +2334,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private scrollToFleetCard(kind: InicioFleetRow['kind'], entityId: string): void {
-    const prefix = kind === 'pr500' ? 'pr500' : kind === 'combistato' ? 'combistato' : 'device';
+    const prefix =
+      kind === 'pr500'
+        ? 'pr500'
+        : kind === 'combistato'
+          ? 'combistato'
+          : kind === 'pro400'
+            ? 'pro400'
+            : 'device';
     const scroll = (): void => {
       document.getElementById(`fleet-card-${prefix}-${entityId}`)?.scrollIntoView({
         behavior: 'smooth',
@@ -2255,7 +2379,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (section === 'settings') {
       this.settingsConfigKind = 'none';
       void this.router.navigate([path], {
-        queryParams: { deviceId: null, combistatoId: null, pr500Id: null },
+        queryParams: { deviceId: null, combistatoId: null, pr500Id: null, pro400Id: null },
         replaceUrl: true,
       });
       if (this.isAdminView) void this.loadAdminEmails();
@@ -2267,6 +2391,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         deviceId: this.selectedDeviceId ? this.selectedDeviceId : null,
         combistatoId: null,
         pr500Id: null,
+        pro400Id: null,
         solo: null,
         fichaId: null,
         tab: null,
@@ -2349,8 +2474,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         const queryParams =
           path === '/configuracion'
             ? deviceId
-              ? { deviceId, combistatoId: null, pr500Id: null }
-              : { deviceId: null, combistatoId: null, pr500Id: null }
+              ? { deviceId, combistatoId: null, pr500Id: null, pro400Id: null }
+              : { deviceId: null, combistatoId: null, pr500Id: null, pro400Id: null }
             : deviceId
               ? { deviceId }
               : { deviceId: null };
@@ -2754,12 +2879,31 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   selectCombistato(id: string | null): void {
     this.selectedCombistatoId = id;
-    if (id != null && id !== '') this.selectPr500(null);
+    if (id != null && id !== '') {
+      this.selectPr500(null);
+      this.selectPro400(null);
+    }
+  }
+
+  selectPro400(id: string | null): void {
+    this.selectedPro400Id = id;
+    if (id != null && id !== '') {
+      this.selectCombistato(null);
+      this.selectPr500(null);
+      this.selectDevice(null, false);
+    }
   }
 
   selectPr500(id: string | null): void {
     this.selectedPr500Id = id;
-    if (id != null && id !== '') this.selectCombistato(null);
+    if (id != null && id !== '') {
+      this.selectCombistato(null);
+      this.selectPro400(null);
+    }
+  }
+
+  trackByPro400Id(_index: number, p: DashboardPro400): string {
+    return p.id;
   }
 
   trackByPr500Id(_index: number, p: DashboardPr500): string {
@@ -2823,15 +2967,37 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.openSettingsCombistatoParams(c.id);
   }
 
+  /** Desde Inicio / Dispositivos: abre Configuración con ese PRO400 para editar AR01–AR26. */
+  goPro400Settings(p: DashboardPro400, ev?: Event): void {
+    ev?.stopPropagation();
+    this.openSettingsPro400Params(p.id);
+  }
+
   openSettingsDeviceParams(deviceId: string): void {
     this.skipQueryParamDeviceSync = true;
     this.settingsConfigKind = 'device';
     this.selectCombistato(null);
     this.selectPr500(null);
+    this.selectPro400(null);
     this.selectDevice(deviceId, false);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId, combistatoId: null, pr500Id: null },
+        queryParams: { deviceId, combistatoId: null, pr500Id: null, pro400Id: null },
+        replaceUrl: true,
+      })
+      .finally(() => {
+        this.skipQueryParamDeviceSync = false;
+      });
+    this.scrollSettingsParamsIntoView();
+  }
+
+  openSettingsPro400Params(pro400Id: string): void {
+    this.skipQueryParamDeviceSync = true;
+    this.settingsConfigKind = 'pro400';
+    this.selectPro400(pro400Id);
+    void this.router
+      .navigate(['/configuracion'], {
+        queryParams: { deviceId: null, combistatoId: null, pr500Id: null, pro400Id },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2845,9 +3011,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.settingsConfigKind = 'combistato';
     this.selectCombistato(combistatoId);
     this.selectPr500(null);
+    this.selectPro400(null);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId: null, combistatoId: combistatoId, pr500Id: null },
+        queryParams: { deviceId: null, combistatoId: combistatoId, pr500Id: null, pro400Id: null },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2860,10 +3027,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.skipQueryParamDeviceSync = true;
     this.settingsConfigKind = 'pr500';
     this.selectCombistato(null);
+    this.selectPro400(null);
     this.selectPr500(pr500Id);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId: null, combistatoId: null, pr500Id },
+        queryParams: { deviceId: null, combistatoId: null, pr500Id, pro400Id: null },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2877,9 +3045,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.settingsConfigKind = 'none';
     this.selectCombistato(null);
     this.selectPr500(null);
+    this.selectPro400(null);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId: null, combistatoId: null, pr500Id: null },
+        queryParams: { deviceId: null, combistatoId: null, pr500Id: null, pro400Id: null },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2899,6 +3068,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   openAddCombistatoModal(): void {
     this.pr500ProvisioningOpen = false;
     this.pr500ProvisioningCredentials = null;
+    this.pro400ProvisioningOpen = false;
+    this.pro400ProvisioningCredentials = null;
+    this.pro400ModalMode = null;
     this.combistatoProvisioningOpen = false;
     this.combistatoProvisioningCredentials = null;
     this.combistatoModalMode = 'add';
@@ -2980,9 +3152,103 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
+  openAddPro400Modal(): void {
+    this.combistatoProvisioningOpen = false;
+    this.combistatoProvisioningCredentials = null;
+    this.pr500ProvisioningOpen = false;
+    this.pr500ProvisioningCredentials = null;
+    this.pro400ProvisioningOpen = false;
+    this.pro400ProvisioningCredentials = null;
+    this.pro400ModalMode = 'add';
+    this.editingPro400Id = null;
+    this.pro400Form.reset({ name: 'PRO400 ', location: '', moduleId: '' });
+  }
+
+  openEditPro400Modal(p: DashboardPro400): void {
+    this.pro400ModalMode = 'edit';
+    this.editingPro400Id = p.id;
+    this.pro400Form.patchValue({
+      name: p.name,
+      location: p.location === 'Sin ubicación' ? '' : p.location,
+      moduleId: p.moduleId ?? '',
+    });
+  }
+
+  closePro400Modal(): void {
+    this.pro400ModalMode = null;
+    this.editingPro400Id = null;
+    this.addPro400Submitting = false;
+  }
+
+  async submitPro400Form(): Promise<void> {
+    if (this.pro400Form.invalid) {
+      this.pro400Form.markAllAsTouched();
+      return;
+    }
+    const v = this.pro400Form.getRawValue();
+    if (this.pro400ModalMode === 'add') {
+      this.addPro400Submitting = true;
+      try {
+        const result = await this.pro400Store.addPro400FromFormAsync({
+          name: v.name ?? '',
+          location: v.location ?? '',
+          moduleId: v.moduleId ?? '',
+        });
+        if (!result.ok) {
+          alert(result.error);
+          return;
+        }
+        this.closePro400Modal();
+        this.selectPro400(result.id);
+        this.pro400ProvisioningCredentials = result.credentials;
+        this.pro400ProvisioningOpen = true;
+      } finally {
+        this.addPro400Submitting = false;
+      }
+      return;
+    }
+    if (this.pro400ModalMode === 'edit' && this.editingPro400Id) {
+      this.addPro400Submitting = true;
+      try {
+        const result = await this.pro400Store.updatePro400Meta(this.editingPro400Id, {
+          name: v.name ?? '',
+          location: v.location ?? '',
+          moduleId: v.moduleId ?? '',
+        });
+        if (!result.ok) {
+          alert(result.error ?? 'No se pudo guardar.');
+          return;
+        }
+      } finally {
+        this.addPro400Submitting = false;
+      }
+    }
+    this.closePro400Modal();
+  }
+
+  async confirmDeletePro400(p: DashboardPro400): Promise<void> {
+    if (!confirm(`¿Eliminar PRO400 «${p.name}»? Se borrarán también los parámetros en la nube.`)) return;
+    const r = await this.pro400Store.removePro400Async(p.id);
+    if (!r.ok) {
+      alert(r.error ?? 'No se pudo eliminar.');
+      return;
+    }
+    if (this.selectedPro400Id === p.id) {
+      this.selectedPro400Id = null;
+    }
+  }
+
+  get editingPro400(): DashboardPro400 | null {
+    if (!this.editingPro400Id) return null;
+    return this.pro400s.find((p) => p.id === this.editingPro400Id) ?? null;
+  }
+
   openAddPr500Modal(): void {
     this.combistatoProvisioningOpen = false;
     this.combistatoProvisioningCredentials = null;
+    this.pro400ProvisioningOpen = false;
+    this.pro400ProvisioningCredentials = null;
+    this.pro400ModalMode = null;
     this.provisioningOpen = false;
     this.provisioningCredentials = null;
     this.pr500ProvisioningOpen = false;
@@ -3101,7 +3367,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.openAddCombistatoModal();
       return;
     }
-    this.openAddDeviceModal(kind);
+    if (kind === 'pro400') {
+      this.openAddPro400Modal();
+      return;
+    }
+    this.openAddDeviceModal('generic');
   }
 
   deviceModalAddTitle(): string {
@@ -3246,6 +3516,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.combistatoProvisioningCredentials = null;
     this.pr500ProvisioningOpen = false;
     this.pr500ProvisioningCredentials = null;
+    this.pro400ProvisioningOpen = false;
+    this.pro400ProvisioningCredentials = null;
   }
 
   copyProvisioning(text: string): void {
@@ -3309,15 +3581,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return (c.lastPhaseTotalS ?? 0) > 0 || (c.lastPhaseElapsedS ?? 0) > 0;
   }
 
-  devicePro400PhaseHasTimer(d: DashboardDevice): boolean {
-    if (d.equipmentKind !== 'pro400' || !d.lastPhase) return false;
-    return (d.lastPhaseTotalS ?? 0) > 0 || (d.lastPhaseElapsedS ?? 0) > 0;
+  pro400PhaseHasTimer(p: DashboardPro400): boolean {
+    if (!p.lastPhase) return false;
+    return (p.lastPhaseTotalS ?? 0) > 0 || (p.lastPhaseElapsedS ?? 0) > 0;
   }
 
-  devicePro400PhaseRemainingS(d: DashboardDevice): number | null {
-    if (!this.devicePro400PhaseHasTimer(d)) return null;
-    const total = d.lastPhaseTotalS ?? 0;
-    const elapsed = d.lastPhaseElapsedS ?? 0;
+  pro400PhaseRemainingS(p: DashboardPro400): number | null {
+    if (!this.pro400PhaseHasTimer(p)) return null;
+    const total = p.lastPhaseTotalS ?? 0;
+    const elapsed = p.lastPhaseElapsedS ?? 0;
     if (total <= 0) return null;
     const rem = total - elapsed;
     return rem > 0 ? rem : 0;

@@ -109,6 +109,26 @@ export interface DashboardCombistato {
   lastFanForcedRemainingS?: number | null;
 }
 
+/** PRO400 — controlador 1 sonda (`devices` con `equipment_kind = pro400`); misma idea de conexión que PRO300. */
+export interface DashboardPro400 {
+  id: string;
+  name: string;
+  location: string;
+  moduleId?: string;
+  updatedAtLabel: string;
+  lastSeenLabel: string;
+  lastSeenAt?: string | null;
+  online: boolean;
+  ownerUserId?: string;
+  deviceToken?: string;
+  lastTemp1C?: number | null;
+  lastCompOn?: boolean | null;
+  lastDefrostOn?: boolean | null;
+  lastPhase?: CombistatoPhase | null;
+  lastPhaseElapsedS?: number | null;
+  lastPhaseTotalS?: number | null;
+}
+
 export type CombistatoPhase =
   | 'boot'
   | 'normal'

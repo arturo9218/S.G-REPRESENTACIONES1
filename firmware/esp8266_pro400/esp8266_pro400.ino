@@ -6,12 +6,12 @@
  * Parámetros F01–F26 + F50 (sin F25 ni F27), sync nube `fetch-pro400-params`.
  * Menú local: códigos A01…A24, A26, A50 en display 7-seg.
  *
- * Hardware:
- *   - NTC1 GPIO34. SPI CD4094: DATA=23, CLOCK=18, STROBE=5
- *   - Un solo relé en 4094#2 bit5 (misma plaqueta PRO300); bit6/7 sin usar
+ * Hardware (ESP8266 cableado aparte):
+ *   - NTC1 A0. SPI CD4094: DATA=13, CLOCK=14, STROBE=5
+ *   - Un solo relé en 4094#2 bit5; bit6/7 sin usar
  *   - PRO400_SINGLE_RELAY: bit5 ON si compresor o deshielo activo
- *   - Botones: UP=13 DOWN=14 SET=27 BACK=17
- *   - GPIO0 a GND al encender → portal WiFi
+ *   - Botones: UP=4 DOWN=12 SET=0 BACK=16
+ *   - GPIO2 a GND al encender → portal WiFi
  *   - DOOR_PIN: -1 sin sensor, o GPIO (ej. 33) + F26 entrada digital
  *
  * Dependencias: WiFiManager, ArduinoJson v6, core ESP8266 + LittleFS
@@ -20,11 +20,12 @@
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecureBearSSL.h>
 #include <WiFiManager.h>
-#include <HTTPClient.h>
+#include <ESP8266HTTPClient.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <SPI.h>
 #include <math.h>
+#include <memory>
 
 static void runConfigPortal();
 static void flashUiMessage(const char *msg, unsigned long ms = 1200UL);
@@ -1195,7 +1196,7 @@ static void runConfigPortal() {
 }
 
 static void setupWifi() {
-  WiFi.setSleepMode(WIFI_NONE);
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);  // ESP8266: no WIFI_NONE (eso es ESP32)
   WiFi.persistent(true);
   wm.setSaveConfigCallback([]() { g_portalSaveRequested = true; });
   p_module.setValue(g_cfg.moduleId, sizeof(g_cfg.moduleId) - 1);
