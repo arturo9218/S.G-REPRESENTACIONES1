@@ -148,6 +148,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private chatUnreadSub: Subscription | null = null;
   /** Mensajes privados sin leer (campana en menú Comunidad). */
   chatUnreadTotal = 0;
+  /** Menú inferior móvil: panel «Más». */
+  mobileNavMoreOpen = false;
   private routeQuerySub: Subscription | null = null;
   private visibilitySub: Subscription | null = null;
   /** Evita que queryParamMap pise la selección mientras actualizamos la URL desde el picker */
@@ -2364,6 +2366,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       | 'presupuestos'
       | 'settings'
   ): void {
+    this.mobileNavMoreOpen = false;
     const paths: Record<typeof section, string> = {
       inicio: '/inicio',
       devices: '/dispositivos',
@@ -2398,6 +2401,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
       },
       replaceUrl: true,
     });
+  }
+
+  mobileNavMoreActive(): boolean {
+    return (
+      this.shellRoute === 'equipment' ||
+      this.shellRoute === 'herramientas' ||
+      this.shellRoute === 'comunidad' ||
+      this.shellRoute === 'presupuestos' ||
+      this.shellRoute === 'settings'
+    );
+  }
+
+  toggleMobileNavMore(): void {
+    this.mobileNavMoreOpen = !this.mobileNavMoreOpen;
   }
 
   /** Desde Ficha equipo → Herramientas con panel, ficha y pestaña precargados. */

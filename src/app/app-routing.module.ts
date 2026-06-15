@@ -31,7 +31,7 @@ const routes: Routes = [
   { path: 'comunidad', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'presupuestos', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'configuracion', component: DashboardComponent, canActivate: [authGuard] },
-  { path: 'chart', component: ChartAnalysisComponent },
+  { path: 'chart', component: ChartAnalysisComponent, canActivate: [authGuard] },
   { path: 'chart-combistato', component: CombistatoChartComponent, canActivate: [authGuard] },
   { path: 'chart-pr500', component: Pr500ChartComponent, canActivate: [authGuard] },
   { path: '**', redirectTo: 'login' },

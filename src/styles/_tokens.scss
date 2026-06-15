@@ -1,0 +1,31 @@
+/**
+ * Tokens globales AR Monitoreo — usados en shell y sub-páginas.
+ */
+:root {
+  --ar-font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --ar-bg: #0b1220;
+  --ar-bg-elevated: #131c2e;
+  --ar-surface: #1a2740;
+  --ar-text: #e8eef7;
+  --ar-text-muted: #94a3b8;
+  --ar-primary: #3b82f6;
+  --ar-primary-soft: rgba(59, 130, 246, 0.18);
+  --ar-border: rgba(148, 163, 184, 0.18);
+  --ar-radius-card: 16px;
+  --ar-radius-pill: 999px;
+  --ar-shadow-card: 0 16px 48px rgba(0, 0, 0, 0.35);
+
+  /* Identidad por tipo de equipo */
+  --ar-kind-panel: #64748b;
+  --ar-kind-pro400: #38bdf8;
+  --ar-kind-pro300: #34d399;
+  --ar-kind-pr500: #fbbf24;
+
+  --ar-success-bg: rgba(34, 197, 94, 0.12);
+  --ar-success-border: rgba(34, 197, 94, 0.35);
+  --ar-success-text: #86efac;
+  --ar-warn-bg: rgba(251, 146, 60, 0.12);
+  --ar-warn-border: rgba(251, 146, 60, 0.35);
+  --ar-warn-text: #fdba74;
+}

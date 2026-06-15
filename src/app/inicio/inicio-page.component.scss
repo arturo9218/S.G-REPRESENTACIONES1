@@ -475,10 +475,26 @@
   font-size: 0.65rem;
   font-weight: 800;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--ar-kind-panel);
   writing-mode: vertical-rl;
   transform: rotate(180deg);
   letter-spacing: 0.04em;
+}
+
+.inicio-fleet__kind--pro400 {
+  color: var(--ar-kind-pro400);
+}
+
+.inicio-fleet__kind--combistato {
+  color: var(--ar-kind-pro300);
+}
+
+.inicio-fleet__kind--pr500 {
+  color: var(--ar-kind-pr500);
+}
+
+.inicio-fleet__kind--sensor {
+  color: var(--ar-kind-panel);
 }
 
 .inicio-fleet__name {

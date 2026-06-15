@@ -1200,7 +1200,7 @@
                 <h2 class="device-section__title">PR500</h2>
                 <p class="device-section__hint">
                   <strong>Central frigorífica</strong>: presión de proceso, setpoints y etapas. En la app
-                  <strong>AR01–AR28</strong>; botón en cada tarjeta →
+                  <strong>AR01–AR34</strong>; botón en cada tarjeta →
                   <strong>Configuración</strong>. La telemetría
                   llega por la misma función de ingesta que paneles y PRO300, con <code>pressure_bar</code> en el POST.
                 </p>
@@ -1634,7 +1634,7 @@
             <p class="card__hint card__hint--tight">
               Tocá un <strong>panel de medición</strong> para umbrales, nombres de sensores, corrección, compartir, etc.
               Tocá un <strong>PRO400</strong> para <strong>AR01–AR26</strong> (1 sonda), un <strong>PRO300</strong> para
-              <strong>AR01–AR48</strong> (2 sondas), o un <strong>PR500</strong> para <strong>AR01–AR28</strong>
+              <strong>AR01–AR48</strong> (2 sondas), o un <strong>PR500</strong> para <strong>AR01–AR34</strong>
               (presión / etapas). No hace falta que esté online para guardar.
             </p>
             <p class="card__empty" *ngIf="!devices.length && !pro400s.length && !combistatos.length && !pr500s.length">
@@ -3348,7 +3348,7 @@
               *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
             >
               <div class="card__title-row">
-                <h2 class="card__title card__title--sm">PR500 — central frigorífica (AR01–AR28)</h2>
+                <h2 class="card__title card__title--sm">PR500 — central frigorífica (AR01–AR34)</h2>
                 <button type="button" class="btn btn--ghost btn--sm" (click)="openAddPr500Modal()">+ PR500</button>
               </div>
               <p class="card__hint card__hint--tight">
@@ -3372,7 +3372,7 @@
           <p class="empty__text">
             Agregá <strong>dispositivos</strong> para ver temperaturas y alertas, <strong>PRO400</strong>
             (<strong>AR01–AR26</strong>, 1 sonda), <strong>PRO300</strong> (<strong>AR01–AR48</strong>, 2 sondas), o
-            <strong>PR500</strong> para presión de proceso (<strong>AR01–AR28</strong>). Son independientes: podés
+            <strong>PR500</strong> para presión de proceso (<strong>AR01–AR34</strong>). Son independientes: podés
             tener todos los que necesites de cada tipo. Si ya cargaste datos en otro momento, revisá la conexión o
             cerrá sesión y volvé a entrar.
           </p>
@@ -3408,21 +3408,7 @@
           <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
           <rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
         </svg>
-        <span>Dispositivos</span>
-      </button>
-      <button
-        type="button"
-        class="mobile-nav__btn"
-        [class.mobile-nav__btn--active]="shellRoute === 'equipment'"
-        (click)="scrollToSection('equipment')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-          <line x1="16" y1="13" x2="8" y2="13" />
-          <line x1="16" y1="17" x2="8" y2="17" />
-        </svg>
-        <span>Ficha</span>
+        <span>Equipos</span>
       </button>
       <button
         type="button"
@@ -3451,16 +3437,51 @@
       <button
         type="button"
         class="mobile-nav__btn"
-        [class.mobile-nav__btn--active]="shellRoute === 'settings'"
-        (click)="scrollToSection('settings')"
+        [class.mobile-nav__btn--active]="mobileNavMoreActive() || mobileNavMoreOpen"
+        [attr.aria-expanded]="mobileNavMoreOpen"
+        aria-controls="mobile-nav-more"
+        (click)="toggleMobileNavMore()"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          <circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" />
         </svg>
-        <span>Ajustes</span>
+        <span>Más</span>
+        <span
+          class="mobile-nav__badge"
+          *ngIf="chatUnreadTotal > 0"
+          [attr.aria-label]="chatUnreadTotal + ' mensajes sin leer'"
+        >{{ chatUnreadTotal > 9 ? '9+' : chatUnreadTotal }}</span>
       </button>
     </nav>
+
+    <div
+      class="mobile-nav-more"
+      id="mobile-nav-more"
+      *ngIf="mobileNavMoreOpen && hasShellContent"
+      role="dialog"
+      aria-label="Más secciones"
+    >
+      <button type="button" class="mobile-nav-more__backdrop" aria-label="Cerrar menú" (click)="mobileNavMoreOpen = false"></button>
+      <div class="mobile-nav-more__sheet">
+        <p class="mobile-nav-more__title">Más secciones</p>
+        <button type="button" class="mobile-nav-more__item" (click)="scrollToSection('equipment')">
+          Ficha equipo
+        </button>
+        <button type="button" class="mobile-nav-more__item" (click)="scrollToSection('herramientas')">
+          Herramientas
+        </button>
+        <button type="button" class="mobile-nav-more__item" (click)="scrollToSection('comunidad')">
+          Comunidad
+          <span class="mobile-nav-more__badge" *ngIf="chatUnreadTotal > 0">{{ chatUnreadTotal > 9 ? '9+' : chatUnreadTotal }}</span>
+        </button>
+        <button type="button" class="mobile-nav-more__item" (click)="scrollToSection('presupuestos')">
+          Presupuestos
+        </button>
+        <button type="button" class="mobile-nav-more__item" (click)="scrollToSection('settings')">
+          Ajustes
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 

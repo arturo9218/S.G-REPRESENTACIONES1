@@ -98,7 +98,7 @@
         tabindex="0"
         [attr.aria-label]="'Abrir ' + row.name"
       >
-        <span class="inicio-fleet__kind">{{ row.kind === 'pr500' ? 'PR500' : row.kind === 'combistato' ? 'PRO300' : 'Panel' }}</span>
+        <span class="inicio-fleet__kind" [ngClass]="fleetKindClass(row.kind)">{{ fleetKindLabel(row.kind) }}</span>
         <span class="inicio-fleet__name">{{ row.name }}</span>
         <span class="inicio-fleet__detail">{{ row.detail }}</span>
         <span class="inicio-fleet__dot" [class.inicio-fleet__dot--on]="row.online" aria-hidden="true"></span>

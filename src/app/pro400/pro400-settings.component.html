@@ -5,7 +5,10 @@
     Las <strong>alarmas push</strong> se configuran abajo en «Notificaciones» (mín/máx de temperatura).
   </p>
 
-  <p class="combistato-status" *ngIf="loading">Cargando…</p>
+  <p class="ui-loading combistato-status" *ngIf="loading" aria-busy="true">
+    <span class="ui-spinner" aria-hidden="true"></span>
+    Cargando parámetros…
+  </p>
 
   <fieldset class="notify-panel-fieldset" *ngIf="model as m" [disabled]="!canEdit || loading || saving">
     <ng-container *ngFor="let sec of sections">
@@ -35,9 +38,9 @@
   </fieldset>
 
   <p
-    class="sensor-labels-feedback"
+    class="ui-feedback"
     *ngIf="feedback"
-    [class.sensor-labels-feedback--warn]="feedback.includes('No se pudo')"
+    [class.ui-feedback--warn]="feedback.includes('No se pudo')"
   >
     {{ feedback }}
   </p>
@@ -48,7 +51,7 @@
       Valores por defecto
     </button>
     <button type="button" class="btn btn--primary" [disabled]="!canEdit || loading || saving" (click)="save()">
-      {{ saving ? 'Guardando…' : 'Guardar parámetros' }}
+      {{ saving ? 'Guardando…' : 'Guardar en la nube' }}
     </button>
   </div>
 </article>

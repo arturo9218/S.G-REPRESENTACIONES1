@@ -1,0 +1,51 @@
+/* Primitivos UI reutilizables en toda la app */
+
+.ui-spinner {
+  display: inline-block;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid rgba(148, 163, 184, 0.25);
+  border-top-color: var(--ar-primary);
+  border-radius: 50%;
+  animation: ui-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ui-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ar-text-muted);
+}
+
+.ui-feedback {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ar-success-text);
+  background: var(--ar-success-bg);
+  border: 1px solid var(--ar-success-border);
+
+  &--warn {
+    color: var(--ar-warn-text);
+    background: var(--ar-warn-bg);
+    border-color: var(--ar-warn-border);
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--ar-primary);
+  outline-offset: 2px;
+}

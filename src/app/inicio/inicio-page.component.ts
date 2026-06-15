@@ -77,6 +77,23 @@ export class InicioPageComponent {
     },
   ];
 
+  fleetKindLabel(kind: InicioFleetRow['kind']): string {
+    switch (kind) {
+      case 'pr500':
+        return 'PR500';
+      case 'combistato':
+        return 'PRO300';
+      case 'pro400':
+        return 'PRO400';
+      default:
+        return 'Panel';
+    }
+  }
+
+  fleetKindClass(kind: InicioFleetRow['kind']): string {
+    return `inicio-fleet__kind--${kind}`;
+  }
+
   readonly gallery: InicioGalleryItem[] = [
     {
       title: 'Cámara de frío',

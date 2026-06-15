@@ -15,7 +15,12 @@ export const authGuard: CanActivateFn = async () => {
     }
   }
   if (!session) {
-    return router.parseUrl('/login');
+    const attempted = router.url;
+    const returnUrl =
+      attempted && attempted !== '/login' && !attempted.startsWith('/login?') ? attempted : null;
+    return router.createUrlTree(['/login'], {
+      queryParams: returnUrl ? { returnUrl } : {},
+    });
   }
   return true;
 };

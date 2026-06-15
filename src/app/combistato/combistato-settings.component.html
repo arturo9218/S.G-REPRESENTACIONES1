@@ -4,7 +4,10 @@
     Cada ajuste tiene un código <strong>AR01…AR48</strong> en pantalla, ordenado para lectura rápida y puesta en marcha.
   </p>
 
-  <p class="combistato-status" *ngIf="loading">Cargando…</p>
+  <p class="ui-loading combistato-status" *ngIf="loading" aria-busy="true">
+    <span class="ui-spinner" aria-hidden="true"></span>
+    Cargando parámetros…
+  </p>
 
   <fieldset class="notify-panel-fieldset" *ngIf="model as m" [disabled]="!canEdit || loading || saving">
     <ng-container *ngFor="let sec of sections">
@@ -36,9 +39,9 @@
   </fieldset>
 
   <p
-    class="sensor-labels-feedback"
+    class="ui-feedback"
     *ngIf="feedback"
-    [class.sensor-labels-feedback--warn]="feedback.includes('No se pudo') || feedback.includes('No se pudo cargar')"
+    [class.ui-feedback--warn]="feedback.includes('No se pudo') || feedback.includes('No se pudo cargar')"
   >
     {{ feedback }}
   </p>

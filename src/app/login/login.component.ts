@@ -5,6 +5,14 @@ import { AuthService } from '../core/auth.service';
 import { mapSignInError } from '../core/auth-errors';
 import { isSupabaseConfigured } from '../core/supabase-config';
 
+function safeReturnUrl(raw: string | null | undefined): string {
+  if (!raw) return '/inicio';
+  const path = raw.trim();
+  if (!path.startsWith('/') || path.startsWith('//')) return '/inicio';
+  if (path.startsWith('/login') || path.startsWith('/register')) return '/inicio';
+  return path;
+}
+
 @Component({
   selector: 'app-login',
   templateUrl: './login.component.html',
@@ -22,6 +30,7 @@ export class LoginComponent implements OnInit {
   submitting = false;
   errorMessage: string | null = null;
   successMessage: string | null = null;
+  private returnUrl = '/inicio';
 
   constructor(
     private readonly fb: FormBuilder,
@@ -31,6 +40,7 @@ export class LoginComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
+    this.returnUrl = safeReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl'));
     if (this.route.snapshot.queryParamMap.get('restablecida') === '1') {
       this.successMessage = 'Contraseña actualizada. Iniciá sesión con la nueva.';
     }
@@ -62,7 +72,7 @@ export class LoginComponent implements OnInit {
           this.errorMessage = mapSignInError(error.message);
           return;
         }
-        void this.router.navigate(['/inicio']);
+        void this.router.navigateByUrl(this.returnUrl);
       })
       .catch(() => {
         this.submitting = false;
