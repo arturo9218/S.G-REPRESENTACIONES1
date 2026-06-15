@@ -30,6 +30,7 @@ import { environment } from '../../environments/environment';
 import { ingestFunctionUrl } from '../core/supabase-config';
 import { pr500BarToPsi } from '../pr500/pr500-params.defaults';
 import type { InicioFleetRow } from '../inicio/inicio-page.component';
+import type { ShellRoute } from '../shell/shell-route.model';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
 import { ToastService } from '../core/toast.service';
 import { ChatUnreadService } from '../core/chat-unread.service';
@@ -209,16 +210,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
    * Vista según la URL: panel principal, dispositivos, alertas o configuración.
    * Sidebar y barra móvil reflejan este valor (sincronizado en `syncShellRoute`).
    */
-  shellRoute:
-    | 'inicio'
-    | 'devices'
-    | 'equipment'
-    | 'alerts'
-    | 'ayuda'
-    | 'herramientas'
-    | 'comunidad'
-    | 'presupuestos'
-    | 'settings' = 'inicio';
+  shellRoute: ShellRoute = 'inicio';
   /** Desde Inicio: mostrar solo la tarjeta del equipo elegido en Dispositivos. */
   deviceSoloFocus: { kind: 'sensor' | 'pr500' | 'combistato' | 'pro400'; entityId: string } | null =
     null;
@@ -2354,18 +2346,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
     setTimeout(scroll, 350);
   }
 
-  scrollToSection(
-    section:
-      | 'inicio'
-      | 'devices'
-      | 'equipment'
-      | 'alerts'
-      | 'ayuda'
-      | 'herramientas'
-      | 'comunidad'
-      | 'presupuestos'
-      | 'settings'
-  ): void {
+  get showLastDataBar(): boolean {
+    return (
+      this.shellRoute !== 'inicio' &&
+      this.shellRoute !== 'ayuda' &&
+      this.shellRoute !== 'herramientas' &&
+      this.shellRoute !== 'comunidad' &&
+      this.shellRoute !== 'presupuestos' &&
+      this.shellRoute !== 'devices' &&
+      this.hasAnyEquipment &&
+      !!this.lastDataRefreshLabel
+    );
+  }
+
+  scrollToSection(section: ShellRoute): void {
     this.mobileNavMoreOpen = false;
     const paths: Record<typeof section, string> = {
       inicio: '/inicio',
@@ -2401,16 +2395,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
       },
       replaceUrl: true,
     });
-  }
-
-  mobileNavMoreActive(): boolean {
-    return (
-      this.shellRoute === 'equipment' ||
-      this.shellRoute === 'herramientas' ||
-      this.shellRoute === 'comunidad' ||
-      this.shellRoute === 'presupuestos' ||
-      this.shellRoute === 'settings'
-    );
   }
 
   toggleMobileNavMore(): void {

@@ -22,6 +22,7 @@ import { AyudaPageComponent } from './ayuda/ayuda-page.component';
 import { HerramientasPageComponent } from './herramientas/herramientas-page.component';
 import { ComunidadPageComponent } from './comunidad/comunidad-page.component';
 import { PresupuestosPageComponent } from './presupuestos/presupuestos-page.component';
+import { ShellLayoutComponent } from './shell/shell-layout.component';
 import { environment } from '../environments/environment';
 
 export function rootErrorHandlerFactory(): ErrorHandler {
@@ -51,6 +52,7 @@ export function rootErrorHandlerFactory(): ErrorHandler {
     HerramientasPageComponent,
     ComunidadPageComponent,
     PresupuestosPageComponent,
+    ShellLayoutComponent,
   ],
   imports: [
     BrowserModule,
