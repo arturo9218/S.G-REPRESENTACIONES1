@@ -1,0 +1,12 @@
+const fs = require('fs');
+const path = require('path');
+const p = path.join(__dirname, '../src/app/devices/devices-page.component.html');
+let t = fs.readFileSync(p, 'utf8');
+t = t.replace(/class="h\./g, 'class="');
+t = t.replace(/\[class\.h\./g, '[class.');
+t = t.replace(/id="h\./g, 'id="');
+t = t.replace(/\[attr\.id\]="'h\./g, "[attr.id]=\"'");
+t = t.replace(/'h\.fleet-card-/g, "'fleet-card-");
+t = t.replace(/\uFEFF/g, '');
+fs.writeFileSync(p, t, 'utf8');
+console.log('fixed');

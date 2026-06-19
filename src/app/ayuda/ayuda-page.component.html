@@ -4,8 +4,8 @@
     <h1 class="ayuda-hero__title">Manuales y parámetros AR</h1>
     <p class="ayuda-hero__lead">
       Guías en lenguaje claro para operadores y técnicos. Cada equipo tiene su rango de parámetros:
-      <strong>PR500</strong> (AR01–AR34), <strong>PRO400</strong> (AR01–AR26 + AR50) y <strong>PRO300</strong> (AR01–AR48).
-      Podés descargar cada manual en PDF para imprimir o enviar a planta.
+      <strong>PR500</strong> (AR01–AR34), <strong>PRO400</strong> (AR01–AR26 + AR50), <strong>PRO300</strong> (AR01–AR48)
+      y <strong>Datalogger</strong> (AR12–AR48). Podés descargar cada manual en PDF para imprimir o enviar a planta.
     </p>
     <p class="ayuda-hero__tools">
       <a routerLink="/herramientas" class="ayuda-hero__tools-link">Herramientas P–T y Danfoss →</a>
@@ -46,7 +46,7 @@
         <dd>
           En <a routerLink="/herramientas">Herramientas</a> podés, si querés, importar la última telemetría de
           <strong>PR500</strong> (presión y succión), <strong>PRO300</strong> (S1/S2) o <strong>PRO400</strong> (sonda).
-          Solo ayuda a rellenar calculadoras; no modifica el firmware ni los parámetros del equipo.
+          Solo ayuda a rellenar calculadoras; no modifica el equipo ni los parámetros guardados.
         </dd>
       </div>
       <div class="ayuda-tools__row">
@@ -82,6 +82,7 @@
     <details
       class="ayuda-manual__panel"
       [class.ayuda-manual__panel--pr500]="manual.id === 'pr500'"
+      [class.ayuda-manual__panel--datalogger]="manual.id === 'datalogger'"
       *ngFor="let manual of deviceManuals"
       [attr.id]="'manual-' + manual.id"
     >

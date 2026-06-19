@@ -5,6 +5,15 @@
     Las <strong>alarmas push</strong> se configuran abajo en «Notificaciones» (mín/máx de temperatura).
   </p>
 
+  <p class="combistato-chart-link" *ngIf="deviceId">
+    <a
+      class="btn btn--ghost btn--block"
+      routerLink="/chart-pro400"
+      [queryParams]="{ pro400Id: deviceId }"
+      >Ver gráfico histórico</a
+    >
+  </p>
+
   <p class="ui-loading combistato-status" *ngIf="loading" aria-busy="true">
     <span class="ui-spinner" aria-hidden="true"></span>
     Cargando parámetros…

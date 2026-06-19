@@ -505,6 +505,85 @@
   color: #64748b;
 }
 
+.herr-theory {
+  margin-bottom: 1rem;
+}
+
+.herr-theory__body {
+  padding: 0 0.85rem 0.85rem;
+}
+
+.herr-subpanel__title--first {
+  margin-top: 0.65rem;
+}
+
+.herr-theory__list {
+  margin: 0 0 0.85rem;
+  padding-left: 1.15rem;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #cbd5e1;
+}
+
+.herr-theory__list li + li {
+  margin-top: 0.35rem;
+}
+
+.herr-theory__p {
+  margin: 0 0 0.65rem;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #cbd5e1;
+}
+
+.herr-theory__formula {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-align: center;
+  color: #ecfdf5;
+  background: rgba(6, 95, 70, 0.25);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+}
+
+.herr-theory__dl {
+  margin: 0 0 1rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.herr-theory__dl dt {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #6ee7b7;
+}
+
+.herr-theory__dl dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: #94a3b8;
+}
+
+.herr-calc-steps--theory {
+  margin-bottom: 1rem;
+}
+
+.herr-theory__note {
+  padding-left: 0;
+  padding-bottom: 0;
+}
+
+.herr-field__hint {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: #64748b;
+}
+
 .herr-result__lead {
   margin: -0.35rem 0 0.35rem;
   font-size: 0.88rem;

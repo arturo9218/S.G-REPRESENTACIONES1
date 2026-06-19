@@ -16,7 +16,7 @@ export const PR500_SECTIONS: Pr500Section[] = [
     id: 'f01-f08',
     title: 'Bloque 1 · Marcha, presión y tiempos',
     intro:
-      'Códigos AR01–AR08 y AR28. AR08 (rotación de mapeo) y AR28 (balanceo) definen qué borne usa cada etapa; ver ayuda larga de AR08.',
+      'Códigos AR01–AR08 y AR28. AR08 (rotación de mapeo) y AR28 (balanceo) definen qué contactor usa cada etapa; ver ayuda larga de AR08.',
     fields: [
       {
         key: 'F01',
@@ -79,7 +79,7 @@ export const PR500_SECTIONS: Pr500Section[] = [
         key: 'F28',
         code: 'AR28',
         label: 'Balanceo por horas de marcha',
-        help: '0 = reparto por rotación AR08 (lead). 1 = el equipo elige los compresores con menor tiempo ON acumulado; AR08 entonces no define esa asignación (firmware Stage3 con horómetro en flash).',
+        help: '0 = reparto por rotación AR08 (lead). 1 = el PR500 elige los compresores con menor tiempo ON acumulado; AR08 entonces no define esa asignación (horómetro interno).',
         step: 1,
       },
     ],
@@ -95,7 +95,7 @@ export const PR500_SECTIONS: Pr500Section[] = [
         code: 'AR09',
         label: 'Etapas de demanda por presión',
         help:
-          '1, 2 o 3: cuántas etapas lógicas puede activar el control a la vez (no qué borne R1/R2/R3 usa). Con 2 compresores en C1/C2: AR09=2 y AR28=1. Con AR28=0 la rotación (AR08) puede encender C3 aunque no haya tercera máquina.',
+          '1, 2 o 3: cuántas etapas lógicas puede activar el control a la vez (no qué contactor C1/C2/C3 usa). Con 2 compresores en C1/C2: AR09=2 y AR28=1. Con AR28=0 la rotación (AR08) puede encender C3 aunque no haya tercera máquina.',
         step: 1,
       },
       {
@@ -200,9 +200,9 @@ export const PR500_SECTIONS: Pr500Section[] = [
   },
   {
     id: 'f23-f27',
-    title: 'Bloque 4 · Fallo del sensor de presión (ADC)',
+    title: 'Bloque 4 · Fallo del sensor de presión',
     intro:
-      'AR23–AR27: si la tensión del ADC sale de la ventana AR26–AR27 (voltios en el pin), el equipo trata falla de cable/sensor (con AR23≠0), alarma y ciclo ON/OFF AR24/AR25. AR16 borra la alarma como el resto.',
+      'AR23–AR27: si la tensión de la señal sale de la ventana AR26–AR27, el PR500 trata falla de cable/sensor (con AR23≠0), alarma y ciclo ON/OFF AR24/AR25. AR16 borra la alarma como el resto.',
     fields: [
       {
         key: 'F23',
@@ -229,7 +229,7 @@ export const PR500_SECTIONS: Pr500Section[] = [
         key: 'F26',
         code: 'AR26',
         label: 'Tensión mínima válida (V)',
-        help: 'Por debajo de este valor en el ADC (0…3,25 V) la señal se considera inválida. Debe quedar al menos 0,05 V por debajo de AR27.',
+        help: 'Por debajo de este valor (0…3,25 V) la señal se considera inválida. Debe quedar al menos 0,05 V por debajo de AR27.',
         step: 0.01,
       },
       {
@@ -244,13 +244,13 @@ export const PR500_SECTIONS: Pr500Section[] = [
   {
     id: 'f29-f34',
     title: 'Bloque 5 · Sonda succión y recalentamiento',
-    intro: 'AR29–AR34: habilita DS18B20, corrige la sonda y evalúa recalentamiento según refrigerante.',
+    intro: 'AR29–AR34: sonda de succión, corrección y recalentamiento según refrigerante.',
     fields: [
       {
         key: 'F29',
         code: 'AR29',
         label: 'Habilitar sonda de temperatura',
-        help: '0 = no usa sonda. 1 = habilita lectura DS18B20 en el PR500 (pin OneWire configurado en firmware).',
+        help: '0 = no usa sonda. 1 = habilita lectura de temperatura de succión en el PR500.',
         step: 1,
       },
       {

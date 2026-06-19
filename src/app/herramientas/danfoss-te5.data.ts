@@ -8,6 +8,7 @@ import {
   danfossDistributorFactor,
   danfossFamilyForRefrigerant,
   danfossSubcoolingFactor,
+  ORIFICE_MIN_CAPACITY_RATIO,
   type DanfossRefFamily,
 } from './danfoss-t2-te2.data';
 
@@ -331,7 +332,7 @@ export function selectTe5TexLine(input: {
   for (const row of DANFOSS_TE5_ORIFICES) {
     const cap = te5CapacityKw(input.refrigerantId, row.id, te, input.condTempC);
     if (cap == null) return null;
-    if (cap >= required * 0.98) {
+    if (cap >= required * ORIFICE_MIN_CAPACITY_RATIO) {
       selected = row;
       rated = cap;
       break;
@@ -341,7 +342,7 @@ export function selectTe5TexLine(input: {
   if (!selected) {
     const last = DANFOSS_TE5_ORIFICES[DANFOSS_TE5_ORIFICES.length - 1];
     rated = te5CapacityKw(input.refrigerantId, last.id, te, input.condTempC) ?? 0;
-    if (required > rated * 1.02) return null;
+    if (required > rated * ORIFICE_MIN_CAPACITY_RATIO) return null;
     selected = last;
   }
 

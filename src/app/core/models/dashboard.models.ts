@@ -1,3 +1,5 @@
+import type { DataloggerSensorSlotId } from '../../datalogger/datalogger-params.defaults';
+
 /** Rol del usuario actual sobre el equipo en Supabase (compartido / invitación). */
 export type DashboardDeviceAccessRole = 'owner' | 'editor' | 'viewer' | 'admin_view';
 
@@ -172,6 +174,36 @@ export interface DashboardPr500 {
   lastTempSuctionC?: number | null;
   lastSuperheatC?: number | null;
   lastSuperheatOk?: boolean | null;
+}
+
+/** Datalogger — 6T + 3 consumo + 2P (`datalogger_controllers` / `datalogger_readings`). */
+export interface DashboardDatalogger {
+  id: string;
+  name: string;
+  location: string;
+  moduleId?: string;
+  updatedAtLabel: string;
+  lastSeenLabel: string;
+  lastSeenAt?: string | null;
+  online: boolean;
+  ownerUserId?: string;
+  deviceToken?: string;
+  lastTemp1C?: number | null;
+  lastTemp2C?: number | null;
+  lastTemp3C?: number | null;
+  lastTemp4C?: number | null;
+  lastTemp5C?: number | null;
+  lastTemp6C?: number | null;
+  lastCurrent1A?: number | null;
+  lastCurrent2A?: number | null;
+  lastCurrent3A?: number | null;
+  lastPower1W?: number | null;
+  lastPower2W?: number | null;
+  lastPower3W?: number | null;
+  lastPress1Bar?: number | null;
+  lastPress2Bar?: number | null;
+  /** Canales con AR24–AR34 = 1 (solo esos aparecen en tarjeta y resúmenes). */
+  enabledSensorSlots?: DataloggerSensorSlotId[];
 }
 
 /** Marca vertical en el análisis de gráfico (Supabase: device_chart_markers). */

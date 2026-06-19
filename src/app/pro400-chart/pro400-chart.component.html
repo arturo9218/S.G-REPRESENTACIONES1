@@ -1,0 +1,280 @@
+<div #fullscreenRoot class="pr5-page page--dark">
+  <header class="pr5-head">
+    <div class="pr5-head__text">
+      <p class="pr5-kicker">Historial · PRO400</p>
+      <h1 class="pr5-title">{{ pro400Name }}</h1>
+      <p class="pr5-sub">
+        Sonda de temperatura, compresor, deshielo y puerta. Los estados requieren que el PRO400 envíe los campos
+        en cada POST a la nube.
+      </p>
+    </div>
+    <div class="pr5-head-actions">
+      <button type="button" class="btn btn--ghost" (click)="backToApp()">Volver al panel</button>
+      <button type="button" class="btn btn--primary" [disabled]="loading || !pro400Id" (click)="loadAll()">
+        {{ loading ? 'Cargando…' : 'Actualizar' }}
+      </button>
+    </div>
+  </header>
+
+  <p class="pr5-err" *ngIf="error">{{ error }}</p>
+
+  <div class="pr5-layout" *ngIf="pro400Id">
+    <aside class="pr5-side card">
+      <h2 class="pr5-side__title">Rango de fechas</h2>
+      <p class="pr5-side__lead">
+        Elegí el intervalo y aplicá para redibujar. En el celular, <strong>tocá el gráfico</strong> para fijar el valor;
+        con zoom activo, arrastrá para mover el rango.
+      </p>
+      <div class="pr5-presets">
+        <span class="pr5-presets__label">Rápido</span>
+        <button type="button" class="btn btn--ghost pr5-preset-btn" [disabled]="loading" (click)="applyPresetRange(24)">
+          24 h
+        </button>
+        <button type="button" class="btn btn--ghost pr5-preset-btn" [disabled]="loading" (click)="applyPresetRange(48)">
+          48 h
+        </button>
+        <button type="button" class="btn btn--ghost pr5-preset-btn" [disabled]="loading" (click)="applyPresetRange(168)">
+          7 d
+        </button>
+      </div>
+      <div class="pr5-side__toggles">
+        <label><input type="checkbox" [(ngModel)]="showTemp" (ngModelChange)="persistSeriesPrefs()" /> Sonda</label>
+        <label><input type="checkbox" [(ngModel)]="showComp" (ngModelChange)="persistSeriesPrefs()" /> Compresor</label>
+        <label><input type="checkbox" [(ngModel)]="showDefrost" (ngModelChange)="persistSeriesPrefs()" /> Deshielo</label>
+        <label><input type="checkbox" [(ngModel)]="showDoor" (ngModelChange)="persistSeriesPrefs()" /> Puerta</label>
+        <label class="pr5-side__toggles--full">
+          <input type="checkbox" [(ngModel)]="showHistogram" (ngModelChange)="persistSeriesPrefs()" /> Histograma de temperatura
+        </label>
+      </div>
+      <label class="pr5-field pr5-field--style">
+        <span>Estilo del gráfico</span>
+        <select
+          class="pr5-style-select"
+          [(ngModel)]="chartStylePreset"
+          (ngModelChange)="onChartStyleChange()"
+          name="p4chartstyle"
+        >
+          <option *ngFor="let o of chartStyleOptions" [ngValue]="o.value">{{ o.label }}</option>
+        </select>
+      </label>
+      <label class="pr5-field">
+        <span>Desde</span>
+        <input type="datetime-local" [(ngModel)]="filterFrom" name="p4f" />
+      </label>
+      <label class="pr5-field">
+        <span>Hasta</span>
+        <input type="datetime-local" [(ngModel)]="filterTo" name="p4t" />
+      </label>
+      <button type="button" class="btn btn--primary btn--block" [disabled]="loading" (click)="applyFilters()">
+        Aplicar rango
+      </button>
+      <button type="button" class="btn btn--ghost btn--block" [disabled]="pdfExporting || !readings.length" (click)="downloadChartPdf()">
+        {{ pdfExporting ? 'Generando PDF…' : 'Descargar PDF' }}
+      </button>
+      <button type="button" class="btn btn--ghost btn--block pr5-tall-btn" (click)="toggleChartTallLayout()">
+        {{ chartTallLayout ? 'Gráficos: tamaño normal' : 'Gráficos más altos' }}
+      </button>
+      <dl class="pr5-side__meta" *ngIf="readings.length">
+        <div class="pr5-side__meta-row">
+          <dt>Escala °C</dt>
+          <dd>{{ tempMin | number : '1.0-1' }} — {{ tempMax | number : '1.0-1' }}</dd>
+        </div>
+        <div class="pr5-side__meta-row">
+          <dt>Datos</dt>
+          <dd>{{ readings.length }} lecturas · dibujo {{ displayPoints.length }}</dd>
+        </div>
+      </dl>
+    </aside>
+
+    <section class="pr5-main card" [class.pr5-main--charts-tall]="chartTallLayout">
+      <div class="pr5-main__head">
+        <h2 class="pr5-main__title">Temperatura en el tiempo</h2>
+        <div class="pr5-main__actions">
+          <p class="pr5-main__unit">Eje Y: °C</p>
+          <span class="pr5-main__zoom-hint" *ngIf="displayPoints.length"
+            >PC: rueda · doble clic = ver todo · Móvil: toque = valor · Zoom: pellizco / arrastre</span
+          >
+          <div class="pr5-main__zoom-btns" *ngIf="displayPoints.length">
+            <button type="button" class="btn btn--ghost pr5-zoom-btn" (click)="chartZoomIn()">+</button>
+            <button type="button" class="btn btn--ghost pr5-zoom-btn" (click)="chartZoomOut()">−</button>
+          </div>
+          <button
+            type="button"
+            class="btn btn--ghost pr5-zoom-reset"
+            *ngIf="displayPoints.length && chartZoomIsActive"
+            (click)="resetChartZoom()"
+          >
+            Ver todo
+          </button>
+          <button type="button" class="btn btn--ghost pr5-fs-btn" [disabled]="!displayPoints.length" (click)="toggleFullscreen()">
+            {{ isFullscreenUi ? 'Salir pantalla completa' : 'Pantalla completa' }}
+          </button>
+        </div>
+      </div>
+
+      <p class="pr5-empty" *ngIf="loading">Cargando datos…</p>
+      <p class="pr5-empty" *ngIf="!readings.length && !loading">Sin lecturas en este rango.</p>
+
+      <div class="pr5-legend" *ngIf="readings.length">
+        <span class="pr5-legend__item pr5-legend__item--succ" *ngIf="showTemp">Sonda</span>
+        <span class="pr5-legend__pill" *ngIf="showComp">Comp</span>
+        <span class="pr5-legend__pill" *ngIf="showDefrost">Defrost</span>
+        <span class="pr5-legend__pill pr5-legend__pill--alarm" *ngIf="showDoor">Puerta</span>
+      </div>
+
+      <div #chartPdfCapture class="pr5-pdf-capture">
+      <div class="pr5-chart" *ngIf="readings.length">
+        <div
+          #chartStage
+          class="pr5-svg-wrap"
+          [class.pr5-svg-wrap--style-line]="chartStylePreset === 'line'"
+          [class.pr5-svg-wrap--style-minimal]="chartStylePreset === 'minimal'"
+          [class.pr5-svg-wrap--style-technical]="chartStylePreset === 'technical'"
+          [class.pr5-svg-wrap--style-trend]="chartStylePreset === 'trend'"
+          (mousemove)="onTempMouseMove($event)"
+          (mouseleave)="onTempMouseLeave()"
+          (mousedown)="startTempPan($event)"
+          (wheel)="onChartWheel($event)"
+          (dblclick)="resetChartZoom()"
+          (touchstart)="onTempTouchStart($event)"
+          (touchmove)="onTempTouchMove($event)"
+          (touchend)="onTempTouchEnd()"
+          (touchcancel)="onTempTouchEnd()"
+        >
+          <svg class="pr5-svg p4-svg--temp" viewBox="0 0 100 58" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="p4Fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="rgba(74, 222, 128, 0.28)" />
+                <stop offset="100%" stop-color="rgba(15, 23, 42, 0)" />
+              </linearGradient>
+            </defs>
+            <rect class="pr5-plot-bg" x="0" y="0" width="100" height="58" />
+            <line
+              *ngFor="let g of [8, 22, 36, 50]"
+              class="pr5-grid-line"
+              x1="0"
+              [attr.y1]="g"
+              x2="100"
+              [attr.y2]="g"
+            />
+            <path
+              *ngIf="showTemp && tempPath && chartShowsAreaFill() && chartStylePreset !== 'trend'"
+              class="p4-area"
+              [attr.d]="tempPath + ' L99,52 L4,52 Z'"
+              fill="url(#p4Fill)"
+            />
+            <path
+              *ngIf="showTemp && tempPath && chartStylePreset !== 'trend'"
+              class="p4-line"
+              [attr.d]="tempPath"
+              fill="none"
+            />
+            <ng-container *ngIf="showTemp && chartStylePreset === 'trend'">
+              <line
+                *ngFor="let seg of tempTrendSegs"
+                fill="none"
+                stroke-linecap="round"
+                vector-effect="non-scaling-stroke"
+                [attr.x1]="seg.x1"
+                [attr.y1]="seg.y1"
+                [attr.x2]="seg.x2"
+                [attr.y2]="seg.y2"
+                class="pr5-trend-seg"
+                [class.pr5-trend-seg--up]="seg.trend === 'up'"
+                [class.pr5-trend-seg--down]="seg.trend === 'down'"
+                [class.pr5-trend-seg--flat]="seg.trend === 'flat'"
+              />
+            </ng-container>
+            <line
+              *ngIf="cursorActive"
+              class="pr5-cursor-line"
+              [attr.x1]="cursorX"
+              y1="4"
+              [attr.x2]="cursorX"
+              y2="52"
+              vector-effect="non-scaling-stroke"
+            />
+            <circle
+              *ngIf="cursorActive && showTemp"
+              class="pr5-cursor-dot"
+              [attr.cx]="cursorX"
+              [attr.cy]="cursorY"
+              r="0.65"
+            />
+            <g *ngIf="cursorActive">
+              <rect
+                class="pr5-cursor-box"
+                [attr.x]="cursorX > 70 ? cursorX - 22 : cursorX + 1.2"
+                y="4.5"
+                width="20.6"
+                height="5.8"
+                rx="0.8"
+              />
+              <text class="pr5-cursor-text pr5-cursor-text--temp" [attr.x]="cursorX > 70 ? cursorX - 20.8 : cursorX + 2" y="7.2">
+                {{ cursorLabelTemp }}
+              </text>
+              <text class="pr5-cursor-text pr5-cursor-text--time" [attr.x]="cursorX > 70 ? cursorX - 20.8 : cursorX + 2" y="9.5">
+                {{ cursorLabelTime }}
+              </text>
+            </g>
+            <text *ngFor="let tl of timeLabels" class="pr5-x-tick" [attr.x]="tl.x" y="56" text-anchor="middle">
+              {{ tl.text }}
+            </text>
+          </svg>
+        </div>
+      </div>
+      </div>
+
+      <div class="pr5-states" *ngIf="showHistogram && readings.length">
+        <div class="pr5-states__head">
+          <h3 class="pr5-states__title">Histograma de temperatura</h3>
+          <p class="pr5-states__hint">Distribución en el rango elegido</p>
+        </div>
+        <div class="pr5-svg-wrap pr5-svg-wrap--hist">
+          <svg class="pr5-svg p4-svg--hist" viewBox="0 0 100 42" preserveAspectRatio="none">
+            <rect x="0" y="0" width="100" height="42" class="pr5-plot-bg" rx="1" />
+            <rect
+              *ngFor="let b of histBars"
+              class="p4-hist-bar"
+              [attr.x]="b.x + 0.1"
+              [attr.y]="40 - barDisplayHeight(b.h)"
+              [attr.width]="b.w"
+              [attr.height]="barDisplayHeight(b.h)"
+            />
+          </svg>
+        </div>
+      </div>
+
+      <div class="pr5-states" *ngIf="readings.length">
+        <div class="pr5-states__head">
+          <h3 class="pr5-states__title">Actividad (relés / puerta)</h3>
+          <p class="pr5-states__hint">Verde = encendido / puerta abierta · Gris = apagado / cerrada</p>
+        </div>
+        <div class="pr5-states__grid p4-act-grid">
+          <div class="p4-act-labels">
+            <span *ngIf="showComp">Compresor</span>
+            <span *ngIf="showDefrost">Deshielo</span>
+            <span *ngIf="showDoor">Puerta</span>
+          </div>
+          <div class="pr5-svg-wrap pr5-svg-wrap--states">
+            <svg class="pr5-svg p4-svg--act" viewBox="0 0 100 72" preserveAspectRatio="none">
+              <ng-container *ngFor="let r of activityRects">
+                <rect
+                  class="p4-act-rect"
+                  [class.p4-act-rect--on]="r.on"
+                  [attr.x]="r.x0"
+                  [attr.y]="8 + r.lane * 20"
+                  [attr.width]="rectW(r)"
+                  height="14"
+                />
+              </ng-container>
+              <text *ngFor="let tl of timeLabels" class="pr5-x-tick" [attr.x]="tl.x" y="70" text-anchor="middle">
+                {{ tl.text }}
+              </text>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>

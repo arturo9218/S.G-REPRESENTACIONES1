@@ -23,6 +23,16 @@ interface IngestPayload {
   /** Corriente RMS (A), ej. SCT-013 */
   current_a?: number | null;
   power_w?: number | null;
+  /** Datalogger: 6T + 3 consumos + 2 presiones */
+  temp4_c?: number | null;
+  temp5_c?: number | null;
+  temp6_c?: number | null;
+  current1_a?: number | null;
+  current2_a?: number | null;
+  current3_a?: number | null;
+  power1_w?: number | null;
+  power2_w?: number | null;
+  power3_w?: number | null;
   press1_bar?: number | null;
   press2_bar?: number | null;
   /** Combistato: estado de relés / puerta (0/1 o boolean); opcional en firmware viejo. */
@@ -54,7 +64,26 @@ interface IngestPayload {
   temp_suction_c?: unknown;
   superheat_c?: unknown;
   superheat_ok?: unknown;
+  /** Firmware: marca de params que tiene el equipo (pull inmediato si difiere). */
+  params_updated_at?: string;
 }
+
+const DATALOGGER_CHANNEL_KEYS = [
+  'temp1_c',
+  'temp2_c',
+  'temp3_c',
+  'temp4_c',
+  'temp5_c',
+  'temp6_c',
+  'current1_a',
+  'current2_a',
+  'current3_a',
+  'power1_w',
+  'power2_w',
+  'power3_w',
+  'press1_bar',
+  'press2_bar',
+] as const;
 
 /** Ms totales ON (0…MAX_SAFE_INTEGER); null si ausente o inválido. */
 function ingestOptionalRunMs(v: unknown): number | null {
@@ -95,6 +124,13 @@ function ingestOptionalNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function hasDataloggerChannel(payload: IngestPayload): boolean {
+  for (const k of DATALOGGER_CHANNEL_KEYS) {
+    if (ingestOptionalNumber(payload[k]) != null) return true;
+  }
+  return false;
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -120,10 +156,12 @@ Deno.serve(async (req) => {
       typeof payload.temp1_c === 'number' && !Number.isNaN(payload.temp1_c as number);
     const hasPressure =
       typeof payload.pressure_bar === 'number' && !Number.isNaN(payload.pressure_bar as number);
-    if (!moduleId || !deviceToken || (!hasTemp && !hasPressure)) {
+    const hasDlgChannel = hasDataloggerChannel(payload);
+    if (!moduleId || !deviceToken || (!hasTemp && !hasPressure && !hasDlgChannel)) {
       return new Response(
         JSON.stringify({
-          error: 'Payload inválido: hace falta temp1_c (dispositivo/combistato) o pressure_bar (PR500).',
+          error:
+            'Payload inválido: hace falta temp1_c (panel/combistato), pressure_bar (PR500) o al menos un canal datalogger.',
         }),
         {
           status: 400,
@@ -310,6 +348,116 @@ Deno.serve(async (req) => {
           status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
+      }
+
+      const { data: dlg, error: dlgErr } = await supabase
+        .from('datalogger_controllers')
+        .select('id, device_token_hash, updated_at, params')
+        .eq('module_id', moduleId)
+        .maybeSingle();
+
+      if (!dlgErr && dlg?.id && dlg.device_token_hash === deviceToken) {
+        const sentIso =
+          typeof payload.sentAt === 'string' && payload.sentAt.trim()
+            ? payload.sentAt.trim()
+            : new Date().toISOString();
+        const n = (k: (typeof DATALOGGER_CHANNEL_KEYS)[number]) => ingestOptionalNumber(payload[k]);
+        if (!hasDataloggerChannel(payload)) {
+          return new Response(JSON.stringify({ error: 'Datalogger: falta al menos un canal numérico' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const offNum = (v: unknown): number =>
+          typeof v === 'number' && Number.isFinite(v) ? v : 0;
+        const rawParams =
+          dlg.params != null && typeof dlg.params === 'object' && !Array.isArray(dlg.params)
+            ? (dlg.params as Record<string, unknown>)
+            : {};
+        const off = (key: string) => offNum(rawParams[key]);
+
+        const pair = (raw: number | null, o: number) =>
+          raw == null ? { raw: null as number | null, corr: null as number | null } : { raw, corr: raw + o };
+
+        const t1 = pair(n('temp1_c'), off('F35'));
+        const t2 = pair(n('temp2_c'), off('F36'));
+        const t3 = pair(n('temp3_c'), off('F37'));
+        const t4 = pair(n('temp4_c'), off('F38'));
+        const t5 = pair(n('temp5_c'), off('F39'));
+        const t6 = pair(n('temp6_c'), off('F40'));
+        const i1 = pair(n('current1_a'), off('F41'));
+        const i2 = pair(n('current2_a'), off('F42'));
+        const i3 = pair(n('current3_a'), off('F43'));
+        const p1 = pair(n('power1_w'), off('F44'));
+        const p2 = pair(n('power2_w'), off('F45'));
+        const p3 = pair(n('power3_w'), off('F46'));
+        const pr1 = pair(n('press1_bar'), off('F47'));
+        const pr2 = pair(n('press2_bar'), off('F48'));
+
+        const insertRow: Record<string, unknown> = {
+          datalogger_id: dlg.id,
+          created_at: sentIso,
+          temp1_raw_c: t1.raw,
+          temp2_raw_c: t2.raw,
+          temp3_raw_c: t3.raw,
+          temp4_raw_c: t4.raw,
+          temp5_raw_c: t5.raw,
+          temp6_raw_c: t6.raw,
+          current1_raw_a: i1.raw,
+          current2_raw_a: i2.raw,
+          current3_raw_a: i3.raw,
+          power1_raw_w: p1.raw,
+          power2_raw_w: p2.raw,
+          power3_raw_w: p3.raw,
+          press1_raw_bar: pr1.raw,
+          press2_raw_bar: pr2.raw,
+          temp1_c: t1.corr,
+          temp2_c: t2.corr,
+          temp3_c: t3.corr,
+          temp4_c: t4.corr,
+          temp5_c: t5.corr,
+          temp6_c: t6.corr,
+          current1_a: i1.corr,
+          current2_a: i2.corr,
+          current3_a: i3.corr,
+          power1_w: p1.corr,
+          power2_w: p2.corr,
+          power3_w: p3.corr,
+          press1_bar: pr1.corr,
+          press2_bar: pr2.corr,
+        };
+        const { error: insDlgErr } = await supabase.from('datalogger_readings').insert(insertRow);
+        if (insDlgErr) {
+          return new Response(JSON.stringify({ error: insDlgErr.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const { error: upDlg } = await supabase
+          .from('datalogger_controllers')
+          .update({ last_seen_at: sentIso })
+          .eq('id', dlg.id);
+        if (upDlg) {
+          return new Response(JSON.stringify({ error: upDlg.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const paramsUpdatedAt =
+          typeof dlg.updated_at === 'string' && dlg.updated_at.trim() ? dlg.updated_at.trim() : null;
+        const clientUpd =
+          typeof payload.params_updated_at === 'string' ? payload.params_updated_at.trim() : '';
+        const pullParamsNow = !clientUpd || !paramsUpdatedAt || clientUpd !== paramsUpdatedAt;
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            kind: 'datalogger',
+            params_updated_at: paramsUpdatedAt,
+            pull_params_now: pullParamsNow,
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
 
       return new Response(JSON.stringify({ error: 'Dispositivo no encontrado' }), {

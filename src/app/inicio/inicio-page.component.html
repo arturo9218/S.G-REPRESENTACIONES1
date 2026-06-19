@@ -7,7 +7,7 @@
         Sesión: <strong>{{ userEmail }}</strong>
       </p>
       <p class="inicio-hero__lead">
-        Resumen de planta, alertas y alta de equipos PR500, PRO400 y PRO300 desde un solo acceso.
+        Resumen de planta, alertas y alta de equipos PR500, PRO400, PRO300 y Datalogger desde un solo acceso.
       </p>
       <p class="inicio-hero__onboard" *ngIf="totalEquipos === 0">
         Todavía no hay equipos en tu cuenta. Elegí un tipo abajo para dar de alta el primero.
@@ -31,7 +31,7 @@
       <p class="inicio-stat__value">{{ totalEquipos }}</p>
       <p class="inicio-stat__label">Equipos en cuenta</p>
       <p class="inicio-stat__detail">
-        {{ deviceCount }} paneles · {{ pro400Count }} PRO400 · {{ combistatoCount }} PRO300 · {{ pr500Count }} PR500
+        {{ deviceCount }} paneles · {{ pro400Count }} PRO400 · {{ combistatoCount }} PRO300 · {{ pr500Count }} PR500 · {{ dataloggerCount }} Datalogger
       </p>
     </article>
     <article
@@ -133,7 +133,7 @@
       <span class="inicio-help__text">
         <span class="inicio-help__title">Manuales y parámetros AR</span>
         <span class="inicio-help__desc">
-          PR500, PRO300 y PRO400 — guías para planta y PDF descargable.
+          PR500, PRO300, PRO400 y Datalogger — guías para planta y PDF descargable.
         </span>
       </span>
       <span class="inicio-help__cta">Abrir ayuda →</span>

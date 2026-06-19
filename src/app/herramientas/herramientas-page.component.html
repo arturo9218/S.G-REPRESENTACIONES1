@@ -126,7 +126,7 @@
     <details class="herr-cloud-opt" *ngIf="hasCloudImport">
       <summary class="herr-cloud-opt__summary">Opcional: lecturas desde equipos en la nube</summary>
       <p class="herr-cloud-opt__lead">
-        Solo rellena las calculadoras en esta pantalla. <strong>No cambia firmware ni parámetros</strong> del equipo.
+        Solo rellena las calculadoras en esta pantalla. <strong>No cambia parámetros</strong> del equipo.
       </p>
 
       <div class="herr-cloud-opt__block" *ngIf="pr500List.length">
@@ -382,10 +382,12 @@
     <div class="herr-ficha" *ngIf="fichaEnabled">
       <div class="herr-controls herr-controls--grid">
         <label class="herr-field">
-          <span class="herr-field__label">Panel</span>
-          <select class="herr-field__input" [(ngModel)]="fichaDeviceId" (ngModelChange)="onFichaDeviceChange()">
-            <option value="">— Elegir panel —</option>
-            <option *ngFor="let d of cloudDevices" [value]="d.id">{{ d.name }}</option>
+          <span class="herr-field__label">Equipo</span>
+          <select class="herr-field__input" [(ngModel)]="fichaTargetKey" (ngModelChange)="onFichaTargetChange()">
+            <option value="">— Elegir equipo —</option>
+            <option *ngFor="let t of equipmentFichaTargets" [value]="t.kind + ':' + t.id">
+              {{ fichaTargetLabel(t) }}
+            </option>
           </select>
         </label>
         <label class="herr-field">
@@ -403,7 +405,7 @@
       </div>
     </div>
     <p class="herr-disclaimer herr-disclaimer--tight" *ngIf="!fichaEnabled">
-      Necesitás un panel PRO400 en nube con ficha de equipo para guardar visitas.
+      Necesitás al menos un equipo en nube (Panel, PRO400, PRO300, PR500 o Datalogger) para guardar visitas en ficha.
     </p>
 
     <div class="herr-controls herr-controls--grid" *ngIf="fichaId">
@@ -698,6 +700,95 @@
       recomendaciones y, si aplica, otras líneas (TUA, TR6, TGE).
     </p>
 
+    <details class="herr-catalog herr-theory">
+      <summary class="herr-catalog__summary">Cómo funciona el cálculo del orificio (teoría y pasos)</summary>
+      <div class="herr-theory__body">
+        <h3 class="herr-subpanel__title herr-subpanel__title--first">Qué usa la app — y qué no</h3>
+        <ul class="herr-theory__list">
+          <li>
+            <strong>No</strong> dimensiona por HP del motor. Reglas del tipo «2 HP → orificio 03» son atajos de taller
+            que no contemplan refrigerante, Te ni Tc.
+          </li>
+          <li>
+            <strong>Sí</strong> usa la <strong>capacidad frigorífica en kW</strong> (placa o ficha del compresor a tu Te y
+            Tc), igual criterio que Danfoss Coolselector®.
+          </li>
+          <li>
+            Las tablas TE2/T2 están referidas a <strong>Tc ≈ 25 °C</strong>; si tu Tc es mayor, el cartucho rinde menos
+            y la app pide uno más grande.
+          </li>
+        </ul>
+
+        <h3 class="herr-subpanel__title">Teoría del dimensionado</h3>
+        <p class="herr-theory__p">
+          La válvula debe dejar pasar el caudal de refrigerante que corresponde a la carga del equipo. Eso depende de
+          cuántos <strong>kW</strong> frigoríficos hay que evaporar y a qué <strong>Te</strong> y <strong>Tc</strong>
+          trabaja el circuito — no del HP del compresor.
+        </p>
+        <p class="herr-theory__formula">
+          Q<sub>corregida</sub> = Q ÷ (f<sub>sub</sub> × f<sub>p</sub>) × f<sub>Tc</sub>
+        </p>
+        <dl class="herr-theory__dl">
+          <div>
+            <dt>Q (kW)</dt>
+            <dd>Capacidad frigorífica que cargás (ficha del compresor).</dd>
+          </div>
+          <div>
+            <dt>f<sub>sub</sub></dt>
+            <dd>Subenfriamiento del líquido: más subenfriamiento → líquido más denso → cartucho puede ser un poco más chico.</dd>
+          </div>
+          <div>
+            <dt>f<sub>p</sub></dt>
+            <dd>Caída de presión en distribuidor de líquido (bar). Con TE2 y distribuidor suele ser &lt; 1.</dd>
+          </div>
+          <div>
+            <dt>f<sub>Tc</sub></dt>
+            <dd>Corrección si Tc ≠ 25 °C. A mayor Tc condensación, menor capacidad del mismo cartucho → Q<sub>corregida</sub> sube.</dd>
+          </div>
+        </dl>
+
+        <h3 class="herr-subpanel__title">Cómo elige el cartucho (0X … 06)</h3>
+        <ol class="herr-calc-steps herr-calc-steps--theory">
+          <li>Consulta la tabla Danfoss del refrigerante elegido: kW de cada cartucho a tu <strong>Te</strong>.</li>
+          <li>Recorre cartuchos de chico a grande (0X → 06).</li>
+          <li>Elige el <strong>primero</strong> cuya capacidad a Te sea ≥ Q<sub>corregida</sub>.</li>
+          <li>Si hay distribuidor / multicircuito → cuerpo <strong>TE2</strong> (equalización externa); si no → <strong>T2</strong>.</li>
+          <li>Según Te sugiere rango del elemento: <strong>N</strong> (comercial), <strong>NL</strong> (congelado) o <strong>B</strong> (ultracongelado).</li>
+        </ol>
+
+        <ng-container *ngIf="txvResult?.breakdown as b">
+          <h3 class="herr-subpanel__title">Tu cálculo con los datos cargados</h3>
+          <ol class="herr-calc-steps">
+            <li>
+              <strong>Carga instalación:</strong> {{ fmt(b.capacityKw, 2) }} kW (valor ingresado; debe salir de la ficha
+              del compresor, no de HP).
+            </li>
+            <li>
+              <strong>Factores:</strong> f<sub>sub</sub> = {{ fmt(b.fsub, 3) }} (subenf. {{ fmt(b.subcoolingK, 0) }} K) ·
+              f<sub>p</sub> = {{ fmt(b.fp, 3) }}
+              <span *ngIf="b.distributorDropBar > 0"> (caída distribuidor {{ fmt(b.distributorDropBar, 1) }} bar)</span>
+              <span *ngIf="b.distributorDropBar <= 0"> (sin caída en distribuidor)</span>
+              · f<sub>Tc</sub> = {{ fmt(b.ftc, 3) }} (Te {{ fmt(b.evapTempC, 1) }} °C · Tc {{ fmt(b.condTempC, 1) }} °C).
+            </li>
+            <li>
+              <strong>Carga corregida:</strong> {{ fmt(b.capacityKw, 2) }} ÷ ({{ fmt(b.fsub, 3) }} × {{ fmt(b.fp, 3) }}) ×
+              {{ fmt(b.ftc, 3) }} ≈ <strong>{{ fmt(b.requiredCapacityKw, 2) }} kW</strong>.
+            </li>
+            <li *ngIf="txvResult as txv">
+              <strong>Cartucho elegido:</strong> orificio <strong>{{ txv.danfoss.orifice }}</strong> ({{ txv.danfoss.orificeCode }}) —
+              ~{{ fmt(txv.danfoss.ratedCapacityKw, 2) }} kW a Te {{ fmt(b.evapTempC, 0) }} °C · cuerpo
+              <strong>{{ txv.danfoss.valveBody }}</strong>.
+            </li>
+          </ol>
+        </ng-container>
+
+        <p class="herr-catalog__note herr-theory__note">
+          Resultado <strong>orientativo</strong> según tablas Danfoss en la app. Validá refrigerante, Te, Tc y cartucho en
+          Coolselector®2 o catálogo antes de comprar.
+        </p>
+      </div>
+    </details>
+
     <details class="herr-catalog">
       <summary class="herr-catalog__summary">Tipos de válvula Danfoss (referencia)</summary>
       <div class="herr-catalog__table-wrap">
@@ -753,7 +844,14 @@
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Capacidad frigorífica (kW)</span>
-        <input type="text" class="herr-field__input" [(ngModel)]="txvCapacityDraft" inputmode="decimal" placeholder="Ej. 5" />
+        <input
+          type="text"
+          class="herr-field__input"
+          [(ngModel)]="txvCapacityDraft"
+          inputmode="decimal"
+          placeholder="Ej. 4,5 — ficha del compresor"
+        />
+        <span class="herr-field__hint">No uses HP del motor; buscá kW a tu Te/Tc en la placa o catálogo.</span>
       </label>
       <label class="herr-field">
         <span class="herr-field__label">Te — temp. evaporación (°C)</span>
@@ -899,14 +997,16 @@
             ? ', presión de succión, recalentamiento y/o subenfriamiento'
             : ' y nota de orificio de la válvula TXV'
         }}
-        a una ficha del panel PRO400 (Ficha equipo).
+        a una ficha del equipo (Ficha equipo).
       </p>
       <div class="herr-controls herr-controls--grid">
         <label class="herr-field">
-          <span class="herr-field__label">Panel</span>
-          <select class="herr-field__input" [(ngModel)]="fichaDeviceId" (ngModelChange)="onFichaDeviceChange()">
-            <option value="">— Elegir panel —</option>
-            <option *ngFor="let d of cloudDevices" [value]="d.id">{{ d.name }}</option>
+          <span class="herr-field__label">Equipo</span>
+          <select class="herr-field__input" [(ngModel)]="fichaTargetKey" (ngModelChange)="onFichaTargetChange()">
+            <option value="">— Elegir equipo —</option>
+            <option *ngFor="let t of equipmentFichaTargets" [value]="t.kind + ':' + t.id">
+              {{ fichaTargetLabel(t) }}
+            </option>
           </select>
         </label>
         <label class="herr-field">
@@ -932,7 +1032,7 @@
       </button>
     </div>
     <p class="herr-disclaimer herr-disclaimer--tight" *ngIf="!fichaEnabled">
-      Para guardar en ficha necesitás un panel PRO400 en nube (Ficha equipo).
+      Para guardar en ficha necesitás un equipo en nube con UUID (Ficha equipo).
     </p>
   </ng-template>
 

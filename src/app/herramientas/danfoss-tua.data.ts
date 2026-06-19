@@ -6,6 +6,7 @@
 import {
   DANFOSS_EVAP_TEMP_C,
   danfossFamilyForRefrigerant,
+  ORIFICE_MIN_CAPACITY_RATIO,
   type DanfossRefFamily,
 } from './danfoss-t2-te2.data';
 
@@ -139,7 +140,7 @@ export function selectTuaTuaeAlternative(input: {
   for (const row of DANFOSS_TUA_ORIFICES) {
     const cap = tuaCapacityKw(input.refrigerantId, row.id, input.evapTempC);
     if (cap == null) return null;
-    if (cap >= required * 0.98) {
+    if (cap >= required * ORIFICE_MIN_CAPACITY_RATIO) {
       selected = row.id;
       rated = cap;
       break;
@@ -149,7 +150,7 @@ export function selectTuaTuaeAlternative(input: {
   if (!selected) {
     selected = '9';
     rated = tuaCapacityKw(input.refrigerantId, '9', input.evapTempC) ?? 0;
-    if (required > rated * 1.02) return null;
+    if (required > rated * ORIFICE_MIN_CAPACITY_RATIO) return null;
   }
 
   const body = input.externalEqualization ? 'TUAE' : 'TUA';

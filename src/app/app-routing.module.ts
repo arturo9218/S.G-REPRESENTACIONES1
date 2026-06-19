@@ -10,6 +10,8 @@ import { DashboardComponent } from './dashboard/dashboard.component';
 import { ChartAnalysisComponent } from './chart-analysis/chart-analysis.component';
 import { CombistatoChartComponent } from './combistato-chart/combistato-chart.component';
 import { Pr500ChartComponent } from './pr500-chart/pr500-chart.component';
+import { Pro400ChartComponent } from './pro400-chart/pro400-chart.component';
+import { DataloggerChartComponent } from './datalogger-chart/datalogger-chart.component';
 
 const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'login' },
@@ -34,6 +36,8 @@ const routes: Routes = [
   { path: 'chart', component: ChartAnalysisComponent, canActivate: [authGuard] },
   { path: 'chart-combistato', component: CombistatoChartComponent, canActivate: [authGuard] },
   { path: 'chart-pr500', component: Pr500ChartComponent, canActivate: [authGuard] },
+  { path: 'chart-pro400', component: Pro400ChartComponent, canActivate: [authGuard] },
+  { path: 'chart-datalogger', component: DataloggerChartComponent, canActivate: [authGuard] },
   { path: '**', redirectTo: 'login' },
 ];
 

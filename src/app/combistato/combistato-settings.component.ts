@@ -99,7 +99,7 @@ export class CombistatoSettingsComponent implements OnChanges {
   resetDefaults(): void {
     this.model = mergeCombistatoParams(null);
     this.syncDraftsFromModel();
-    this.feedback = 'Valores restaurados a los del firmware (sin guardar en la nube).';
+    this.feedback = 'Valores restaurados a los de fábrica (sin guardar en la nube).';
   }
 
   async save(): Promise<void> {
@@ -119,7 +119,7 @@ export class CombistatoSettingsComponent implements OnChanges {
     try {
       await navigator.clipboard.writeText(txt);
       this.feedback =
-        'JSON copiado al portapapeles. Pegalo en `/combistato.json` del ESP32 (LittleFS) o guardalo como archivo.';
+        'JSON copiado al portapapeles. Guardalo como archivo o usalo en la configuración del PRO300.';
     } catch {
       this.jsonExport = txt;
       this.feedback =

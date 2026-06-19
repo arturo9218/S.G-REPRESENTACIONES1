@@ -1,8 +1,9 @@
-<div class="page page--dark">
-  <header class="page__head">
-    <div class="page__head-left">
+<div class="page page--dark pr5-page">
+  <header class="pr5-head page__head">
+    <div class="pr5-head__text page__head-left">
+      <p class="pr5-kicker">Historial · análisis</p>
       <button type="button" class="btn btn--ghost page__back" (click)="backToDashboard()">← Volver</button>
-      <h1 class="page__title">Análisis temperatura y corriente</h1>
+      <h1 class="pr5-title page__title">Análisis temperatura y corriente</h1>
     </div>
   </header>
 
@@ -25,8 +26,8 @@
     ≡
   </button>
 
-  <section class="grid" [class.grid--sidebar-hidden]="sidebarCollapsed && !sidebarPeek">
-    <div class="panel panel--side panel--side--cards" (mouseleave)="closeSidebarPeek()">
+  <section class="grid pr5-layout" [class.grid--sidebar-hidden]="sidebarCollapsed && !sidebarPeek">
+    <div class="panel panel--side panel--side--cards pr5-side card" (mouseleave)="closeSidebarPeek()">
       <div class="panel__side-actions" *ngIf="!narrowUi">
         <button type="button" class="btn btn--ghost panel__collapse" (click)="toggleSidebar()">
           {{ sidebarCollapsed ? 'Mostrar panel' : 'Ocultar panel' }}
@@ -329,7 +330,7 @@
     </div>
 
     <div
-      class="panel panel--chart"
+      class="panel panel--chart pr5-main card"
       #chartPanel
       [class.panel--chart-style-line]="chartStylePreset === 'line'"
       [class.panel--chart-style-minimal]="chartStylePreset === 'minimal'"
@@ -337,22 +338,22 @@
       [class.panel--chart-style-trend]="chartStylePreset === 'trend'"
     >
       <div class="chart-pdf-capture" #chartPdfCapture>
-      <div class="chart-head">
-        <div class="chart-head__legend">
-          <span class="legend-item" *ngIf="showTemp1">
+      <div class="chart-head pr5-main__head">
+        <div class="chart-head__legend pr5-legend">
+          <span class="legend-item pr5-legend__item pr5-legend__item--succ" *ngIf="showTemp1">
             <i class="legend-item__swatch legend-item__swatch--s1"></i>
             {{ sensor1Name }}
           </span>
-          <span class="legend-item" *ngIf="showTemp2 && hasSecondSeries">
+          <span class="legend-item pr5-legend__item pr5-legend__item--pres" *ngIf="showTemp2 && hasSecondSeries">
             <i class="legend-item__swatch legend-item__swatch--s2"></i>
             {{ sensor2Name }}
           </span>
-          <span class="legend-item" *ngIf="analysisShowsCurrent">
+          <span class="legend-item pr5-legend__item pr5-legend__item--sh" *ngIf="analysisShowsCurrent">
             <i class="legend-item__swatch legend-item__swatch--power"></i>
             Corriente
           </span>
         </div>
-        <div class="chart-head__actions">
+        <div class="chart-head__actions pr5-main__actions">
           <label class="chart-style-inline">
             <span class="chart-style-inline__label">Estilo</span>
             <select
@@ -442,7 +443,11 @@
         </div>
 
         <div
-          class="chart__svg-wrap"
+          class="chart__svg-wrap pr5-svg-wrap"
+          [class.pr5-svg-wrap--style-line]="chartStylePreset === 'line'"
+          [class.pr5-svg-wrap--style-minimal]="chartStylePreset === 'minimal'"
+          [class.pr5-svg-wrap--style-technical]="chartStylePreset === 'technical'"
+          [class.pr5-svg-wrap--style-trend]="chartStylePreset === 'trend'"
           [class.chart__svg-wrap--pan-ready]="chartZoomIsActive"
           [class.chart__svg-wrap--panning]="chartPanDrag"
           #chartSvgWrap
@@ -475,7 +480,7 @@
               </clipPath>
             </defs>
 
-            <rect class="chart__svg-bg" x="0" y="0" width="100" height="100" />
+            <rect class="chart__svg-bg pr5-plot-bg" x="0" y="0" width="100" height="100" />
 
             <g class="chart__grid" clip-path="url(#chartPlotClip)">
               <line *ngFor="let gy of chartGridYStops" x1="0" [attr.y1]="gy" x2="100" [attr.y2]="gy" />
@@ -488,7 +493,7 @@
                 class="chart__grid-v"
               />
             </g>
-            <rect class="chart-plot-frame" x="4" y="8" width="96" height="84" fill="none" />
+            <rect class="chart-plot-frame pr5-plot-frame" x="4" y="8" width="96" height="84" fill="none" />
 
             <g clip-path="url(#chartPlotClip)">
               <ng-container *ngIf="showTemp1 || showTemp2">

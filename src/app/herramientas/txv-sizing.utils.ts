@@ -2,6 +2,9 @@ import {
   selectDanfossValve,
   DANFOSS_VALVE_LINES,
   type DanfossValveSelection,
+  danfossSubcoolingFactor,
+  danfossDistributorFactor,
+  danfossCondensingFactor,
 } from './danfoss-t2-te2.data';
 import { absBarFromSatTemp, formatNum, fromAbsBar, type PtPoint } from './refrigerant-pt.utils';
 import type { DanfossApplication } from './danfoss-valve-lines.data';
@@ -22,6 +25,18 @@ export interface TxvSizingInput {
   application: DanfossApplication;
 }
 
+export interface TxvSizingBreakdown {
+  capacityKw: number;
+  requiredCapacityKw: number;
+  fsub: number;
+  fp: number;
+  ftc: number;
+  evapTempC: number;
+  condTempC: number;
+  subcoolingK: number;
+  distributorDropBar: number;
+}
+
 export interface TxvSizingResult {
   capacityTr: number;
   massFlowKgH: number;
@@ -36,6 +51,7 @@ export interface TxvSizingResult {
   valveLinesCatalog: typeof DANFOSS_VALVE_LINES;
   tuaAlternative: DanfossTuaSelection | null;
   te5Alternative: DanfossTe5Selection | null;
+  breakdown: TxvSizingBreakdown;
 }
 
 /** Texto compacto para el campo Orificio / cartucho de la ficha. */
@@ -82,6 +98,13 @@ export function sizeTxv(input: TxvSizingInput, points: readonly PtPoint[]): TxvS
 
   const sh = Number.isFinite(input.superheatK) ? Math.max(0, input.superheatK) : 8;
   const sc = Number.isFinite(input.subcoolingK) ? Math.max(0, input.subcoolingK) : 3;
+  const distributorDropBar =
+    input.externalEqualization && Number.isFinite(input.distributorDropBar)
+      ? Math.max(0, input.distributorDropBar)
+      : 0;
+  const fsub = danfossSubcoolingFactor(sc);
+  const fp = danfossDistributorFactor(distributorDropBar);
+  const ftc = danfossCondensingFactor(tc);
   const deltaT = tc - te;
   const enthalpyKjKg = 145 + deltaT * 2.2 + sh * 0.4 - sc * 0.15;
   const safeDh = Math.max(120, Math.min(260, enthalpyKjKg));
@@ -194,5 +217,16 @@ export function sizeTxv(input: TxvSizingInput, points: readonly PtPoint[]): TxvS
     valveLinesCatalog: DANFOSS_VALVE_LINES,
     tuaAlternative,
     te5Alternative,
+    breakdown: {
+      capacityKw: q,
+      requiredCapacityKw: danfoss.requiredCapacityKw,
+      fsub,
+      fp,
+      ftc,
+      evapTempC: te,
+      condTempC: tc,
+      subcoolingK: sc,
+      distributorDropBar,
+    },
   };
 }

@@ -40,14 +40,14 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
         key: 'F03',
         code: 'AR03',
         label: 'Corrección sonda S1 (°C)',
-        help: 'Suma (o resta) este valor a la lectura del NTC en GPIO 34 para calibrar contra un termómetro de referencia.',
+        help: 'Suma (o resta) este valor a la lectura de S1 para calibrar contra un termómetro de referencia.',
         step: 0.1,
       },
       {
         key: 'F04',
         code: 'AR04',
         label: 'Corrección sonda S2 (°C)',
-        help: 'Igual que AR03 para la segunda sonda (GPIO 35), usada como evaporador o respaldo según AR07.',
+        help: 'Igual que AR03 para la segunda sonda S2, usada como evaporador o respaldo según AR07.',
         step: 0.1,
       },
       {
@@ -74,8 +74,8 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
       {
         key: 'F54',
         code: 'AR08',
-        label: 'Muestras promedio ADC',
-        help: 'Lecturas ADC que se promedian en cada toma (4–32). Más muestras = decimal más estable. El equipo además promedia las últimas 8 lecturas (1/s) en pantalla.',
+        label: 'Muestras promedio sonda',
+        help: 'Lecturas que se promedian en cada toma (4–32). Más muestras = decimal más estable. El PRO300 además promedia las últimas 8 lecturas (1/s) en pantalla.',
         step: 1,
       },
     ],
@@ -89,7 +89,7 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
         key: 'F05',
         code: 'AR09',
         label: 'Tipo de deshielo',
-        help: '0 = resistencia en el relé de deshielo. 1 = gas caliente (segundo relé si está cableado en firmware).',
+        help: '0 = resistencia en el relé de deshielo. 1 = gas caliente (segundo relé si está cableado).',
         step: 1,
       },
       {
@@ -299,7 +299,7 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
         key: 'F25',
         code: 'AR35',
         label: 'Habilitar entrada puerta',
-        help: '1 = usa el GPIO de puerta para lógica y alarmas. 0 = ignora la entrada.',
+        help: '1 = usa la entrada de puerta para lógica y alarmas. 0 = ignora la entrada.',
         step: 1,
       },
       {
@@ -348,14 +348,14 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
   },
   {
     id: 'manual',
-    title: 'Manual / técnico (firmware)',
-    intro: 'AR42–AR48: comandos por puerto serie en modo técnico; revisá el sketch antes de habilitar en producción.',
+    title: 'Manual / técnico',
+    intro: 'AR42–AR48: comandos por puerto serie en modo técnico; habilitá solo en taller.',
     fields: [
       {
         key: 'F31',
         code: 'AR42',
         label: 'Permitir compresor manual por Serial',
-        help: '1 = en modo técnico permite encender el compresor por comando manual del firmware.',
+        help: '1 = en modo técnico permite encender el compresor por comando manual desde la consola serie.',
         step: 1,
       },
       {
@@ -397,7 +397,7 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
         key: 'F37',
         code: 'AR48',
         label: 'Deshielo inmediato al pedir',
-        help: '1 = permite forzar deshielo en el acto si la lógica del firmware lo admite en modo técnico.',
+        help: '1 = permite forzar deshielo en el acto si la lógica del PRO300 lo admite en modo técnico.',
         step: 1,
       },
     ],

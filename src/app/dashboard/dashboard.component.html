@@ -26,6 +26,7 @@
         [combistatoCount]="combistatos.length"
         [pro400Count]="pro400s.length"
         [pr500Count]="pr500s.length"
+        [dataloggerCount]="dataloggers.length"
         [activeAlerts]="summaryAlerts"
         [accumulatedAlerts]="summaryAlarmEvents"
         [cloudSyncActive]="deviceStore.isCloudSyncActive()"
@@ -104,1055 +105,7 @@
       </section>
 
       <div class="grid-main" [class.grid-main--alerts-only]="shellRoute === 'alerts'" [class.grid-main--solo-device]="isDeviceSoloView">
-        <div class="grid-main__left" *ngIf="shellRoute === 'devices'">
-          <div
-            class="devices-sync-bar"
-            *ngIf="hasAnyEquipment"
-            [class.devices-sync-bar--stale]="lastDataRefreshStale"
-            role="status"
-          >
-            <span
-              class="devices-sync-bar__dot"
-              [class.devices-sync-bar__dot--live]="deviceStore.isCloudSyncActive()"
-              aria-hidden="true"
-            ></span>
-            <span class="devices-sync-bar__text">
-              <ng-container *ngIf="lastDataRefreshLabel; else syncNoData">
-                Última lectura:
-                <strong>{{ lastDataRefreshLabel }}</strong>
-                <span *ngIf="lastDataRefreshAgeLabel"> ({{ lastDataRefreshAgeLabel }})</span>
-              </ng-container>
-              <ng-template #syncNoData>Sin lecturas recientes en la cuenta</ng-template>
-            </span>
-            <span class="devices-sync-bar__meta">
-              Consulta app ~{{ readingsPollIntervalSec }} s
-              <ng-container *ngIf="deviceStore.isCloudSyncActive()"> · Nube activa</ng-container>
-              <ng-container *ngIf="!deviceStore.isCloudSyncActive()"> · Modo local</ng-container>
-            </span>
-          </div>
-          <div class="device-solo-banner" *ngIf="isDeviceSoloView" role="status">
-            <div class="device-solo-banner__text">
-              <span class="device-solo-banner__label">Viendo solo</span>
-              <strong class="device-solo-banner__name">{{ deviceSoloFocusLabel }}</strong>
-            </div>
-            <button type="button" class="device-solo-banner__btn" (click)="clearDeviceSoloView()">
-              Ver todos los equipos
-            </button>
-          </div>
-          <article
-            id="section-chart"
-            class="card card--chart"
-            *ngIf="showDevicesChartInView"
-            [class.card--chart-expanded]="chartExpanded"
-            [class.card--chart-style-line]="chartStylePreset === 'line'"
-            [class.card--chart-style-minimal]="chartStylePreset === 'minimal'"
-            [class.card--chart-style-technical]="chartStylePreset === 'technical'"
-            [class.card--chart-style-trend]="chartStylePreset === 'trend'"
-          >
-            <div class="card__head card__head--chart">
-              <div class="card__head-chart-text">
-                <h2 class="card__title">Temperatura en el tiempo · {{ selectedDevice?.name ?? 'Todos' }}</h2>
-                <span class="card__hint">Últimas lecturas · actualización ~{{ (environment.readingsPollIntervalMs || 5000) / 1000 }}s</span>
-              </div>
-              <button
-                type="button"
-                class="chart-expand-btn"
-                (click)="toggleChartExpanded()"
-                [attr.aria-expanded]="chartExpanded"
-                [attr.aria-label]="chartExpanded ? 'Reducir gráfico' : 'Ampliar gráfico para más detalle'"
-              >
-                <svg class="chart-expand-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <ng-container *ngIf="!chartExpanded">
-                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-                  </ng-container>
-                  <ng-container *ngIf="chartExpanded">
-                    <path d="M4 14h6v6M14 4h6v6M4 10l6-6M14 20l6-6" />
-                  </ng-container>
-                </svg>
-                <span class="chart-expand-btn__label">{{ chartExpanded ? 'Reducir' : 'Ampliar' }}</span>
-              </button>
-              <button
-                type="button"
-                class="chart-open-btn"
-                [disabled]="!selectedDeviceId && !devices.length"
-                (click)="openChartInNewTab($event)"
-                aria-label="Abrir análisis en pestaña nueva"
-              >
-                Abrir análisis
-              </button>
-            </div>
-            <div class="chart-style-bar" *ngIf="selectedDeviceId">
-              <label class="chart-style-bar__field">
-                <span class="chart-style-bar__label">Estilo del gráfico</span>
-                <select
-                  class="chart-style-bar__select"
-                  [(ngModel)]="chartStylePreset"
-                  (ngModelChange)="onChartStyleChange()"
-                  name="chart-style-preset"
-                >
-                  <option *ngFor="let o of chartStyleOptions" [ngValue]="o.value">{{ o.label }}</option>
-                </select>
-              </label>
-              <div class="chart-style-bar__dates">
-                <label class="chart-style-bar__date-field">
-                  <span class="chart-style-bar__label">PDF desde</span>
-                  <input
-                    type="date"
-                    class="chart-style-bar__date"
-                    [(ngModel)]="pdfExportFromDate"
-                    name="pdf-from"
-                    autocomplete="off"
-                  />
-                </label>
-                <label class="chart-style-bar__date-field">
-                  <span class="chart-style-bar__label">PDF hasta</span>
-                  <input
-                    type="date"
-                    class="chart-style-bar__date"
-                    [(ngModel)]="pdfExportToDate"
-                    name="pdf-to"
-                    autocomplete="off"
-                  />
-                </label>
-              </div>
-              <p class="chart-style-bar__hint">
-                Dejá ambas fechas vacías para exportar las <strong>últimas 500</strong> lecturas en memoria. Con fechas (hora local), hasta <strong>4000</strong> filas con muestreo uniforme en todo el período. En <strong>nube</strong>, el PDF trae lecturas <strong>crudas</strong> del rango (hasta 20.000), no el resumen por hora del gráfico.
-              </p>
-              <button
-                type="button"
-                class="chart-style-bar__pdf btn btn--ghost"
-                [disabled]="pdfExporting"
-                (click)="downloadTemperaturesPdf($event)"
-              >
-                {{ pdfExporting ? 'Generando…' : 'Descargar PDF' }}
-              </button>
-            </div>
-            <div class="chart-legend" *ngIf="selectedDeviceId">
-              <span class="chart-legend__item"><i class="chart-legend__swatch chart-legend__swatch--s1"></i>{{ selectedSensor1Name }}</span>
-              <span class="chart-legend__item" *ngIf="chartHasSecondSeries()"><i class="chart-legend__swatch chart-legend__swatch--s2"></i>{{ selectedSensor2Name }}</span>
-              <span class="chart-legend__item" *ngIf="chartHasCurrentSeries()"><i class="chart-legend__swatch chart-legend__swatch--power"></i>Corriente</span>
-            </div>
-            <div class="chart-panel">
-              <div class="chart-y-axis" aria-hidden="true">
-                <span>{{ chartYMaxLabel }}</span>
-                <span>{{ chartYMidLabel }}</span>
-                <span>{{ chartYMinLabel }}</span>
-              </div>
-              <div class="chart-svg-wrap" (click)="openChartInNewTab($event)">
-                <svg class="chart-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                  <defs>
-                    <linearGradient id="chartFillS1" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stop-color="#1e40af" stop-opacity="0.14" />
-                      <stop offset="100%" stop-color="#1e40af" stop-opacity="0" />
-                    </linearGradient>
-                    <clipPath id="chartPlotClip">
-                      <rect x="0" y="0" width="100" height="100" rx="0" />
-                    </clipPath>
-                  </defs>
-                  <rect class="chart-svg__bg" x="0" y="0" width="100" height="100" />
-                  <g class="chart-grid" clip-path="url(#chartPlotClip)">
-                    <line *ngFor="let gy of chartGridYStops" x1="0" [attr.y1]="gy" x2="100" [attr.y2]="gy" />
-                    <ng-container *ngIf="chartStylePreset === 'trend'">
-                      <line
-                        *ngFor="let gx of chartGridXStops"
-                        [attr.x1]="gx"
-                        y1="8"
-                        [attr.x2]="gx"
-                        y2="92"
-                        class="chart-grid-v"
-                      />
-                    </ng-container>
-                  </g>
-                  <g clip-path="url(#chartPlotClip)">
-                    <polygon
-                      *ngIf="chartShowsAreaFill()"
-                      class="chart-area chart-area--s1"
-                      [attr.points]="'0,100 ' + chartPolylinePoints() + ' 100,100'"
-                      fill="url(#chartFillS1)"
-                    />
-                    <ng-container *ngIf="chartStylePreset === 'trend'; else dashChartLines">
-                      <line
-                        *ngFor="let seg of chartTrendSegments1()"
-                        fill="none"
-                        stroke-linecap="round"
-                        vector-effect="non-scaling-stroke"
-                        [attr.x1]="seg.x1"
-                        [attr.y1]="seg.y1"
-                        [attr.x2]="seg.x2"
-                        [attr.y2]="seg.y2"
-                        [class.chart-seg--up]="seg.trend === 'up'"
-                        [class.chart-seg--down]="seg.trend === 'down'"
-                        [class.chart-seg--flat]="seg.trend === 'flat'"
-                      />
-                      <circle
-                        *ngFor="let m of chartTrendMarkers1()"
-                        class="chart-trend-dot chart-trend-dot--s1"
-                        [attr.cx]="m.cx"
-                        [attr.cy]="m.cy"
-                        r="1.1"
-                        vector-effect="non-scaling-stroke"
-                      />
-                      <line
-                        *ngFor="let seg of chartTrendSegments2()"
-                        fill="none"
-                        stroke-linecap="round"
-                        vector-effect="non-scaling-stroke"
-                        [attr.x1]="seg.x1"
-                        [attr.y1]="seg.y1"
-                        [attr.x2]="seg.x2"
-                        [attr.y2]="seg.y2"
-                        [class.chart-seg--up]="seg.trend === 'up'"
-                        [class.chart-seg--down]="seg.trend === 'down'"
-                        [class.chart-seg--flat]="seg.trend === 'flat'"
-                        class="chart-seg--s2"
-                      />
-                      <circle
-                        *ngFor="let m of chartTrendMarkers2()"
-                        class="chart-trend-dot chart-trend-dot--s2"
-                        [attr.cx]="m.cx"
-                        [attr.cy]="m.cy"
-                        r="1.1"
-                        vector-effect="non-scaling-stroke"
-                      />
-                    </ng-container>
-                    <ng-template #dashChartLines>
-                      <polyline
-                        class="chart-line chart-line--s1"
-                        fill="none"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        vector-effect="non-scaling-stroke"
-                        [attr.points]="chartPolylinePoints()"
-                      />
-                      <polyline
-                        *ngIf="chartHasSecondSeries()"
-                        class="chart-line chart-line--s2"
-                        fill="none"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        vector-effect="non-scaling-stroke"
-                        [attr.points]="chartPolylinePoints2()"
-                      />
-                    </ng-template>
-                  </g>
-                </svg>
-                <div class="chart-labels">
-                  <span *ngFor="let lb of chartDayLabels">{{ lb }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="chart-panel chart-panel--power" *ngIf="chartHasCurrentSeries()">
-              <div class="chart-y-axis chart-y-axis--power" aria-hidden="true">
-                <span>{{ currentChartYMaxLabel }}</span>
-                <span>{{ currentChartYMidLabel }}</span>
-                <span>{{ currentChartYMinLabel }}</span>
-              </div>
-              <div class="chart-svg-wrap chart-svg-wrap--power" (click)="openChartInNewTab($event)">
-                <svg class="chart-svg chart-svg--power" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                  <defs>
-                    <linearGradient id="dashChartFillPower" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stop-color="#d97706" stop-opacity="0.2" />
-                      <stop offset="100%" stop-color="#d97706" stop-opacity="0" />
-                    </linearGradient>
-                    <clipPath id="dashChartPlotClipPower">
-                      <rect x="0" y="0" width="100" height="100" rx="0" />
-                    </clipPath>
-                  </defs>
-                  <rect class="chart-svg__bg" x="0" y="0" width="100" height="100" />
-                  <g class="chart-grid" clip-path="url(#dashChartPlotClipPower)">
-                    <line *ngFor="let gy of chartGridYStops" x1="0" [attr.y1]="gy" x2="100" [attr.y2]="gy" />
-                  </g>
-                  <g clip-path="url(#dashChartPlotClipPower)">
-                    <polygon
-                      *ngIf="chartShowsAreaFill()"
-                      class="chart-area chart-area--power"
-                      [attr.points]="'0,100 ' + currentChartPolylinePoints() + ' 100,100'"
-                      fill="url(#dashChartFillPower)"
-                    />
-                    <polyline
-                      class="chart-line chart-line--power"
-                      fill="none"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      vector-effect="non-scaling-stroke"
-                      [attr.points]="currentChartPolylinePoints()"
-                    />
-                  </g>
-                </svg>
-                <div class="chart-labels chart-labels--power">
-                  <span *ngFor="let lb of chartDayLabels">{{ lb }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="chart-side">
-              <p class="chart-side__delta">{{ avgDeltaLabel }}</p>
-              <div class="chart-side__stats">
-                <span class="chart-side__stat-line">
-                  <i class="chart-side__swatch chart-side__swatch--s1"></i>{{ selectedSensor1Name }}: {{ chartCurrentLabel }}
-                </span>
-                <span class="chart-side__stat-line" *ngIf="chartHasSecondSeries()">
-                  <i class="chart-side__swatch chart-side__swatch--s2"></i>{{ selectedSensor2Name }}: {{ chartCurrentLabel2 }}
-                </span>
-                <span class="chart-side__stat-line" *ngIf="chartHasCurrentSeries()">
-                  <i class="chart-side__swatch chart-side__swatch--power"></i>Corriente: {{ chartCurrentLatestLabel }}
-                </span>
-                <span class="chart-side__range">{{ chartTempRangeLabel }}</span>
-                <span class="chart-side__range" *ngIf="chartHasCurrentSeries()">{{ chartCurrentRangeLabel }}</span>
-              </div>
-              <span class="chart-side__humidity" *ngIf="hasHumidity">{{ humidityLabel }} humedad</span>
-            </div>
-            <div class="chart-timeline" *ngIf="chartTimelineItems.length; else noChartTimeline">
-              <p class="chart-timeline__title">Historial del gráfico</p>
-              <ul class="chart-timeline__list">
-                <li class="chart-timeline__item" *ngFor="let it of chartTimelineItems">
-                  <span>{{ it.whenLabel }}</span>
-                  <strong>{{ it.tempLabel }}</strong>
-                </li>
-              </ul>
-            </div>
-            <ng-template #noChartTimeline>
-              <p class="card__empty">Sin datos de temperatura para mostrar.</p>
-            </ng-template>
-          </article>
-
-          <div id="section-devices" class="device-grid" *ngIf="showDevicePanelsInView && devicesForView.length">
-            <article
-              class="device-card"
-              *ngFor="let d of devicesForView; trackBy: trackByDeviceId"
-              [attr.id]="'fleet-card-device-' + d.id"
-              [class.device-card--selected]="d.id === selectedDeviceId"
-              (click)="selectDevice(d.id)"
-            >
-              <header class="device-card__head">
-                <div class="device-card__head-text">
-                  <h3 class="device-card__name">{{ d.name }}</h3>
-                  <span class="device-card__role-pill" *ngIf="d.accessRole === 'viewer'">Solo lectura</span>
-                  <span class="device-card__role-pill device-card__role-pill--editor" *ngIf="d.accessRole === 'editor'"
-                    >Invitado editor</span
-                  >
-                  <span class="device-card__id">ID panel: {{ d.id }}</span>
-                  <span class="device-card__module" *ngIf="d.moduleId">ID dispositivo: {{ d.moduleId }}</span>
-                </div>
-                <div class="device-card__head-actions">
-                  <span class="device-card__status" [class.device-card__status--off]="!d.online">
-                    <span class="device-card__dot"></span>
-                    {{ d.online ? 'Online' : 'Offline' }}
-                  </span>
-                  <span class="device-card__burger" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <line x1="4" y1="6" x2="20" y2="6" />
-                      <line x1="4" y1="12" x2="20" y2="12" />
-                      <line x1="4" y1="18" x2="20" y2="18" />
-                    </svg>
-                  </span>
-                </div>
-              </header>
-              <div class="device-card__head-line" aria-hidden="true"></div>
-              <div
-                class="device-card__temps"
-                [class.device-card__temps--pending]="d.temperatureC == null && d.temperature2C == null"
-              >
-                <ng-container *ngIf="d.temperatureC != null && d.temperature2C != null; else singleOrEmpty">
-                  <div class="device-card__temps-inner">
-                    <div class="device-card__sensor-col">
-                      <span class="device-card__sensor-label">{{ d.sensor1Label || 'Sensor 1' }}</span>
-                      <span
-                        class="device-card__sensor-value"
-                        [attr.aria-label]="formatTempCard(d.temperatureC)"
-                      >
-                        <span class="device-card__sensor-value-num">{{
-                          formatTempCardValueOnly(d.temperatureC)
-                        }}</span>
-                        <span
-                          *ngIf="formatTempCardValueOnly(d.temperatureC) !== '—'"
-                          class="device-card__sensor-value-unit"
-                          aria-hidden="true"
-                          >°C</span
-                        >
-                      </span>
-                      <div class="device-card__sensor-foot">
-                        <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
-                        <a
-                          class="device-card__chart-link"
-                          [routerLink]="['/chart']"
-                          [queryParams]="{ deviceId: d.id }"
-                          (click)="$event.stopPropagation()"
-                          title="Ver gráfico"
-                          aria-label="Ver gráfico de temperaturas"
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                            <path d="M3 3v18h18" />
-                            <path d="M7 16l4-4 3 3 5-6" />
-                          </svg>
-                        </a>
-                      </div>
-                    </div>
-                    <div class="device-card__sensor-col">
-                      <span class="device-card__sensor-label">{{ d.sensor2Label || 'Sensor 2' }}</span>
-                      <span
-                        class="device-card__sensor-value"
-                        [attr.aria-label]="formatTempCard(d.temperature2C)"
-                      >
-                        <span class="device-card__sensor-value-num">{{
-                          formatTempCardValueOnly(d.temperature2C)
-                        }}</span>
-                        <span
-                          *ngIf="formatTempCardValueOnly(d.temperature2C) !== '—'"
-                          class="device-card__sensor-value-unit"
-                          aria-hidden="true"
-                          >°C</span
-                        >
-                      </span>
-                      <div class="device-card__sensor-foot">
-                        <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
-                        <a
-                          class="device-card__chart-link"
-                          [routerLink]="['/chart']"
-                          [queryParams]="{ deviceId: d.id }"
-                          (click)="$event.stopPropagation()"
-                          title="Ver gráfico"
-                          aria-label="Ver gráfico de temperaturas"
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                            <path d="M3 3v18h18" />
-                            <path d="M7 16l4-4 3 3 5-6" />
-                          </svg>
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-                </ng-container>
-                <ng-template #singleOrEmpty>
-                  <ng-container *ngIf="d.temperatureC != null || d.temperature2C != null; else noTemp">
-                    <div class="device-card__temps-inner device-card__temps-inner--single">
-                      <span class="device-card__sensor-label">{{ deviceFirstSensorLabel(d) }}</span>
-                      <span
-                        class="device-card__sensor-value"
-                        [attr.aria-label]="formatTempCard(deviceFirstTempC(d))"
-                      >
-                        <span class="device-card__sensor-value-num">{{
-                          formatTempCardValueOnly(deviceFirstTempC(d))
-                        }}</span>
-                        <span
-                          *ngIf="formatTempCardValueOnly(deviceFirstTempC(d)) !== '—'"
-                          class="device-card__sensor-value-unit"
-                          aria-hidden="true"
-                          >°C</span
-                        >
-                      </span>
-                      <div class="device-card__sensor-foot">
-                        <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
-                        <a
-                          class="device-card__chart-link"
-                          [routerLink]="['/chart']"
-                          [queryParams]="{ deviceId: d.id }"
-                          (click)="$event.stopPropagation()"
-                          title="Ver gráfico"
-                          aria-label="Ver gráfico de temperaturas"
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                            <path d="M3 3v18h18" />
-                            <path d="M7 16l4-4 3 3 5-6" />
-                          </svg>
-                        </a>
-                      </div>
-                    </div>
-                  </ng-container>
-                </ng-template>
-                <ng-template #noTemp>
-                  <div class="device-card__temps-inner device-card__temps-inner--empty">
-                    <span class="device-card__sensor-value device-card__sensor-value--muted">Sin lectura</span>
-                    <span class="device-card__sensor-label device-card__sensor-label--muted">Esperando datos del dispositivo</span>
-                  </div>
-                </ng-template>
-              </div>
-              <div class="device-card__clamp" *ngIf="deviceShowClampRow(d)">
-                <div
-                  class="device-card__temps-inner device-card__temps-inner--single device-card__temps-inner--clamp"
-                >
-                  <span class="device-card__sensor-label">Pinza / corriente</span>
-                  <span
-                    class="device-card__sensor-value"
-                    [attr.aria-label]="formatDeviceClampMain(d)"
-                  >
-                    <span class="device-card__sensor-value-num">{{ formatDeviceClampAmpNum(d) }}</span>
-                    <span
-                      *ngIf="formatDeviceClampAmpNum(d) !== '—'"
-                      class="device-card__sensor-value-unit device-card__sensor-value-unit--amp"
-                      aria-hidden="true"
-                      >A</span
-                    >
-                  </span>
-                  <span class="device-card__sensor-subline" *ngIf="formatDeviceClampSub(d)">{{
-                    formatDeviceClampSub(d)
-                  }}</span>
-                  <span
-                    class="device-card__sensor-subline device-card__sensor-subline--hint"
-                    *ngIf="d.cloudSynced && formatDeviceClampAmpNum(d) === '—'"
-                  >
-                    Sin corriente/potencia en lecturas: el ESP debe enviar <code>current_a</code> y/o
-                    <code>power_w</code> en cada POST.
-                  </span>
-                  <div class="device-card__sensor-foot">
-                    <span class="device-card__sensor-time">{{ d.updatedAtLabel }}</span>
-                  </div>
-                </div>
-              </div>
-              <footer class="device-card__foot">
-                <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && d.ownerUserId">
-                  Cuenta {{ formatOwnerUserIdShort(d.ownerUserId) }}
-                </span>
-                <span class="device-card__meta">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                  {{ d.location }}
-                </span>
-                <span class="device-card__meta" *ngIf="d.temperatureC == null && d.temperature2C == null">{{ d.updatedAtLabel }}</span>
-                <span class="device-card__meta" *ngIf="d.espLocalIp">{{ d.espLocalIp }}</span>
-                <span class="device-card__meta" *ngIf="d.batteryPct != null">{{ d.batteryPct }}%</span>
-              </footer>
-              <div class="device-card__actions">
-                <button
-                  type="button"
-                  class="device-card__btn"
-                  *ngIf="deviceCanOpenEquipmentSheet(d)"
-                  title="Ficha técnica, trabajo realizado y fotos"
-                  [attr.aria-label]="'Ir a ficha del equipo ' + d.name"
-                  (click)="goToEquipmentSheet(d.id, $event)"
-                >
-                  Ficha
-                </button>
-                <button
-                  type="button"
-                  class="device-card__btn"
-                  [attr.aria-label]="'Editar ' + d.name"
-                  (click)="openEditDeviceModal(d); $event.stopPropagation()"
-                >
-                  Editar
-                </button>
-                <button
-                  type="button"
-                  class="device-card__btn device-card__btn--danger"
-                  [attr.aria-label]="'Eliminar dispositivo ' + d.name"
-                  (click)="confirmDeleteDevice(d); $event.stopPropagation()"
-                >
-                  Eliminar
-                </button>
-              </div>
-            </article>
-          </div>
-
-          <div
-            id="section-pro400-cards"
-            class="device-section"
-            *ngIf="
-              showPro400SectionInView &&
-              (shellRoute === 'devices') &&
-              environment.deviceCloudSync &&
-              deviceStore.isCloudSyncActive() &&
-              pro400sForView.length
-            "
-          >
-            <div class="device-section__head">
-              <div class="device-section__titles">
-                <h2 class="device-section__title">PRO400</h2>
-                <p class="device-section__hint">
-                  Controlador con <strong>una sonda</strong> y un relé (compresor / deshielo). En la app se edita
-                  <strong>AR01–AR26</strong> (+ AR50 hardware). Botón en cada tarjeta →
-                  <strong>Configuración</strong>.
-                </p>
-              </div>
-              <button type="button" class="btn btn--ghost btn--sm" (click)="openAddPro400Modal()">+ PRO400</button>
-            </div>
-            <div class="device-grid">
-              <article
-                class="device-card device-card--combistato"
-                *ngFor="let p of pro400sForView; trackBy: trackByPro400Id"
-                [attr.id]="'fleet-card-pro400-' + p.id"
-                [class.device-card--selected]="p.id === selectedPro400Id"
-                (click)="selectPro400(p.id)"
-              >
-                <header class="device-card__head">
-                  <div class="device-card__head-text">
-                    <h3 class="device-card__name">{{ p.name }}</h3>
-                    <span class="device-card__id">ID panel: {{ p.id }}</span>
-                    <span class="device-card__module" *ngIf="p.moduleId">ID dispositivo: {{ p.moduleId }}</span>
-                  </div>
-                  <div class="device-card__head-actions">
-                    <span class="device-card__status" [class.device-card__status--off]="!p.online">
-                      <span class="device-card__dot"></span>
-                      {{ p.online ? 'Online' : 'Offline' }}
-                    </span>
-                  </div>
-                </header>
-                <div class="device-card__head-line" aria-hidden="true"></div>
-                <div class="device-card__temps" [class.device-card__temps--pending]="p.lastTemp1C == null">
-                  <ng-container *ngIf="p.lastTemp1C != null; else pro400NoTemp">
-                    <div class="device-card__temps-inner device-card__temps-inner--single">
-                      <span class="device-card__sensor-label">Sonda</span>
-                      <span class="device-card__sensor-value" [attr.aria-label]="formatTempCard(p.lastTemp1C)">
-                        <span class="device-card__sensor-value-num">{{ formatTempCardValueOnly(p.lastTemp1C) }}</span>
-                        <span
-                          *ngIf="formatTempCardValueOnly(p.lastTemp1C) !== '—'"
-                          class="device-card__sensor-value-unit"
-                          aria-hidden="true"
-                          >°C</span
-                        >
-                      </span>
-                      <div class="device-card__sensor-foot device-card__sensor-foot--relays">
-                        <span
-                          class="device-card__relay-pill device-card__relay-pill--static"
-                          [class.device-card__relay-pill--on]="p.lastCompOn === true || p.lastDefrostOn === true"
-                          title="Relé (compresor o deshielo)"
-                          >REL</span
-                        >
-                        <span class="device-card__sensor-time">{{ p.lastSeenLabel || p.updatedAtLabel }}</span>
-                        <a
-                          class="device-card__chart-link"
-                          [routerLink]="['/chart']"
-                          [queryParams]="{ deviceId: p.id }"
-                          (click)="$event.stopPropagation()"
-                          title="Ver gráfico"
-                          aria-label="Ver gráfico"
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                            <path d="M3 3v18h18" />
-                            <path d="M7 16l4-4 3 3 5-6" />
-                          </svg>
-                        </a>
-                      </div>
-                    </div>
-                    <div class="device-card__defrost-strip" *ngIf="p.lastPhase" [attr.data-phase]="p.lastPhase">
-                      <span class="device-card__defrost-pill">{{ combistatoPhaseLabel(p.lastPhase) }}</span>
-                      <div class="device-card__defrost-info">
-                        <ng-container *ngIf="pro400PhaseHasTimer(p)">
-                          <span><strong>Transcurrido</strong> {{ formatMinSec(p.lastPhaseElapsedS) }}</span>
-                          <span *ngIf="pro400PhaseRemainingS(p) != null"
-                            ><strong>Faltan</strong> {{ formatMinSec(pro400PhaseRemainingS(p)) }}</span
-                          >
-                        </ng-container>
-                      </div>
-                    </div>
-                  </ng-container>
-                  <ng-template #pro400NoTemp>
-                    <div class="device-card__temps-inner device-card__temps-inner--empty">
-                      <span class="device-card__sensor-label device-card__sensor-label--muted">
-                        Esperando primera lectura del PRO400
-                      </span>
-                      <span class="device-card__sensor-subline device-card__sensor-subline--hint">
-                        Último envío: {{ p.lastSeenLabel || p.updatedAtLabel }}
-                      </span>
-                    </div>
-                  </ng-template>
-                </div>
-                <footer class="device-card__foot">
-                  <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && p.ownerUserId">
-                    Cuenta {{ formatOwnerUserIdShort(p.ownerUserId) }}
-                  </span>
-                  <span class="device-card__meta">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                    {{ p.location }}
-                  </span>
-                </footer>
-                <div class="device-card__actions">
-                  <button
-                    type="button"
-                    class="device-card__btn"
-                    [attr.aria-label]="'Parámetros AR01 a AR26 de ' + p.name"
-                    (click)="goPro400Settings(p, $event)"
-                  >
-                    AR01–AR26
-                  </button>
-                  <a
-                    class="device-card__btn device-card__btn--link"
-                    [routerLink]="['/chart']"
-                    [queryParams]="{ deviceId: p.id }"
-                    (click)="$event.stopPropagation()"
-                    title="Gráfico histórico"
-                    >Gráfico</a
-                  >
-                  <button
-                    type="button"
-                    class="device-card__btn"
-                    [attr.aria-label]="'Editar nombre de ' + p.name"
-                    (click)="openEditPro400Modal(p); $event.stopPropagation()"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    type="button"
-                    class="device-card__btn device-card__btn--danger"
-                    [attr.aria-label]="'Eliminar PRO400 ' + p.name"
-                    (click)="confirmDeletePro400(p); $event.stopPropagation()"
-                  >
-                    Eliminar
-                  </button>
-                </div>
-              </article>
-            </div>
-          </div>
-
-          <div
-            id="section-combistatos-cards"
-            class="device-section"
-            *ngIf="
-              showCombistatoSectionInView &&
-              (shellRoute === 'devices') &&
-              environment.deviceCloudSync &&
-              deviceStore.isCloudSyncActive()
-            "
-          >
-            <div class="device-section__head">
-              <div class="device-section__titles">
-                <h2 class="device-section__title">PRO300</h2>
-                <p class="device-section__hint">
-                  Controlador de cámara con dos sondas, compresor / ventilador / deshielo. En la app se edita por
-                  <strong>AR01–AR48</strong>. Botón en cada tarjeta →
-                  <strong>Configuración</strong>.
-                </p>
-              </div>
-            </div>
-            <div class="device-grid device-grid--combistatos" *ngIf="combistatosForView.length">
-              <article
-                class="device-card device-card--combistato"
-                *ngFor="let c of combistatosForView; trackBy: trackByCombistatoId"
-                [attr.id]="'fleet-card-combistato-' + c.id"
-                [class.device-card--selected]="c.id === selectedCombistatoId"
-                (click)="selectCombistato(c.id)"
-              >
-                <header class="device-card__head">
-                  <div class="device-card__head-text">
-                    <h3 class="device-card__name">{{ c.name }}</h3>
-                    <span class="device-card__role-pill device-card__role-pill--editor">PRO300</span>
-                    <span class="device-card__id">ID: {{ c.id }}</span>
-                    <span class="device-card__module" *ngIf="c.moduleId">ID módulo: {{ c.moduleId }}</span>
-                  </div>
-                  <div class="device-card__head-actions">
-                    <span class="device-card__status" [class.device-card__status--off]="!c.online">
-                      <span class="device-card__dot"></span>
-                      {{ c.online ? 'Online' : 'Sin conexión' }}
-                    </span>
-                  </div>
-                </header>
-                <div class="device-card__head-line" aria-hidden="true"></div>
-                <div
-                  class="device-card__temps"
-                  [class.device-card__temps--pending]="c.lastTemp1C == null && c.lastTemp2C == null"
-                >
-                  <ng-container *ngIf="c.lastTemp1C != null || c.lastTemp2C != null; else combistatoNoTemp">
-                    <div class="device-card__temps-inner">
-                      <div class="device-card__sensor-col">
-                        <span class="device-card__sensor-label">Sonda 1 · ambiente</span>
-                        <span
-                          class="device-card__sensor-value"
-                          [attr.aria-label]="formatTempCard(c.lastTemp1C ?? null)"
-                        >
-                          <span class="device-card__sensor-value-num">{{
-                            formatTempCardValueOnly(c.lastTemp1C ?? null)
-                          }}</span>
-                          <span
-                            *ngIf="formatTempCardValueOnly(c.lastTemp1C ?? null) !== '—'"
-                            class="device-card__sensor-value-unit"
-                            aria-hidden="true"
-                            >°C</span
-                          >
-                        </span>
-                        <div class="device-card__sensor-foot">
-                          <span class="device-card__sensor-time">{{ c.lastSeenLabel }}</span>
-                        </div>
-                      </div>
-                      <div class="device-card__sensor-col">
-                        <span class="device-card__sensor-label">Sonda 2 · evaporador</span>
-                        <span
-                          class="device-card__sensor-value"
-                          [attr.aria-label]="formatTempCard(c.lastTemp2C ?? null)"
-                        >
-                          <span class="device-card__sensor-value-num">{{
-                            formatTempCardValueOnly(c.lastTemp2C ?? null)
-                          }}</span>
-                          <span
-                            *ngIf="formatTempCardValueOnly(c.lastTemp2C ?? null) !== '—'"
-                            class="device-card__sensor-value-unit"
-                            aria-hidden="true"
-                            >°C</span
-                          >
-                        </span>
-                        <div class="device-card__sensor-foot device-card__sensor-foot--relays">
-                          <button
-                            type="button"
-                            class="device-card__relay-pill"
-                            [class.device-card__relay-pill--on]="c.lastCompOn === true"
-                            [class.device-card__relay-pill--forced]="(c.lastCompForcedRemainingS ?? 0) > 0"
-                            [attr.title]="combistatoRelayTooltip('comp', c)"
-                            (click)="onCombistatoRelayClick('comp', c)"
-                          >
-                            COMP<span
-                              class="device-card__relay-pill-timer"
-                              *ngIf="(c.lastCompForcedRemainingS ?? 0) > 0"
-                              >· {{ formatMinSec(c.lastCompForcedRemainingS) }}</span
-                            >
-                          </button>
-                          <button
-                            type="button"
-                            class="device-card__relay-pill"
-                            [class.device-card__relay-pill--on]="c.lastFanOn === true"
-                            [class.device-card__relay-pill--forced]="(c.lastFanForcedRemainingS ?? 0) > 0"
-                            [attr.title]="combistatoRelayTooltip('fan', c)"
-                            (click)="onCombistatoRelayClick('fan', c)"
-                          >
-                            VENT<span
-                              class="device-card__relay-pill-timer"
-                              *ngIf="(c.lastFanForcedRemainingS ?? 0) > 0"
-                              >· {{ formatMinSec(c.lastFanForcedRemainingS) }}</span
-                            >
-                          </button>
-                          <button
-                            type="button"
-                            class="device-card__relay-pill"
-                            [class.device-card__relay-pill--on]="c.lastDefrostOn === true"
-                            [attr.title]="combistatoRelayTooltip('def', c)"
-                            (click)="onCombistatoRelayClick('def', c)"
-                          >
-                            DEF</button
-                          >
-                        </div>
-                      </div>
-                    </div>
-                    <div
-                      class="device-card__defrost-strip"
-                      *ngIf="c.lastPhase"
-                      [attr.data-phase]="c.lastPhase"
-                    >
-                      <span class="device-card__defrost-pill">
-                        {{ combistatoPhaseLabel(c.lastPhase) }}
-                      </span>
-                      <div class="device-card__defrost-info">
-                        <ng-container *ngIf="combistatoPhaseHasTimer(c)">
-                          <span><strong>Transcurrido</strong> {{ formatMinSec(c.lastPhaseElapsedS) }}</span>
-                          <span *ngIf="combistatoPhaseRemainingS(c) != null"
-                            ><strong>Faltan</strong> {{ formatMinSec(combistatoPhaseRemainingS(c)) }}</span
-                          >
-                        </ng-container>
-                        <span *ngIf="c.lastPhase === 'defrost' && c.defrostTargetC != null"
-                          ><strong>Corte ≤</strong> {{ c.defrostTargetC | number: '1.0-1' }}°C</span
-                        >
-                      </div>
-                    </div>
-                  </ng-container>
-                  <ng-template #combistatoNoTemp>
-                    <div class="device-card__temps-inner device-card__temps-inner--empty">
-                      <span class="device-card__sensor-label device-card__sensor-label--muted">
-                        Esperando primera lectura del PRO300
-                      </span>
-                      <span class="device-card__sensor-subline device-card__sensor-subline--hint">
-                        Último envío: {{ c.lastSeenLabel }}
-                      </span>
-                    </div>
-                  </ng-template>
-                </div>
-                <footer class="device-card__foot">
-                  <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && c.ownerUserId">
-                    Cuenta {{ formatOwnerUserIdShort(c.ownerUserId) }}
-                  </span>
-                  <span class="device-card__meta">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                    {{ c.location }}
-                  </span>
-                </footer>
-                <div class="device-card__actions">
-                  <button
-                    type="button"
-                    class="device-card__btn"
-                    [attr.aria-label]="'Parámetros AR01 a AR48 de ' + c.name"
-                    (click)="goCombistatoSettings(c, $event)"
-                  >
-                    AR01–AR48
-                  </button>
-                  <a
-                    class="device-card__btn device-card__btn--link"
-                    [routerLink]="['/chart-combistato']"
-                    [queryParams]="{ combistatoId: c.id }"
-                    (click)="$event.stopPropagation()"
-                    title="Gráfico histórico"
-                    >Gráfico</a
-                  >
-                  <button
-                    type="button"
-                    class="device-card__btn"
-                    [attr.aria-label]="'Editar nombre de ' + c.name"
-                    (click)="openEditCombistatoModal(c); $event.stopPropagation()"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    type="button"
-                    class="device-card__btn device-card__btn--danger"
-                    [attr.aria-label]="'Eliminar PRO300 ' + c.name"
-                    (click)="confirmDeleteCombistato(c); $event.stopPropagation()"
-                  >
-                    Eliminar
-                  </button>
-                </div>
-              </article>
-            </div>
-            <p class="card__hint card__hint--tight" *ngIf="!combistatos.length">
-              No hay PRO300. Agregá equipos desde <strong>Inicio</strong> (PR500, PRO400 y PRO300 en el alta).
-            </p>
-          </div>
-
-          <div
-            id="section-pr500-cards"
-            class="device-section"
-            *ngIf="
-              showPr500SectionInView &&
-              (shellRoute === 'devices') &&
-              environment.deviceCloudSync &&
-              deviceStore.isCloudSyncActive()
-            "
-          >
-            <div class="device-section__head">
-              <div class="device-section__titles">
-                <h2 class="device-section__title">PR500</h2>
-                <p class="device-section__hint">
-                  <strong>Central frigorífica</strong>: presión de proceso, setpoints y etapas. En la app
-                  <strong>AR01–AR34</strong>; botón en cada tarjeta →
-                  <strong>Configuración</strong>. La telemetría
-                  llega por la misma función de ingesta que paneles y PRO300, con <code>pressure_bar</code> en el POST.
-                </p>
-              </div>
-            </div>
-            <div class="device-grid device-grid--combistatos" *ngIf="pr500sForView.length">
-              <article
-                class="device-card device-card--combistato"
-                *ngFor="let p of pr500sForView; trackBy: trackByPr500Id"
-                [attr.id]="'fleet-card-pr500-' + p.id"
-                [class.device-card--selected]="p.id === selectedPr500Id"
-                (click)="selectPr500(p.id)"
-              >
-                <header class="device-card__head">
-                  <div class="device-card__head-text">
-                    <h3 class="device-card__name">{{ p.name }}</h3>
-                    <span class="device-card__role-pill device-card__role-pill--editor">PR500</span>
-                    <span class="device-card__id">ID: {{ p.id }}</span>
-                    <span class="device-card__module" *ngIf="p.moduleId">ID módulo: {{ p.moduleId }}</span>
-                  </div>
-                  <div class="device-card__head-actions">
-                    <span class="device-card__status" [class.device-card__status--off]="!p.online">
-                      <span class="device-card__dot"></span>
-                      {{ p.online ? 'Online' : 'Sin conexión' }}
-                    </span>
-                  </div>
-                </header>
-                <div class="device-card__head-line" aria-hidden="true"></div>
-                <div class="device-card__temps">
-                  <ng-container *ngIf="p.lastPressureBar != null; else pr500NoPressure">
-                    <div class="device-card__temps-inner device-card__temps-inner--single">
-                      <span class="device-card__sensor-label"
-                        >Presión de proceso ({{ pr500PressureDisplayUnit(p) }})</span
-                      >
-                      <span
-                        class="device-card__sensor-value"
-                        [attr.aria-label]="
-                          (pr500PressureDisplayValue(p) | number : (p.pressureDisplayPsi ? '1.1-2' : '1.2-2')) +
-                          ' ' +
-                          pr500PressureDisplayUnit(p)
-                        "
-                      >
-                        <span class="device-card__sensor-value-num">{{
-                          pr500PressureDisplayValue(p) | number : (p.pressureDisplayPsi ? '1.1-2' : '1.2-2')
-                        }}</span>
-                        <span class="device-card__sensor-value-unit" aria-hidden="true">{{
-                          pr500PressureDisplayUnit(p)
-                        }}</span>
-                      </span>
-                      <span class="device-card__sensor-subline" *ngIf="pr500CompressorLine(p) as compLine">{{
-                        compLine
-                      }}</span>
-                      <span class="device-card__sensor-subline device-card__sensor-subline--muted" *ngIf="pr500RuntimeHoursLine(p) as hm">{{
-                        hm
-                      }}</span>
-                      <span class="device-card__sensor-subline device-card__sensor-subline--muted" *ngIf="pr500TempSuperheatLine(p) as ts">{{
-                        ts
-                      }}</span>
-                      <div class="device-card__sensor-foot">
-                        <span class="device-card__sensor-time">Último envío: {{ p.lastSeenLabel }}</span>
-                        <a
-                          class="device-card__chart-link"
-                          [routerLink]="['/chart-pr500']"
-                          [queryParams]="{ pr500Id: p.id }"
-                          (click)="$event.stopPropagation()"
-                          title="Gráfico histórico"
-                          aria-label="Gráfico histórico PR500 (presión de proceso)"
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                            <path d="M3 3v18h18" />
-                            <path d="M7 16l4-4 3 3 5-6" />
-                          </svg>
-                        </a>
-                      </div>
-                    </div>
-                  </ng-container>
-                  <ng-template #pr500NoPressure>
-                    <div class="device-card__temps-inner device-card__temps-inner--empty">
-                      <span class="device-card__sensor-value device-card__sensor-value--muted">Sin lectura de presión</span>
-                      <span class="device-card__sensor-label device-card__sensor-label--muted"
-                        >Último contacto: {{ p.lastSeenLabel }}</span
-                      >
-                    </div>
-                  </ng-template>
-                </div>
-                <footer class="device-card__foot">
-                  <span class="device-card__meta device-card__meta--owner" *ngIf="isAdminView && p.ownerUserId">
-                    Cuenta {{ formatOwnerUserIdShort(p.ownerUserId) }}
-                  </span>
-                  <span class="device-card__meta">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                    {{ p.location }}
-                  </span>
-                </footer>
-                <div class="device-card__actions">
-                  <button
-                    type="button"
-                    class="device-card__btn"
-                    [attr.aria-label]="'Parámetros AR01 a AR34 de ' + p.name"
-                    (click)="goPr500Settings(p, $event)"
-                  >
-                    AR01–AR34
-                  </button>
-                  <a
-                    class="device-card__btn device-card__btn--link"
-                    [routerLink]="['/chart-pr500']"
-                    [queryParams]="{ pr500Id: p.id }"
-                    (click)="$event.stopPropagation()"
-                    title="Gráfico histórico de presión"
-                    >Gráfico</a
-                  >
-                  <button
-                    type="button"
-                    class="device-card__btn"
-                    [attr.aria-label]="'Editar nombre de ' + p.name"
-                    (click)="openEditPr500Modal(p); $event.stopPropagation()"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    type="button"
-                    class="device-card__btn device-card__btn--danger"
-                    [attr.aria-label]="'Eliminar PR500 ' + p.name"
-                    (click)="confirmDeletePr500(p); $event.stopPropagation()"
-                  >
-                    Eliminar
-                  </button>
-                </div>
-              </article>
-            </div>
-            <p class="card__hint card__hint--tight" *ngIf="!pr500s.length">
-              No hay controladores PR500. Agregá uno desde <strong>Inicio → Agregar equipo → PR500</strong>.
-            </p>
-          </div>
-
-        </div>
+        <app-devices-page *ngIf="shellRoute === 'devices'"></app-devices-page>
 
         <aside class="grid-main__right" *ngIf="!isDeviceSoloView">
           <article
@@ -1239,7 +192,7 @@
             </ul>
           </article>
 
-          <article class="card card--telemetry-sidebar">
+          <article class="card card--telemetry-sidebar" *ngIf="showDevicePanelsInView && selectedDeviceId">
             <h2 class="card__title card__title--sm">Lectura actual (multi-sensor)</h2>
             <div class="telemetry" *ngIf="selectedTelemetry as t; else noTelemetry">
               <div class="telemetry__dual" *ngIf="hasDualTelemetry(t)">
@@ -1309,7 +262,7 @@
 
           <article
             class="card card--summary-24h"
-            *ngIf="(shellRoute === 'devices' || shellRoute === 'alerts') && selectedDeviceId"
+            *ngIf="showDevicePanelsInView && (shellRoute === 'devices' || shellRoute === 'alerts') && selectedDeviceId"
           >
             <h2 class="card__title card__title--sm">Resumen últimas 24 h</h2>
             <p class="card__hint card__hint--tight">
@@ -1378,7 +331,7 @@
 
           <button type="button" class="settings-help-link" (click)="scrollToSection('ayuda')">
             <span class="settings-help-link__title">Manuales y parámetros AR</span>
-            <span class="settings-help-link__desc">PR500, PRO300 y PRO400 — guías y PDF para planta</span>
+            <span class="settings-help-link__desc">PR500, PRO300, PRO400 y Datalogger — guías y PDF para planta</span>
             <span class="settings-help-link__cta">Abrir ayuda →</span>
           </button>
 
@@ -1451,9 +404,10 @@
               Tocá un <strong>panel de medición</strong> para umbrales, nombres de sensores, corrección, compartir, etc.
               Tocá un <strong>PRO400</strong> para <strong>AR01–AR26</strong> (1 sonda), un <strong>PRO300</strong> para
               <strong>AR01–AR48</strong> (2 sondas), o un <strong>PR500</strong> para <strong>AR01–AR34</strong>
-              (presión / etapas). No hace falta que esté online para guardar.
+                  (presión / etapas), o un <strong>Datalogger</strong> para <strong>AR12–AR48</strong>
+              (pines y telemetría). No hace falta que esté online para guardar.
             </p>
-            <p class="card__empty" *ngIf="!devices.length && !pro400s.length && !combistatos.length && !pr500s.length">
+            <p class="card__empty" *ngIf="!devices.length && !pro400s.length && !combistatos.length && !pr500s.length && !dataloggers.length">
               No hay equipos cargados. Andá a <strong>Inicio</strong> y usá <strong>Agregar equipo</strong>.
             </p>
             <ng-container *ngIf="devices.length">
@@ -1544,6 +498,28 @@
                 </button>
               </div>
             </ng-container>
+            <ng-container *ngIf="dataloggers.length && environment.deviceCloudSync && deviceStore.isCloudSyncActive()">
+              <h3 class="settings-hub__group-title">Datalogger</h3>
+              <div class="settings-device-grid">
+                <button
+                  type="button"
+                  class="settings-device-tile settings-device-tile--combistato"
+                  *ngFor="let d of dataloggers; trackBy: trackByDataloggerId"
+                  [class.settings-device-tile--active]="settingsConfigKind === 'datalogger' && d.id === selectedDataloggerId"
+                  (click)="openSettingsDataloggerParams(d.id)"
+                >
+                  <span class="settings-device-tile__kind">Datalogger</span>
+                  <span class="settings-device-tile__name">{{ d.name }}</span>
+                  <span
+                    class="settings-device-tile__pill"
+                    [class.settings-device-tile__pill--off]="!d.online"
+                    >{{ d.online ? 'Online' : 'Sin conexión' }}</span
+                  >
+                  <span class="settings-device-tile__meta">AR12–AR48 · 6T + 3I + 2P</span>
+                  <span class="settings-device-tile__meta" *ngIf="d.moduleId">Módulo: {{ d.moduleId }}</span>
+                </button>
+              </div>
+            </ng-container>
           </article>
           <div class="settings-page__params-head" *ngIf="settingsConfigKind !== 'none'">
             <button type="button" class="btn btn--ghost btn--sm" (click)="backToSettingsHub()">
@@ -1564,38 +540,44 @@
               <div>
                 <h1 id="equipment-page-title" class="equipment-page__title">Ficha del equipo</h1>
                 <p class="card__hint card__hint--tight equipment-page__hint">
-                  Planilla técnica: instalación, trabajo realizado, fotos y mantenimiento (nube + UUID de panel).
+                  Planilla técnica: instalación, trabajo realizado, fotos y mantenimiento (nube, cualquier equipo).
                 </p>
               </div>
-              <div class="equipment-page__hero-badge" *ngIf="selectedDevice as sd">
-                <span class="equipment-page__hero-badge-dot" [class.equipment-page__hero-badge-dot--off]="!sd.online"></span>
-                <span class="equipment-page__hero-badge-text">{{ sd.online ? 'Online' : 'Sin conexión' }}</span>
+              <div class="equipment-page__hero-badge" *ngIf="selectedEquipmentFichaTarget as eqt">
+                <span
+                  class="equipment-page__hero-badge-dot"
+                  [class.equipment-page__hero-badge-dot--off]="!selectedEquipmentFichaOnline()"
+                ></span>
+                <span class="equipment-page__hero-badge-text">{{
+                  selectedEquipmentFichaOnline() ? 'Online' : 'Sin conexión'
+                }}</span>
               </div>
             </div>
             <label class="notify-panel__field equipment-page__hero-field">
               <span>Equipo a documentar</span>
               <select
                 class="notify-panel__select"
-                [ngModel]="selectedDeviceId"
-                (ngModelChange)="selectDevice($event)"
-                name="equipment-device-pick"
+                [ngModel]="equipmentFichaTargetKey"
+                (ngModelChange)="selectEquipmentFichaTarget($event)"
+                name="equipment-target-pick"
               >
-                <option *ngFor="let d of devices" [ngValue]="d.id">
-                  {{ d.name }} — {{ d.location || 'Sin ubicación' }}
+                <option *ngFor="let t of equipmentFichaTargets" [ngValue]="t.kind + ':' + t.id">
+                  {{ equipmentFichaTargetLabel(t) }}
                 </option>
               </select>
             </label>
-            <p class="equipment-page__hero-meta" *ngIf="selectedDevice as sd2">
-              <span class="equipment-page__hero-meta-name">{{ sd2.name }}</span>
-              <span class="equipment-page__hero-meta-loc" *ngIf="sd2.location">{{ sd2.location }}</span>
-              <span class="equipment-page__hero-meta-id" *ngIf="sd2.moduleId">ID módulo: {{ sd2.moduleId }}</span>
+            <p class="equipment-page__hero-meta" *ngIf="selectedEquipmentFichaTarget as eq2">
+              <span class="equipment-page__hero-meta-name">{{ eq2.name }}</span>
+              <span class="equipment-page__hero-meta-loc" *ngIf="eq2.location">{{ eq2.location }}</span>
+              <span class="equipment-page__hero-meta-id" *ngIf="eq2.moduleId">ID módulo: {{ eq2.moduleId }}</span>
+              <span class="equipment-page__hero-meta-id">Tipo: {{ eq2.typeLabel }}</span>
             </p>
           </article>
 
           <div *ngIf="!equipmentSheetAvailable()" class="card card--ficha-section">
             <p class="card__empty">
-              La ficha en la nube solo está disponible para dispositivos con ID de panel UUID y con sincronización
-              activa. Agregá un equipo desde <strong>Inicio → Agregar equipo</strong> con cuenta en Supabase.
+              La ficha en la nube requiere sincronización activa y al menos un equipo con UUID en tu cuenta.
+              Agregá equipos desde <strong>Inicio → Agregar equipo</strong> con cuenta en Supabase.
             </p>
           </div>
 
@@ -2577,7 +1559,7 @@
                     <button
                       type="button"
                       class="btn btn--ghost equipment-page__chart-open-btn"
-                      [disabled]="!selectedDeviceId"
+                      [disabled]="!equipmentFichaChartAvailable()"
                       (click)="openEquipmentChartInAnalysis()"
                     >
                       Ver gráfico (Análisis)
@@ -3178,6 +2160,27 @@
               ></app-pr500-settings>
             </article>
           </ng-container>
+
+          <ng-container *ngIf="settingsConfigKind === 'datalogger'">
+            <article
+              id="section-settings-datalogger"
+              class="card"
+              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
+            >
+              <div class="card__title-row">
+                <h2 class="card__title card__title--sm">Datalogger — parámetros AR12–AR48</h2>
+                <button type="button" class="btn btn--ghost btn--sm" (click)="openAddDataloggerModal()">+ Datalogger</button>
+              </div>
+              <p class="card__hint card__hint--tight">
+                Pines de sondas, consumos y presiones. Para cambiar de equipo, usá <strong>Volver a la lista</strong>.
+              </p>
+              <app-datalogger-settings
+                *ngIf="selectedDataloggerId"
+                [dataloggerId]="selectedDataloggerId"
+                [canEdit]="true"
+              ></app-datalogger-settings>
+            </article>
+          </ng-container>
       </ng-template>
     </div>
 
@@ -3452,7 +2455,7 @@
       <button type="button" class="modal__close" (click)="closePr500Modal()" aria-label="Cerrar">×</button>
     </div>
     <p class="modal__intro" *ngIf="pr500ModalMode === 'add'">
-      Nuevo controlador PR500 (central frigorífica). Conectá el firmware con la misma URL de ingesta que los paneles:
+      Nuevo controlador PR500 (central frigorífica). Conectá el PR500 con la misma URL de ingesta que los paneles:
       <code>moduleId</code>, <code>deviceToken</code> y en cada envío <code>pressure_bar</code> (y estados
       <code>r1_on</code>…<code>r4_alarm</code>).
     </p>
@@ -3475,7 +2478,7 @@
       <label class="modal__field">
         <span class="modal__label">ID módulo (PR500)</span>
         <input type="text" class="modal__input" formControlName="moduleId" autocomplete="off" />
-        <span class="modal__hint">Opcional al crear. Vacío = se genera automático para el firmware.</span>
+        <span class="modal__hint">Opcional al crear. Vacío = se genera automático para el equipo.</span>
       </label>
       <div class="modal__field" *ngIf="pr500ModalMode === 'edit' && editingPr500?.deviceToken">
         <span class="modal__label">Código API (6 dígitos)</span>
@@ -3506,7 +2509,7 @@
       <button type="button" class="modal__close" (click)="closeProvisioningModal()" aria-label="Cerrar">×</button>
     </div>
     <p class="modal__intro">
-      Copiá estos valores en el firmware (POST JSON a la función de ingesta). No hace falta enviar temperatura: basta con
+      Copiá estos valores en el PR500 (POST JSON a la función de ingesta). No hace falta enviar temperatura: basta con
       <code>pressure_bar</code> numérico y los booleanos de estado.
     </p>
     <div class="provision-rows">
@@ -3524,6 +2527,101 @@
         <span class="provision-row__label">api_key</span>
         <code class="provision-row__val">{{ pr5cred.deviceToken }}</code>
         <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(pr5cred.deviceToken)">Copiar</button>
+      </div>
+    </div>
+    <p class="modal__hint">Guardá el código de 6 dígitos: no se puede recuperar desde otro navegador.</p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--primary" (click)="closeProvisioningModal()">Listo</button>
+    </div>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="dataloggerModalMode"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="datalogger-modal-title"
+  (click)="closeDataloggerModal()"
+>
+  <div class="modal" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="datalogger-modal-title" class="modal__title">Datalogger</h2>
+      <button type="button" class="modal__close" (click)="closeDataloggerModal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro" *ngIf="dataloggerModalMode === 'add'">
+      Nuevo Datalogger multi-canal: 6 temperaturas, 3 consumos y 2 presiones. Tras guardar, configurá
+      <code>moduleId</code>, <code>deviceToken</code> y WiFi en el Datalogger. Los canales de sensor son fijos; en la app configurás
+      <strong>AR12–AR48</strong>.
+    </p>
+    <p class="modal__intro" *ngIf="dataloggerModalMode === 'edit'">Editar nombre, ubicación o ID módulo del Datalogger.</p>
+    <form class="modal__form" [formGroup]="dataloggerForm" (ngSubmit)="submitDataloggerForm()">
+      <label class="modal__field">
+        <span class="modal__label">Nombre <span class="modal__req">*</span></span>
+        <input type="text" class="modal__input" formControlName="name" autocomplete="off" />
+        <span class="modal__err" *ngIf="dataloggerForm.controls.name.touched && dataloggerForm.controls.name.hasError('required')"
+          >Nombre requerido.</span
+        >
+        <span class="modal__err" *ngIf="dataloggerForm.controls.name.touched && dataloggerForm.controls.name.hasError('minlength')"
+          >Mínimo 2 caracteres.</span
+        >
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">Ubicación</span>
+        <input type="text" class="modal__input" formControlName="location" autocomplete="off" />
+      </label>
+      <label class="modal__field">
+        <span class="modal__label">ID módulo (Datalogger)</span>
+        <input type="text" class="modal__input" formControlName="moduleId" autocomplete="off" />
+        <span class="modal__hint">Opcional al crear. Vacío = se genera automático para el equipo.</span>
+      </label>
+      <div class="modal__field" *ngIf="dataloggerModalMode === 'edit' && editingDatalogger?.deviceToken">
+        <span class="modal__label">Código API (6 dígitos)</span>
+        <input type="text" class="modal__input" readonly [value]="editingDatalogger?.deviceToken" />
+        <span class="modal__hint">Token conocido solo en este navegador.</span>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" (click)="closeDataloggerModal()">Cancelar</button>
+        <button type="submit" class="btn btn--primary" [disabled]="addDataloggerSubmitting">
+          {{ dataloggerModalMode === 'add' ? 'Crear' : 'Guardar' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div
+  class="modal-backdrop"
+  *ngIf="dataloggerProvisioningOpen && dataloggerProvisioningCredentials as dlgcred"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="datalogger-provision-title"
+  (click)="closeProvisioningModal()"
+>
+  <div class="modal modal--wide" (click)="$event.stopPropagation()">
+    <div class="modal__head">
+      <h2 id="datalogger-provision-title" class="modal__title">Configurar el Datalogger</h2>
+      <button type="button" class="modal__close" (click)="closeProvisioningModal()" aria-label="Cerrar">×</button>
+    </div>
+    <p class="modal__intro">
+      Copiá estos valores en el Datalogger. En cada envío mandá temperaturas, corrientes/potencias y presiones según los
+      sensores activos (<strong>AR24–AR34</strong>). Correcciones en <strong>AR35–AR48</strong>.
+    </p>
+    <div class="provision-rows">
+      <div class="provision-row">
+        <span class="provision-row__label">api_url</span>
+        <code class="provision-row__val">{{ dlgcred.ingestUrl }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(dlgcred.ingestUrl)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">module_id</span>
+        <code class="provision-row__val">{{ dlgcred.moduleId }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(dlgcred.moduleId)">Copiar</button>
+      </div>
+      <div class="provision-row">
+        <span class="provision-row__label">api_key</span>
+        <code class="provision-row__val">{{ dlgcred.deviceToken }}</code>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="copyProvisioning(dlgcred.deviceToken)">Copiar</button>
       </div>
     </div>
     <p class="modal__hint">Guardá el código de 6 dígitos: no se puede recuperar desde otro navegador.</p>

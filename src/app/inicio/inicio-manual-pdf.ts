@@ -19,7 +19,7 @@ interface TocEntry {
   page: number;
 }
 
-/** Normaliza unicode que a veces rompe el ancho de línea en jsPDF. */
+/** Normaliza unicode que a veces rompe el glifo o el salto de linea en jsPDF (Helvetica). */
 function pdfSafe(text: string): string {
   return text
     .replace(/\u2026/g, '...')
@@ -27,8 +27,16 @@ function pdfSafe(text: string): string {
     .replace(/\u2013/g, '-')
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
-    .replace(/\u2192/g, '->')
-    .replace(/\u00A0/g, ' ');
+    .replace(/\u2192/g, ' -> ')
+    .replace(/[~≈]/g, ' aprox. ')
+    .replace(/\u03A9/g, ' ohm')
+    .replace(/\u2212/g, '-')
+    .replace(/\u00D7/g, ' x ')
+    .replace(/\u00BC/g, '1/4')
+    .replace(/\u00BA/g, ' deg')
+    .replace(/\u00A0/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 function lastTableY(doc: JsPDFDoc): number {
@@ -244,12 +252,14 @@ class ManualPdfRenderer {
   }
 
   private drawItemCard(item: InicioManualItem): void {
-    this.ensureTableFits(28);
+    this.ensureTableFits(32);
 
-    const body: string[][] = [[item.detail]];
-    const hasExample = Boolean(item.example?.trim());
+    const detail = pdfSafe(item.detail.trim());
+    const body: string[][] = [[detail]];
+    const exampleText = item.example?.trim();
+    const hasExample = Boolean(exampleText);
     if (hasExample) {
-      body.push([`Ejemplo: ${item.example!.trim()}`]);
+      body.push([pdfSafe(`Ejemplo: ${exampleText}`)]);
     }
 
     this.autoTable(this.doc, {
@@ -257,7 +267,7 @@ class ManualPdfRenderer {
       margin: this.tableMargin(),
       theme: 'grid',
       head: [[pdfSafe(item.term)]],
-      body: body.map((row) => row.map(pdfSafe)),
+      body,
       headStyles: {
         fillColor: COLORS.primary,
         textColor: COLORS.white,
@@ -301,6 +311,13 @@ export async function downloadInicioManualPdf(manual: InicioDeviceManual): Promi
   renderer.render();
 
   const stamp = new Date().toISOString().slice(0, 10);
-  const slug = manual.id === 'pr500' ? 'PR500' : manual.id === 'pro400' ? 'PRO400' : 'PRO300';
+  const slug =
+    manual.id === 'pr500'
+      ? 'PR500'
+      : manual.id === 'pro400'
+        ? 'PRO400'
+        : manual.id === 'datalogger'
+          ? 'Datalogger'
+          : 'PRO300';
   doc.save(`manual-${slug}-SG-${stamp}.pdf`);
 }

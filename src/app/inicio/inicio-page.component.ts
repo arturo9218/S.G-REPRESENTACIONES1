@@ -1,7 +1,7 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import type { DashboardAlert } from '../core/models/dashboard.models';
 
-export type InicioEquipmentKind = 'pr500' | 'pro400' | 'pro300';
+export type InicioEquipmentKind = 'pr500' | 'pro400' | 'pro300' | 'datalogger';
 
 export interface InicioGalleryItem {
   title: string;
@@ -14,7 +14,7 @@ export interface InicioFleetRow {
   id: string;
   /** ID real del equipo en la base (UUID). */
   entityId: string;
-  kind: 'sensor' | 'pr500' | 'combistato' | 'pro400';
+  kind: 'sensor' | 'pr500' | 'combistato' | 'pro400' | 'datalogger';
   name: string;
   detail: string;
   online: boolean;
@@ -33,6 +33,7 @@ export class InicioPageComponent {
   @Input() combistatoCount = 0;
   @Input() pro400Count = 0;
   @Input() pr500Count = 0;
+  @Input() dataloggerCount = 0;
   @Input() activeAlerts = 0;
   @Input() accumulatedAlerts = 0;
   @Input() cloudSyncActive = false;
@@ -75,6 +76,12 @@ export class InicioPageComponent {
       desc: 'Controlador de cámara: 2 sondas, compresor / ventilador / deshielo y parámetros AR01–AR48.',
       badge: '2 sondas + control',
     },
+    {
+      kind: 'datalogger',
+      title: 'Datalogger',
+      desc: '6 temperaturas, 3 consumos y 2 presiones. Parámetros AR12–AR48 y gráfico histórico.',
+      badge: 'Multi-canal',
+    },
   ];
 
   fleetKindLabel(kind: InicioFleetRow['kind']): string {
@@ -85,6 +92,8 @@ export class InicioPageComponent {
         return 'PRO300';
       case 'pro400':
         return 'PRO400';
+      case 'datalogger':
+        return 'Datalogger';
       default:
         return 'Panel';
     }
@@ -113,7 +122,7 @@ export class InicioPageComponent {
   ];
 
   get totalEquipos(): number {
-    return this.deviceCount + this.pro400Count + this.combistatoCount + this.pr500Count;
+    return this.deviceCount + this.pro400Count + this.combistatoCount + this.pr500Count + this.dataloggerCount;
   }
 
   get attentionTop(): DashboardAlert[] {

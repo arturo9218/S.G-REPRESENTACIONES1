@@ -18,6 +18,27 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-  <app-root></app-root>
+  <app-root>
+    <div
+      class="app-boot-splash"
+      style="
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        min-height: 100dvh;
+        background: #0b1220;
+        color: #94a3b8;
+        font-family: Inter, system-ui, sans-serif;
+        text-align: center;
+        padding: 2rem;
+        box-sizing: border-box;
+      "
+    >
+      <p style="margin: 0 0 0.5rem; font-size: 1.05rem; color: #e8eef7">Cargando AR Monitoreo…</p>
+      <p style="margin: 0; font-size: 0.85rem; max-width: 22rem">Si la pantalla queda negra más de unos segundos, probá recargar con Ctrl+Shift+R.</p>
+    </div>
+  </app-root>
 </body>
 </html>

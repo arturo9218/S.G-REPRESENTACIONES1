@@ -334,7 +334,7 @@ export class Pr500SettingsComponent implements OnChanges {
     try {
       await navigator.clipboard.writeText(txt);
       this.feedback =
-        'JSON copiado al portapapeles. Pegalo en `pr500.json` del ESP32 (LittleFS) o guardalo como archivo.';
+        'JSON copiado al portapapeles. Guardalo como archivo o usalo en la configuración del PR500.';
     } catch {
       this.jsonExport = txt;
       this.feedback =

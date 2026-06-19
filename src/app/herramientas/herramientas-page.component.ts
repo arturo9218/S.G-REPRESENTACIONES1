@@ -7,12 +7,25 @@ import {
   DeviceEquipmentLogRow,
   EquipmentSheetService,
 } from '../core/equipment-sheet.service';
+import {
+  buildEquipmentFichaTargets,
+  equipmentFichaTargetKey,
+  equipmentFichaTargetOptionLabel,
+  parseEquipmentFichaTargetKey,
+  type EquipmentFichaKind,
+  type EquipmentFichaRef,
+  type EquipmentFichaTarget,
+} from '../core/equipment-ficha-target';
 import type {
   DashboardCombistato,
+  DashboardDatalogger,
   DashboardDevice,
   DashboardPr500,
+  DashboardPro400,
 } from '../core/models/dashboard.models';
 import { CombistatoStoreService } from '../core/combistato-store.service';
+import { DataloggerStoreService } from '../core/datalogger-store.service';
+import { Pro400StoreService } from '../core/pro400-store.service';
 import { Pr500StoreService } from '../core/pr500-store.service';
 import {
   formatCombistatoImportSummary,
@@ -97,7 +110,11 @@ export interface PtTableRow {
   styleUrls: ['./herramientas-page.component.scss'],
 })
 export class HerramientasPageComponent implements OnInit, OnDestroy {
-  @Output() fichaSaved = new EventEmitter<{ deviceId: string; fichaId: string }>();
+  @Output() fichaSaved = new EventEmitter<{
+    deviceId: string;
+    fichaId: string;
+    equipKind?: EquipmentFichaKind;
+  }>();
 
   readonly atmBar = ATM_BAR;
   readonly refrigerantCount = REFRIGERANTS.length;
@@ -183,24 +200,30 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
   visitLogs: DeviceEquipmentLogRow[] = [];
   visitLogLoading = false;
 
-  /** Guardar en ficha (paneles PRO400 con ficha en nube). */
-  fichaDeviceId = '';
+  /** Guardar en ficha (cualquier equipo en nube con UUID). */
+  fichaTargetKey = '';
   fichaId = '';
   fichaRows: DeviceEquipmentFichaRow[] = [];
   fichaLoading = false;
   fichaSaving = false;
   cloudDevices: DashboardDevice[] = [];
+  pro400List: DashboardPro400[] = [];
+  dataloggerList: DashboardDatalogger[] = [];
 
   private subDev?: Subscription;
   private subRoute?: Subscription;
   private subPr500?: Subscription;
   private subCombistato?: Subscription;
+  private subPro400?: Subscription;
+  private subDatalogger?: Subscription;
 
   constructor(
     private readonly deviceStore: DeviceStoreService,
     private readonly equipmentSheet: EquipmentSheetService,
     private readonly pr500Store: Pr500StoreService,
     private readonly combistatoStore: CombistatoStoreService,
+    private readonly pro400Store: Pro400StoreService,
+    private readonly dataloggerStore: DataloggerStoreService,
     private readonly toast: ToastService,
     private readonly route: ActivatedRoute
   ) {}
@@ -221,17 +244,27 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
     });
     this.subDev = this.deviceStore.devices$.subscribe((list) => {
       this.cloudDevices = list.filter((d) => d.cloudSynced && this.isUuid(d.id));
-      if (this.fichaDeviceId && !this.cloudDevices.some((d) => d.id === this.fichaDeviceId)) {
-        this.fichaDeviceId = '';
-        this.fichaId = '';
-        this.fichaRows = [];
-      }
+      this.syncFichaTargetIfMissing();
       if (this.pro400PickId && !this.pro400CloudDevices.some((d) => d.id === this.pro400PickId)) {
         this.pro400PickId = '';
       }
     });
+    this.subPro400 = this.pro400Store.pro400s$.subscribe((list) => {
+      this.pro400List = list.filter((p) => this.isUuid(p.id));
+      this.syncFichaTargetIfMissing();
+    });
+    this.subDatalogger = this.dataloggerStore.dataloggers$.subscribe((list) => {
+      this.dataloggerList = list.filter((d) => this.isUuid(d.id));
+      this.syncFichaTargetIfMissing();
+    });
     this.subRoute = this.route.queryParamMap.subscribe((params) => {
-      void this.applyRouteContext(params.get('deviceId'), params.get('fichaId'), params.get('tab'));
+      void this.applyRouteContext(
+        params.get('deviceId'),
+        params.get('equipKind') as EquipmentFichaKind | null,
+        params.get('equipId'),
+        params.get('fichaId'),
+        params.get('tab')
+      );
     });
   }
 
@@ -240,10 +273,46 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
     this.subRoute?.unsubscribe();
     this.subPr500?.unsubscribe();
     this.subCombistato?.unsubscribe();
+    this.subPro400?.unsubscribe();
+    this.subDatalogger?.unsubscribe();
   }
 
   get fichaEnabled(): boolean {
-    return environment.deviceCloudSync === true && this.cloudDevices.length > 0;
+    return environment.deviceCloudSync === true && this.equipmentFichaTargets.length > 0;
+  }
+
+  get equipmentFichaTargets(): EquipmentFichaTarget[] {
+    return buildEquipmentFichaTargets({
+      devices: this.cloudDevices,
+      pro400s: this.pro400List,
+      combistatos: this.combistatoList,
+      pr500s: this.pr500List,
+      dataloggers: this.dataloggerList,
+      cloudSync: environment.deviceCloudSync === true,
+      isUuid: (id) => this.isUuid(id),
+    });
+  }
+
+  get selectedFichaRef(): EquipmentFichaRef | null {
+    const ref = parseEquipmentFichaTargetKey(this.fichaTargetKey);
+    if (!ref) return null;
+    return this.equipmentFichaTargets.some((t) => t.kind === ref.kind && t.id === ref.entityId)
+      ? ref
+      : null;
+  }
+
+  fichaTargetLabel(t: EquipmentFichaTarget): string {
+    return equipmentFichaTargetOptionLabel(t);
+  }
+
+  private syncFichaTargetIfMissing(): void {
+    if (this.fichaTargetKey && this.selectedFichaRef) return;
+    if (this.fichaTargetKey && !this.selectedFichaRef) {
+      this.fichaTargetKey = '';
+      this.fichaId = '';
+      this.fichaRows = [];
+      this.visitLogs = [];
+    }
   }
 
   get refrigerantGroups() {
@@ -594,9 +663,10 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
 
   async loadVisitLogs(): Promise<void> {
     this.visitLogs = [];
-    if (!this.fichaDeviceId || !this.fichaId) return;
+    const ref = this.selectedFichaRef;
+    if (!ref || !this.fichaId) return;
     this.visitLogLoading = true;
-    const { rows, error } = await this.equipmentSheet.listLog(this.fichaDeviceId, this.fichaId);
+    const { rows, error } = await this.equipmentSheet.listLog(ref, this.fichaId);
     this.visitLogLoading = false;
     if (error) {
       this.toast.error(`No se pudo cargar el historial: ${error}`);
@@ -606,8 +676,9 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
   }
 
   async saveFieldVisit(): Promise<void> {
-    if (!this.fichaDeviceId || !this.fichaId) {
-      this.toast.error('Elegí panel y ficha de equipo.');
+    const ref = this.selectedFichaRef;
+    if (!ref || !this.fichaId) {
+      this.toast.error('Elegí equipo y ficha.');
       return;
     }
     const note = this.buildVisitNote();
@@ -619,12 +690,7 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
       ? new Date(this.visitAtDraft).toISOString()
       : new Date().toISOString();
 
-    const { error: logErr } = await this.equipmentSheet.insertLog(
-      this.fichaDeviceId,
-      this.fichaId,
-      occurred,
-      note
-    );
+    const { error: logErr } = await this.equipmentSheet.insertLog(ref, this.fichaId, occurred, note);
     if (logErr) {
       this.toast.error(`No se pudo guardar la visita: ${logErr}`);
       return;
@@ -642,15 +708,20 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
       if (Number.isFinite(sh)) patch.superheatC = Math.round(sh * 10) / 10;
       if (Number.isFinite(sc)) patch.subcoolingC = Math.round(sc * 10) / 10;
       if (Object.keys(patch).length > 0) {
-        await this.equipmentSheet.upsertFicha({ ...ficha, ...patch, deviceId: this.fichaDeviceId });
+        await this.equipmentSheet.upsertFicha({
+          ...ficha,
+          ...patch,
+          deviceId: ref.entityId,
+          equipmentKind: ref.kind,
+        });
       }
     }
 
     this.toast.success('Visita registrada en la ficha.');
     this.visitNoteDraft = '';
-    this.fichaSaved.emit({ deviceId: this.fichaDeviceId, fichaId: this.fichaId });
+    this.fichaSaved.emit({ deviceId: ref.entityId, fichaId: this.fichaId, equipKind: ref.kind });
     await this.loadVisitLogs();
-    await this.onFichaDeviceChange();
+    await this.onFichaTargetChange();
     if (this.fichaRows.some((f) => f.id === this.fichaId)) {
       /* keep */
     } else if (this.fichaRows.length) {
@@ -695,13 +766,14 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  async onFichaDeviceChange(): Promise<void> {
+  async onFichaTargetChange(): Promise<void> {
     this.fichaId = '';
     this.fichaRows = [];
     this.visitLogs = [];
-    if (!this.fichaDeviceId) return;
+    const ref = this.selectedFichaRef;
+    if (!ref) return;
     this.fichaLoading = true;
-    const { rows, error } = await this.equipmentSheet.listFichas(this.fichaDeviceId);
+    const { rows, error } = await this.equipmentSheet.listFichas(ref);
     this.fichaLoading = false;
     if (error) {
       this.toast.error(`No se pudieron cargar fichas: ${error}`);
@@ -715,8 +787,9 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
   }
 
   async saveToFicha(mode: 'sh' | 'txv' | 'tua' | 'te5'): Promise<void> {
-    if (!this.fichaDeviceId || !this.fichaId) {
-      this.toast.error('Elegí panel y ficha de equipo.');
+    const equipRef = this.selectedFichaRef;
+    if (!equipRef || !this.fichaId) {
+      this.toast.error('Elegí equipo y ficha.');
       return;
     }
     const ficha = this.fichaRows.find((f) => f.id === this.fichaId);
@@ -799,7 +872,8 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
     const { error } = await this.equipmentSheet.upsertFicha({
       ...ficha,
       ...patch,
-      deviceId: this.fichaDeviceId,
+      deviceId: equipRef.entityId,
+      equipmentKind: equipRef.kind,
     });
     this.fichaSaving = false;
 
@@ -808,8 +882,12 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.toast.success('Datos guardados en la ficha del equipo.');
-    this.fichaSaved.emit({ deviceId: this.fichaDeviceId, fichaId: this.fichaId });
-    await this.onFichaDeviceChange();
+    this.fichaSaved.emit({
+      deviceId: equipRef.entityId,
+      fichaId: this.fichaId,
+      equipKind: equipRef.kind,
+    });
+    await this.onFichaTargetChange();
     if (this.fichaRows.some((f) => f.id === this.fichaId)) {
       /* keep selection */
     } else if (this.fichaRows.length) {
@@ -840,6 +918,8 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
 
   private async applyRouteContext(
     deviceId: string | null,
+    equipKind: EquipmentFichaKind | null,
+    equipId: string | null,
     fichaId: string | null,
     tab: string | null
   ): Promise<void> {
@@ -853,10 +933,17 @@ export class HerramientasPageComponent implements OnInit, OnDestroy {
     ) {
       this.activeTab = tab;
     }
-    if (!deviceId || !this.isUuid(deviceId)) return;
 
-    this.fichaDeviceId = deviceId;
-    await this.onFichaDeviceChange();
+    let key: string | null = null;
+    if (equipKind && equipId && this.isUuid(equipId)) {
+      key = equipmentFichaTargetKey({ kind: equipKind, id: equipId });
+    } else if (deviceId && this.isUuid(deviceId)) {
+      key = equipmentFichaTargetKey({ kind: 'device', id: deviceId });
+    }
+    if (!key) return;
+
+    this.fichaTargetKey = key;
+    await this.onFichaTargetChange();
 
     if (fichaId && this.fichaRows.some((f) => f.id === fichaId)) {
       this.fichaId = fichaId;

@@ -11,6 +11,11 @@ import {
 } from '../core/combistato-command.service';
 import { Pr500StoreService } from '../core/pr500-store.service';
 import { Pro400StoreService } from '../core/pro400-store.service';
+import { DataloggerStoreService } from '../core/datalogger-store.service';
+import {
+  DATALOGGER_SENSOR_SLOTS,
+  type DataloggerSensorSlotId,
+} from '../datalogger/datalogger-params.defaults';
 import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
 import {
   ActivityItem,
@@ -22,6 +27,7 @@ import {
   DashboardDevice,
   DashboardPro400,
   DashboardPr500,
+  DashboardDatalogger,
   DeviceAlarmEvent,
   HistoryListItem,
   TemperatureReading,
@@ -42,6 +48,17 @@ import {
   EquipmentSheetService,
   UserBrandingRow,
 } from '../core/equipment-sheet.service';
+import {
+  buildEquipmentFichaTargets,
+  equipmentFichaRefFromTarget,
+  equipmentFichaTargetKey,
+  equipmentFichaTargetOptionLabel,
+  findEquipmentFichaTarget,
+  parseEquipmentFichaTargetKey,
+  type EquipmentFichaKind,
+  type EquipmentFichaRef,
+  type EquipmentFichaTarget,
+} from '../core/equipment-ficha-target';
 
 /** Estadísticas de las lecturas del equipo seleccionado en la ventana móvil de 24 h (datos ya cargados en la app). */
 export interface SelectedDevice24hStats {
@@ -51,6 +68,15 @@ export interface SelectedDevice24hStats {
   t1avg: number;
   t2: { min: number; max: number; avg: number } | null;
   current: { min: number; max: number; avg: number } | null;
+}
+
+export interface DataloggerCardSensor {
+  key: string;
+  label: string;
+  valueText: string;
+  unit: string;
+  subline: string | null;
+  hasValue: boolean;
 }
 
 @Component({
@@ -137,6 +163,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private subCombistatos: Subscription | null = null;
   private subPr500: Subscription | null = null;
   private subPro400: Subscription | null = null;
+  private subDatalogger: Subscription | null = null;
   /** Vista admin: todos los equipos; permisos reales vienen de Supabase (admin_emails + is_app_admin). */
   isAdminView = false;
   /** Lista de emails admin (solo visible si isAdminView; tabla public.admin_emails). */
@@ -182,11 +209,24 @@ export class DashboardComponent implements OnInit, OnDestroy {
   pro400ProvisioningOpen = false;
   pro400ProvisioningCredentials: { moduleId: string; deviceToken: string; ingestUrl: string } | null =
     null;
+  dataloggerModalMode: 'add' | 'edit' | null = null;
+  editingDataloggerId: string | null = null;
+  addDataloggerSubmitting = false;
+  dataloggers: DashboardDatalogger[] = [];
+  selectedDataloggerId: string | null = null;
+  dataloggerProvisioningOpen = false;
+  dataloggerProvisioningCredentials: { moduleId: string; deviceToken: string; ingestUrl: string } | null =
+    null;
+  readonly dataloggerForm = this.fb.group({
+    name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(80)]],
+    location: ['', [Validators.maxLength(120)]],
+    moduleId: ['', [Validators.maxLength(64)]],
+  });
   /**
    * En `/configuracion`: primero se elige equipo en la tarjeta unificada;
    * recién después se muestran parámetros de panel o de combistato.
    */
-  settingsConfigKind: 'none' | 'device' | 'combistato' | 'pr500' | 'pro400' = 'none';
+  settingsConfigKind: 'none' | 'device' | 'combistato' | 'pr500' | 'pro400' | 'datalogger' = 'none';
 
   /** Vista compacta vs ampliada del gráfico de temperaturas */
   chartExpanded = false;
@@ -200,24 +240,22 @@ export class DashboardComponent implements OnInit, OnDestroy {
     { value: 'technical', label: 'Técnico (rejilla)' },
     { value: 'trend', label: 'Tendencia (rejilla + color por subida/bajada)' },
   ];
-  pdfExporting = false;
   /** Tope de filas en la tabla del PDF; si hay más lecturas en el rango, muestreo uniforme en todo el período. */
   private readonly pdfTableMaxRows = 4000;
-  /** Rango para PDF (`yyyy-MM-dd`, vacío = sin límite en ese extremo). */
-  pdfExportFromDate = '';
-  pdfExportToDate = '';
   /**
    * Vista según la URL: panel principal, dispositivos, alertas o configuración.
    * Sidebar y barra móvil reflejan este valor (sincronizado en `syncShellRoute`).
    */
   shellRoute: ShellRoute = 'inicio';
   /** Desde Inicio: mostrar solo la tarjeta del equipo elegido en Dispositivos. */
-  deviceSoloFocus: { kind: 'sensor' | 'pr500' | 'combistato' | 'pro400'; entityId: string } | null =
+  deviceSoloFocus: { kind: 'sensor' | 'pr500' | 'combistato' | 'pro400' | 'datalogger'; entityId: string } | null =
     null;
   /** Preset al alta: PRO400 (1 sonda), PRO300 (2 sondas) o panel genérico. */
   deviceAddPreset: 'pro400' | 'pro300' | 'generic' | null = null;
+  /** Equipo seleccionado en Ficha del equipo (kind:uuid). */
+  equipmentFichaTargetKey: string | null = null;
 
-  /** Ficha técnica / trabajo realizado (solo nube + UUID). */
+  /** Ficha técnica / trabajo realizado (nube). */
   equipmentLoading = false;
   equipmentSaving = false;
   equipmentFeedback = '';
@@ -420,6 +458,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     readonly combistatoStore: CombistatoStoreService,
     readonly pr500Store: Pr500StoreService,
     readonly pro400Store: Pro400StoreService,
+    readonly dataloggerStore: DataloggerStoreService,
     private readonly webPush: WebPushService,
     private readonly equipmentSheet: EquipmentSheetService,
     private readonly combistatoCommand: CombistatoCommandService,
@@ -461,8 +500,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.combistatoStore.combistatos$,
       this.pr500Store.pr500s$,
       this.pro400Store.pro400s$,
+      this.dataloggerStore.dataloggers$,
       this.route.queryParamMap,
-    ]).subscribe(([list, combList, prList, p4List, params]) => {
+    ]).subscribe(([list, combList, prList, p4List, dlgList, params]) => {
       if (this.skipQueryParamDeviceSync) {
         return;
       }
@@ -471,6 +511,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const cid = params.get('combistatoId');
       const pid = params.get('pr500Id');
       const p4id = params.get('pro400Id');
+      const dlgid = params.get('dataloggerId');
       const panelList = list.filter((d) => d.equipmentKind !== 'pro400');
 
       if (path === '/configuracion') {
@@ -483,6 +524,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
           this.settingsConfigKind = 'pro400';
           if (this.selectedPro400Id !== p4id) {
             this.selectPro400(p4id);
+          }
+        } else if (dlgid && dlgList.some((d) => d.id === dlgid)) {
+          this.settingsConfigKind = 'datalogger';
+          if (this.selectedDataloggerId !== dlgid) {
+            this.selectDatalogger(dlgid);
           }
         } else if (did && panelList.some((d) => d.id === did)) {
           this.settingsConfigKind = 'device';
@@ -512,11 +558,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
             this.selectedPr500Id !== pid ||
             this.selectedDeviceId ||
             this.selectedCombistatoId ||
-            this.selectedPro400Id
+            this.selectedPro400Id ||
+            this.selectedDataloggerId
           ) {
             this.selectDevice(null, false);
             this.selectCombistato(null);
             this.selectPro400(null);
+            this.selectDatalogger(null);
             this.selectPr500(pid);
           }
           return;
@@ -529,11 +577,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
             this.selectedCombistatoId !== cid ||
             this.selectedDeviceId ||
             this.selectedPr500Id ||
-            this.selectedPro400Id
+            this.selectedPro400Id ||
+            this.selectedDataloggerId
           ) {
             this.selectDevice(null, false);
             this.selectPr500(null);
             this.selectPro400(null);
+            this.selectDatalogger(null);
             this.selectCombistato(cid);
           }
           return;
@@ -546,12 +596,33 @@ export class DashboardComponent implements OnInit, OnDestroy {
             this.selectedPro400Id !== p4id ||
             this.selectedDeviceId ||
             this.selectedPr500Id ||
-            this.selectedCombistatoId
+            this.selectedCombistatoId ||
+            this.selectedDataloggerId
           ) {
             this.selectDevice(null, false);
             this.selectPr500(null);
             this.selectCombistato(null);
+            this.selectDatalogger(null);
             this.selectPro400(p4id);
+          }
+          return;
+        }
+        if (dlgid && dlgList.some((d) => d.id === dlgid)) {
+          if (solo) {
+            this.deviceSoloFocus = { kind: 'datalogger', entityId: dlgid };
+          }
+          if (
+            this.selectedDataloggerId !== dlgid ||
+            this.selectedDeviceId ||
+            this.selectedPr500Id ||
+            this.selectedCombistatoId ||
+            this.selectedPro400Id
+          ) {
+            this.selectDevice(null, false);
+            this.selectPr500(null);
+            this.selectCombistato(null);
+            this.selectPro400(null);
+            this.selectDatalogger(dlgid);
           }
           return;
         }
@@ -563,23 +634,48 @@ export class DashboardComponent implements OnInit, OnDestroy {
             this.selectedDeviceId !== did ||
             this.selectedPr500Id ||
             this.selectedCombistatoId ||
-            this.selectedPro400Id
+            this.selectedPro400Id ||
+            this.selectedDataloggerId
           ) {
             this.selectPr500(null);
             this.selectCombistato(null);
             this.selectPro400(null);
+            this.selectDatalogger(null);
             this.selectDevice(did, false);
           }
           return;
         }
       }
 
+      if (path === '/ficha-equipo') {
+        const equipKind = params.get('equipKind') as EquipmentFichaKind | null;
+        const equipId = params.get('equipId');
+        if (equipKind && equipId) {
+          const key = equipmentFichaTargetKey({ kind: equipKind, id: equipId });
+          if (this.equipmentFichaTargetKey !== key) {
+            this.selectEquipmentFichaTarget(key, false);
+          }
+          return;
+        }
+        if (did) {
+          const key = equipmentFichaTargetKey({ kind: 'device', id: did });
+          if (this.equipmentFichaTargetKey !== key) {
+            this.selectEquipmentFichaTarget(key, false);
+          }
+          return;
+        }
+        if (!this.equipmentFichaTargetKey && this.equipmentFichaTargets.length) {
+          this.selectEquipmentFichaTarget(equipmentFichaTargetKey(this.equipmentFichaTargets[0]), false);
+        }
+        return;
+      }
+
       if (did && panelList.some((d) => d.id === did)) {
         if (this.selectedDeviceId !== did) {
           this.selectDevice(did, false);
         }
-      } else if (!this.selectedDeviceId && !pid && !cid && !p4id && panelList.length > 0) {
-        const hubSinDevice = path === '/configuracion' && !did && !p4id;
+      } else if (!this.selectedDeviceId && !pid && !cid && !p4id && !dlgid && panelList.length > 0) {
+        const hubSinDevice = path === '/configuracion' && !did && !p4id && !dlgid;
         if (!hubSinDevice) {
           this.selectDevice(panelList[0].id, false);
         }
@@ -622,6 +718,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.selectedPro400Id = null;
       }
     });
+    this.subDatalogger = this.dataloggerStore.dataloggers$.subscribe((list) => {
+      this.dataloggers = list;
+      if (this.selectedDataloggerId && !list.some((d) => d.id === this.selectedDataloggerId)) {
+        this.selectedDataloggerId = null;
+      }
+    });
   }
 
   ngOnDestroy(): void {
@@ -648,6 +750,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subCombistatos?.unsubscribe();
     this.subPr500?.unsubscribe();
     this.subPro400?.unsubscribe();
+    this.subDatalogger?.unsubscribe();
     this.routerSub?.unsubscribe();
     this.chatUnreadSub?.unsubscribe();
     this.routeQuerySub?.unsubscribe();
@@ -783,7 +886,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.devices.length > 0 ||
       this.pro400s.length > 0 ||
       this.combistatos.length > 0 ||
-      this.pr500s.length > 0
+      this.pr500s.length > 0 ||
+      this.dataloggers.length > 0
     );
   }
 
@@ -822,7 +926,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.hasDevices ||
       (this.environment.deviceCloudSync === true &&
         this.deviceStore.isCloudSyncActive() &&
-        (this.pro400s.length > 0 || this.combistatos.length > 0 || this.pr500s.length > 0))
+        (this.pro400s.length > 0 || this.combistatos.length > 0 || this.pr500s.length > 0 || this.dataloggers.length > 0))
     );
   }
 
@@ -884,6 +988,25 @@ export class DashboardComponent implements OnInit, OnDestroy {
         hasAlert: deviceHasAlert(c.id, c.name) || !c.online,
       });
     }
+    for (const d of this.dataloggers) {
+      const telem = this.dataloggerTelemetryLine(d);
+      const enabledCount = d.enabledSensorSlots?.length ?? 0;
+      const detailParts = [
+        'Datalogger',
+        enabledCount ? `${enabledCount} sensor${enabledCount === 1 ? '' : 'es'} activo${enabledCount === 1 ? '' : 's'}` : 'sin sensores (AR24–AR34)',
+        telem || (enabledCount ? 'Sin lectura aún' : ''),
+        d.lastSeenLabel || d.updatedAtLabel,
+      ].filter(Boolean);
+      rows.push({
+        id: `dlg-${d.id}`,
+        entityId: d.id,
+        kind: 'datalogger',
+        name: d.name,
+        detail: detailParts.join(' · '),
+        online: d.online,
+        hasAlert: !d.online,
+      });
+    }
     const score = (r: InicioFleetRow) => (r.hasAlert ? 0 : r.online ? 2 : 1);
     let sorted = rows.sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name, 'es'));
     const q = this.searchQuery.trim().toLowerCase();
@@ -934,6 +1057,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     for (const r of this.readings) bump(r.at);
     for (const c of this.combistatos) bump(c.lastSeenAt);
     for (const p of this.pr500s) bump(p.lastSeenAt);
+    for (const d of this.dataloggers) bump(d.lastSeenAt);
     return max;
   }
 
@@ -953,14 +1077,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.shellRoute === 'devices' && this.deviceSoloFocus != null;
   }
 
+  /** Gráfico legacy de paneles genéricos (multi-sensor + pinza): retirado con PRO400. */
   get showDevicesChartInView(): boolean {
-    if (!this.isDeviceSoloView) return true;
-    return this.deviceSoloFocus!.kind === 'sensor';
+    return false;
   }
 
+  /** Tarjetas de paneles genéricos pre-PRO400: retiradas de la vista Dispositivos. */
   get showDevicePanelsInView(): boolean {
-    if (!this.isDeviceSoloView) return true;
-    return this.deviceSoloFocus!.kind === 'sensor';
+    return false;
   }
 
   get showCombistatoSectionInView(): boolean {
@@ -978,6 +1102,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.deviceSoloFocus!.kind === 'pr500';
   }
 
+  get showDataloggerSectionInView(): boolean {
+    if (!this.isDeviceSoloView) return true;
+    return this.deviceSoloFocus!.kind === 'datalogger';
+  }
+
   get deviceSoloFocusLabel(): string {
     const f = this.deviceSoloFocus;
     if (!f) return '';
@@ -989,6 +1118,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (f.kind === 'pro400') {
       return this.pro400s.find((p) => p.id === f.entityId)?.name ?? 'PRO400';
+    }
+    if (f.kind === 'datalogger') {
+      return this.dataloggers.find((d) => d.id === f.entityId)?.name ?? 'Datalogger';
     }
     return this.devices.find((d) => d.id === f.entityId)?.name ?? 'Panel';
   }
@@ -1035,6 +1167,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!this.searchQuery.trim()) return this.pr500s;
     return this.pr500s.filter((p) =>
       this.matchesEquipmentSearch(p.name, p.location, p.moduleId, p.id)
+    );
+  }
+
+  get dataloggersForView(): DashboardDatalogger[] {
+    const f = this.deviceSoloFocus;
+    if (f?.kind === 'datalogger') {
+      return this.dataloggers.filter((d) => d.id === f.entityId);
+    }
+    if (this.isDeviceSoloView) return [];
+    if (!this.searchQuery.trim()) return this.dataloggers;
+    return this.dataloggers.filter((d) =>
+      this.matchesEquipmentSearch(d.name, d.location, d.moduleId, d.id)
     );
   }
 
@@ -1581,153 +1725,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
-  async downloadTemperaturesPdf(event?: Event): Promise<void> {
-    event?.stopPropagation();
-    event?.preventDefault();
-    const deviceId = this.selectedDeviceId;
-    if (!deviceId) {
-      alert('Seleccioná un dispositivo para exportar lecturas.');
-      return;
-    }
-    const fromMs = this.pdfDayStartMs(this.pdfExportFromDate);
-    const toMs = this.pdfDayEndMs(this.pdfExportToDate);
-    if (fromMs != null && toMs != null && fromMs > toMs) {
-      alert('La fecha “Desde” no puede ser posterior a “Hasta”.');
-      return;
-    }
-    const usePdfRange =
-      this.pdfExportFromDate.trim() !== '' || this.pdfExportToDate.trim() !== '';
-    const useRemotePdf =
-      usePdfRange &&
-      this.deviceStore.isCloudSyncActive() &&
-      this.deviceStore.isCloudDeviceId(deviceId);
-
-    this.pdfExporting = true;
-    let rows: TemperatureReading[] = [];
-    let pdfNoteLine = '';
-    try {
-      if (useRemotePdf) {
-        const bounds = this.pdfExportRangeBounds();
-        if (!bounds) {
-          alert('Revisá las fechas del PDF.');
-          return;
-        }
-        const fetched = await this.deviceStore.fetchRawReadingsForPdfExport(
-          deviceId,
-          bounds.from.toISOString(),
-          bounds.to.toISOString()
-        );
-        if (fetched.error) {
-          alert(fetched.error);
-          return;
-        }
-        rows = [...fetched.rows].sort(
-          (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
-        );
-        if (fetched.truncated) {
-          pdfNoteLine =
-            'En el rango hay más de 20.000 lecturas; el PDF incluye las primeras 20.000.';
-        }
-        const rawLen = rows.length;
-        rows = this.evenSamplePdfRows(rows, this.pdfTableMaxRows);
-        if (rawLen > this.pdfTableMaxRows) {
-          pdfNoteLine =
-            (pdfNoteLine ? pdfNoteLine + ' ' : '') +
-            `Tabla: muestreo uniforme (${this.pdfTableMaxRows} de ${rawLen} lecturas en el período).`;
-        }
-      } else {
-        rows = this.readingsForPdfExport();
-      }
-
-      if (!rows.length) {
-        alert(
-          'No hay lecturas en el rango elegido (o no hay datos en este equipo). Probá ampliar fechas o vaciar “Desde/Hasta” para usar las últimas 500.'
-        );
-        return;
-      }
-      const [jspdfMod, { autoTable }] = await Promise.all([
-        import('jspdf'),
-        import('jspdf-autotable'),
-      ]);
-      const JsPDF = jspdfMod.default;
-
-      const device = this.selectedDevice;
-      const name = device?.name ?? 'dispositivo';
-      const s1 = this.selectedSensor1Name;
-      const s2 = this.selectedSensor2Name;
-      const has2 = rows.some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
-      const nomV = device?.nominalVoltageV;
-      const hasCurrent = rows.some((r) => effectiveCurrentAWithNominal(r, nomV) != null);
-
-      const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      doc.setFontSize(14);
-      doc.text(
-        hasCurrent ? 'AR Monitoreo — temperaturas y corriente' : 'AR Monitoreo — temperaturas',
-        14,
-        16
-      );
-      doc.setFontSize(10);
-      doc.text(`Dispositivo: ${name}`, 14, 23);
-      doc.setFontSize(8);
-      doc.setTextColor(80);
-      const rangeLabel = this.pdfRangeLabelForHeader();
-      let headerY = 28;
-      doc.text(
-        `Generado: ${new Date().toLocaleString('es-AR')} · ${rows.length} lecturas · ${rangeLabel}`,
-        14,
-        headerY
-      );
-      if (pdfNoteLine) {
-        headerY += 5;
-        doc.text(pdfNoteLine, 14, headerY);
-        headerY += 2;
-      }
-      doc.setTextColor(0);
-
-      const tableStartY = pdfNoteLine ? headerY + 2 : 32;
-
-      const buildHead = (): string[][] => {
-        const cols = ['Fecha y hora', `${s1} (°C)`];
-        if (has2) cols.push(`${s2} (°C)`);
-        if (hasCurrent) cols.push('Corriente (A)');
-        return [cols];
-      };
-      const head = buildHead();
-      const body: string[][] = rows.map((r) => {
-        const t1 = r.temperatureC.toFixed(1);
-        const row: string[] = [this.formatPdfDateTime(r.at), t1];
-        if (has2) {
-          row.push(
-            r.temp2C != null && Number.isFinite(r.temp2C) ? r.temp2C.toFixed(1) : '—'
-          );
-        }
-        if (hasCurrent) {
-          const ia = effectiveCurrentAWithNominal(r, nomV);
-          row.push(ia != null && Number.isFinite(ia) ? ia.toFixed(2) : '—');
-        }
-        return row;
-      });
-
-      autoTable(doc, {
-        startY: tableStartY,
-        head,
-        body,
-        styles: { fontSize: 8, cellPadding: 2 },
-        headStyles: { fillColor: [30, 58, 138], textColor: 255 },
-        alternateRowStyles: { fillColor: [245, 247, 250] },
-        margin: { left: 14, right: 14 },
-      });
-
-      const safe = name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);
-      doc.save(`temperaturas_${safe}_${this.pdfDateStamp()}.pdf`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      alert(`No se pudo generar el PDF: ${msg}`);
-    } finally {
-      this.pdfExporting = false;
-    }
-  }
-
   private pdfDateStamp(): string {
     const d = new Date();
     const p = (n: number) => String(n).padStart(2, '0');
@@ -1748,96 +1745,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
     } catch {
       return iso;
     }
-  }
-
-  /**
-   * Lecturas del dispositivo en orden cronológico.
-   * Si ambas fechas PDF están vacías: últimas 500.
-   * Si hay “Desde” y/o “Hasta”: filtra por día local (inclusive); tope 3000 filas.
-   */
-  private readingsForPdfExport(): TemperatureReading[] {
-    if (!this.selectedDeviceId) return [];
-    let rows = [...this.readings.filter((r) => r.deviceId === this.selectedDeviceId)].sort(
-      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
-    );
-
-    const fromMs = this.pdfDayStartMs(this.pdfExportFromDate);
-    const toMs = this.pdfDayEndMs(this.pdfExportToDate);
-    const useRange = this.pdfExportFromDate.trim() !== '' || this.pdfExportToDate.trim() !== '';
-
-    if (useRange) {
-      if (fromMs != null) {
-        rows = rows.filter((r) => new Date(r.at).getTime() >= fromMs);
-      }
-      if (toMs != null) {
-        rows = rows.filter((r) => new Date(r.at).getTime() <= toMs);
-      }
-      if (rows.length > this.pdfTableMaxRows) {
-        rows = this.evenSamplePdfRows(rows, this.pdfTableMaxRows);
-      }
-    } else {
-      rows = rows.slice(-500);
-    }
-    return rows;
-  }
-
-  private pdfDayStartMs(yyyyMmDd: string): number | null {
-    const t = yyyyMmDd?.trim();
-    if (!t) return null;
-    const d = new Date(`${t}T00:00:00`);
-    const ms = d.getTime();
-    return Number.isNaN(ms) ? null : ms;
-  }
-
-  private pdfDayEndMs(yyyyMmDd: string): number | null {
-    const t = yyyyMmDd?.trim();
-    if (!t) return null;
-    const d = new Date(`${t}T23:59:59.999`);
-    const ms = d.getTime();
-    return Number.isNaN(ms) ? null : ms;
-  }
-
-  /**
-   * Límites del rango PDF en hora local (misma idea que el filtro del análisis de gráfico).
-   * Solo “hasta”: desde epoch; solo “desde”: hasta ahora.
-   */
-  private pdfExportRangeBounds(): { from: Date; to: Date } | null {
-    const hasFrom = !!this.pdfExportFromDate?.trim();
-    const hasTo = !!this.pdfExportToDate?.trim();
-    if (!hasFrom && !hasTo) {
-      return null;
-    }
-
-    let from: Date;
-    let to: Date;
-
-    if (hasFrom) {
-      const parsed = this.parsePdfYmdLocal(this.pdfExportFromDate);
-      if (!parsed || !Number.isFinite(parsed.getTime())) {
-        return null;
-      }
-      from = parsed;
-    } else {
-      from = new Date(0);
-    }
-
-    if (hasTo) {
-      const parsed = this.parsePdfYmdLocal(this.pdfExportToDate);
-      if (!parsed || !Number.isFinite(parsed.getTime())) {
-        return null;
-      }
-      to = new Date(parsed);
-      to.setHours(23, 59, 59, 999);
-    } else {
-      // Misma lógica que día completo en “Hasta”: si falta, el tope es fin del día local (no solo “ahora”).
-      const n = new Date();
-      to = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 23, 59, 59, 999);
-    }
-
-    if (from > to) {
-      return null;
-    }
-    return { from, to };
   }
 
   /** Reparte filas en todo el intervalo temporal (evita quedarse solo con el final del rango). */
@@ -1976,7 +1883,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   /** Abre Análisis con el mismo equipo y rango fecha/hora que el PDF. */
   openEquipmentChartInAnalysis(): void {
-    const deviceId = this.selectedDeviceId;
+    const chartDev = this.equipmentChartDeviceForFicha();
+    const deviceId = chartDev?.id;
     if (!deviceId) return;
     const bounds = this.equipmentChartRangeBounds();
     if (!bounds) {
@@ -2216,51 +2124,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return Number.isFinite(d.getTime()) ? d : null;
   }
 
-  private pdfRangeLabelForHeader(): string {
-    const a = this.pdfExportFromDate.trim();
-    const b = this.pdfExportToDate.trim();
-    if (!a && !b) return 'últimas 500 lecturas en memoria';
-    if (a && b) return `desde ${a} hasta ${b}`;
-    if (a) {
-      const implicitTo = this.toDateInputString(new Date());
-      return `desde ${a} hasta ${implicitTo}`;
-    }
-    return `hasta ${b}`;
-  }
-
-  /** Sugiere rango de 7 días según la última lectura en caché. */
-  private syncPdfExportDateDefaults(): void {
-    if (!this.selectedDeviceId) {
-      this.pdfExportFromDate = '';
-      this.pdfExportToDate = '';
-      return;
-    }
-    const rows = [...this.readings.filter((r) => r.deviceId === this.selectedDeviceId)].sort(
-      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
-    );
-    if (rows.length) {
-      const end = new Date(rows[rows.length - 1].at);
-      const start = new Date(end);
-      start.setDate(start.getDate() - 6);
-      this.pdfExportFromDate = this.toDateInputString(start);
-      this.pdfExportToDate = this.toDateInputString(end);
-      return;
-    }
-    // Sin lecturas en caché (muy habitual en nube): igual rellenamos desde y hasta para que el PDF no quede solo “desde”.
-    const today = new Date();
-    const start = new Date(today);
-    start.setDate(start.getDate() - 6);
-    this.pdfExportFromDate = this.toDateInputString(start);
-    this.pdfExportToDate = this.toDateInputString(today);
-  }
-
-  private toDateInputString(d: Date): string {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }
-
   /** Navegación lateral / móvil: cada ítem va a su ruta dedicada. */
   /** Desde Inicio: ir a Dispositivos y mostrar solo la tarjeta del equipo elegido. */
   openInicioFleetRow(row: InicioFleetRow): void {
@@ -2277,6 +2140,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       combistatoId: string | null;
       pr500Id: string | null;
       pro400Id: string | null;
+      dataloggerId: string | null;
       solo: string | null;
     };
 
@@ -2284,26 +2148,72 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.selectDevice(null, false);
       this.selectCombistato(null);
       this.selectPro400(null);
+      this.selectDatalogger(null);
       this.selectPr500(id);
-      queryParams = { deviceId: null, combistatoId: null, pr500Id: id, pro400Id: null, solo: '1' };
+      queryParams = {
+        deviceId: null,
+        combistatoId: null,
+        pr500Id: id,
+        pro400Id: null,
+        dataloggerId: null,
+        solo: '1',
+      };
     } else if (row.kind === 'combistato') {
       this.selectDevice(null, false);
       this.selectPr500(null);
       this.selectPro400(null);
+      this.selectDatalogger(null);
       this.selectCombistato(id);
-      queryParams = { deviceId: null, combistatoId: id, pr500Id: null, pro400Id: null, solo: '1' };
+      queryParams = {
+        deviceId: null,
+        combistatoId: id,
+        pr500Id: null,
+        pro400Id: null,
+        dataloggerId: null,
+        solo: '1',
+      };
     } else if (row.kind === 'pro400') {
       this.selectDevice(null, false);
       this.selectPr500(null);
       this.selectCombistato(null);
+      this.selectDatalogger(null);
       this.selectPro400(id);
-      queryParams = { deviceId: null, combistatoId: null, pr500Id: null, pro400Id: id, solo: '1' };
+      queryParams = {
+        deviceId: null,
+        combistatoId: null,
+        pr500Id: null,
+        pro400Id: id,
+        dataloggerId: null,
+        solo: '1',
+      };
+    } else if (row.kind === 'datalogger') {
+      this.selectDevice(null, false);
+      this.selectPr500(null);
+      this.selectCombistato(null);
+      this.selectPro400(null);
+      this.selectDatalogger(id);
+      queryParams = {
+        deviceId: null,
+        combistatoId: null,
+        pr500Id: null,
+        pro400Id: null,
+        dataloggerId: id,
+        solo: '1',
+      };
     } else {
       this.selectPr500(null);
       this.selectCombistato(null);
       this.selectPro400(null);
+      this.selectDatalogger(null);
       this.selectDevice(id, false);
-      queryParams = { deviceId: id, combistatoId: null, pr500Id: null, pro400Id: null, solo: '1' };
+      queryParams = {
+        deviceId: id,
+        combistatoId: null,
+        pr500Id: null,
+        pro400Id: null,
+        dataloggerId: null,
+        solo: '1',
+      };
     }
 
     void this.router
@@ -2319,7 +2229,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.skipQueryParamDeviceSync = true;
     void this.router
       .navigate(['/dispositivos'], {
-        queryParams: { deviceId: null, combistatoId: null, pr500Id: null, pro400Id: null, solo: null },
+        queryParams: {
+          deviceId: null,
+          combistatoId: null,
+          pr500Id: null,
+          pro400Id: null,
+          dataloggerId: null,
+          solo: null,
+        },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2335,7 +2252,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
           ? 'combistato'
           : kind === 'pro400'
             ? 'pro400'
-            : 'device';
+            : kind === 'datalogger'
+              ? 'datalogger'
+              : 'device';
     const scroll = (): void => {
       document.getElementById(`fleet-card-${prefix}-${entityId}`)?.scrollIntoView({
         behavior: 'smooth',
@@ -2403,11 +2322,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   /** Desde Ficha equipo → Herramientas con panel, ficha y pestaña precargados. */
   openHerramientasFromEquipment(tab: 'txv' | 'sh' = 'txv'): void {
-    if (!this.selectedDeviceId || !this.selectedFichaId) return;
+    const ref = this.selectedEquipmentFichaRef;
+    if (!ref || !this.selectedFichaId) return;
     this.deviceSoloFocus = null;
     void this.router.navigate(['/herramientas'], {
       queryParams: {
-        deviceId: this.selectedDeviceId,
+        equipKind: ref.kind,
+        equipId: ref.entityId,
+        deviceId: ref.kind === 'device' ? ref.entityId : null,
         fichaId: this.selectedFichaId,
         tab,
         combistatoId: null,
@@ -2418,8 +2340,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     });
   }
 
-  onHerramientasFichaSaved(ev: { deviceId: string; fichaId: string }): void {
-    if (this.selectedDeviceId !== ev.deviceId) return;
+  onHerramientasFichaSaved(ev: { deviceId: string; fichaId: string; equipKind?: EquipmentFichaKind }): void {
+    const kind = ev.equipKind ?? 'device';
+    const key = equipmentFichaTargetKey({ kind, id: ev.deviceId });
+    if (this.equipmentFichaTargetKey !== key) return;
     if (this.shellRoute === 'equipment') {
       void this.loadEquipmentPage();
       return;
@@ -2453,11 +2377,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.dailyEnergyKwh = null;
     this.dailyEnergyError = '';
     this.syncNotificationFormWithSelected();
-    this.syncPdfExportDateDefaults();
     const path = this.router.url.split('?')[0];
-    if (path === '/ficha-equipo' && this.equipmentSheetAvailable() && deviceId && deviceId !== prevId) {
-      void this.loadEquipmentPage();
-    }
     if (syncQueryToUrl) {
       const shellPaths = [
         '/inicio',
@@ -2581,7 +2501,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private assertEquipmentNotViewer(): boolean {
-    if (this.deviceStore.isCloudViewerOnly(this.selectedDevice)) {
+    const t = this.selectedEquipmentFichaTarget;
+    if (!t || t.kind !== 'device') return false;
+    const d = this.devices.find((x) => x.id === t.id);
+    if (d && this.deviceStore.isCloudViewerOnly(d)) {
       this.equipmentFeedback = 'Solo lectura: no podés modificar la ficha con este rol.';
       return true;
     }
@@ -2883,6 +2806,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (id != null && id !== '') {
       this.selectPr500(null);
       this.selectPro400(null);
+      this.selectDatalogger(null);
     }
   }
 
@@ -2891,6 +2815,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (id != null && id !== '') {
       this.selectCombistato(null);
       this.selectPr500(null);
+      this.selectDatalogger(null);
       this.selectDevice(null, false);
     }
   }
@@ -2900,6 +2825,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (id != null && id !== '') {
       this.selectCombistato(null);
       this.selectPro400(null);
+      this.selectDatalogger(null);
+    }
+  }
+
+  selectDatalogger(id: string | null): void {
+    this.selectedDataloggerId = id;
+    if (id != null && id !== '') {
+      this.selectCombistato(null);
+      this.selectPr500(null);
+      this.selectPro400(null);
+      this.selectDevice(null, false);
     }
   }
 
@@ -2909,6 +2845,93 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   trackByPr500Id(_index: number, p: DashboardPr500): string {
     return p.id;
+  }
+
+  trackByDataloggerId(_index: number, d: DashboardDatalogger): string {
+    return d.id;
+  }
+
+  /** Subtítulo compacto (inicio / resúmenes): solo sensores activos AR24–AR34. */
+  dataloggerTelemetryLine(d: DashboardDatalogger): string {
+    return this.dataloggerCardSensors(d)
+      .filter((s) => s.hasValue)
+      .map((s) => {
+        const wBit = s.subline ? ` · ${s.subline}` : '';
+        return s.valueText !== '—' ? `${s.label} ${s.valueText} ${s.unit}${wBit}` : '';
+      })
+      .filter(Boolean)
+      .join(' · ');
+  }
+
+  dataloggerHasEnabledSensors(d: DashboardDatalogger): boolean {
+    return (d.enabledSensorSlots?.length ?? 0) > 0;
+  }
+
+  dataloggerHasTelemetry(d: DashboardDatalogger): boolean {
+    if (!this.dataloggerHasEnabledSensors(d)) return false;
+    return this.dataloggerCardSensors(d).some((s) => s.hasValue);
+  }
+
+  dataloggerCardSensors(d: DashboardDatalogger): DataloggerCardSensor[] {
+    const enabled = new Set(d.enabledSensorSlots ?? []);
+    const fmtTemp = (v: number | null | undefined) =>
+      v != null && Number.isFinite(v) ? this.formatTempCardValueOnly(v) : '—';
+    const fmtA = (v: number | null | undefined) =>
+      v != null && Number.isFinite(v) ? v.toFixed(2) : '—';
+    const fmtW = (v: number | null | undefined) =>
+      v != null && Number.isFinite(v) ? `${v.toFixed(0)} W` : null;
+    const fmtBar = (v: number | null | undefined) =>
+      v != null && Number.isFinite(v) ? v.toFixed(1) : '—';
+
+    const valueForSlot = (
+      id: DataloggerSensorSlotId
+    ): { valueText: string; unit: string; subline: string | null } => {
+      switch (id) {
+        case 't1':
+          return { valueText: fmtTemp(d.lastTemp1C), unit: '°C', subline: null };
+        case 't2':
+          return { valueText: fmtTemp(d.lastTemp2C), unit: '°C', subline: null };
+        case 't3':
+          return { valueText: fmtTemp(d.lastTemp3C), unit: '°C', subline: null };
+        case 't4':
+          return { valueText: fmtTemp(d.lastTemp4C), unit: '°C', subline: null };
+        case 't5':
+          return { valueText: fmtTemp(d.lastTemp5C), unit: '°C', subline: null };
+        case 't6':
+          return { valueText: fmtTemp(d.lastTemp6C), unit: '°C', subline: null };
+        case 'c1':
+          return { valueText: fmtA(d.lastCurrent1A), unit: 'A', subline: fmtW(d.lastPower1W) };
+        case 'c2':
+          return { valueText: fmtA(d.lastCurrent2A), unit: 'A', subline: fmtW(d.lastPower2W) };
+        case 'c3':
+          return { valueText: fmtA(d.lastCurrent3A), unit: 'A', subline: fmtW(d.lastPower3W) };
+        case 'p1':
+          return { valueText: fmtBar(d.lastPress1Bar), unit: 'bar', subline: null };
+        case 'p2':
+          return { valueText: fmtBar(d.lastPress2Bar), unit: 'bar', subline: null };
+      }
+    };
+
+    return DATALOGGER_SENSOR_SLOTS.filter((slot) => enabled.has(slot.id)).map((slot) => {
+      const { valueText, unit, subline } = valueForSlot(slot.id);
+      return {
+        key: slot.id,
+        label: slot.label,
+        valueText,
+        unit,
+        subline,
+        hasValue: valueText !== '—' || !!subline,
+      };
+    });
+  }
+
+  trackByDataloggerSensorKey(_index: number, s: DataloggerCardSensor): string {
+    return s.key;
+  }
+
+  goDataloggerSettings(d: DashboardDatalogger, ev?: Event): void {
+    ev?.stopPropagation();
+    this.openSettingsDataloggerParams(d.id);
   }
 
   /** Valor mostrado según `params.F15` (bar en telemetría; psi si el controlador usa psi). */
@@ -2980,10 +3003,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.selectCombistato(null);
     this.selectPr500(null);
     this.selectPro400(null);
+    this.selectDatalogger(null);
     this.selectDevice(deviceId, false);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId, combistatoId: null, pr500Id: null, pro400Id: null },
+        queryParams: {
+          deviceId,
+          combistatoId: null,
+          pr500Id: null,
+          pro400Id: null,
+          dataloggerId: null,
+        },
         replaceUrl: true,
       })
       .finally(() => {
@@ -2996,9 +3026,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.skipQueryParamDeviceSync = true;
     this.settingsConfigKind = 'pro400';
     this.selectPro400(pro400Id);
+    this.selectDatalogger(null);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId: null, combistatoId: null, pr500Id: null, pro400Id },
+        queryParams: {
+          deviceId: null,
+          combistatoId: null,
+          pr500Id: null,
+          pro400Id,
+          dataloggerId: null,
+        },
         replaceUrl: true,
       })
       .finally(() => {
@@ -3013,9 +3050,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.selectCombistato(combistatoId);
     this.selectPr500(null);
     this.selectPro400(null);
+    this.selectDatalogger(null);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId: null, combistatoId: combistatoId, pr500Id: null, pro400Id: null },
+        queryParams: {
+          deviceId: null,
+          combistatoId: combistatoId,
+          pr500Id: null,
+          pro400Id: null,
+          dataloggerId: null,
+        },
         replaceUrl: true,
       })
       .finally(() => {
@@ -3029,10 +3073,41 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.settingsConfigKind = 'pr500';
     this.selectCombistato(null);
     this.selectPro400(null);
+    this.selectDatalogger(null);
     this.selectPr500(pr500Id);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId: null, combistatoId: null, pr500Id, pro400Id: null },
+        queryParams: {
+          deviceId: null,
+          combistatoId: null,
+          pr500Id,
+          pro400Id: null,
+          dataloggerId: null,
+        },
+        replaceUrl: true,
+      })
+      .finally(() => {
+        this.skipQueryParamDeviceSync = false;
+      });
+    this.scrollSettingsParamsIntoView();
+  }
+
+  openSettingsDataloggerParams(dataloggerId: string): void {
+    this.skipQueryParamDeviceSync = true;
+    this.settingsConfigKind = 'datalogger';
+    this.selectCombistato(null);
+    this.selectPro400(null);
+    this.selectPr500(null);
+    this.selectDatalogger(dataloggerId);
+    void this.router
+      .navigate(['/configuracion'], {
+        queryParams: {
+          deviceId: null,
+          combistatoId: null,
+          pr500Id: null,
+          pro400Id: null,
+          dataloggerId,
+        },
         replaceUrl: true,
       })
       .finally(() => {
@@ -3047,9 +3122,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.selectCombistato(null);
     this.selectPr500(null);
     this.selectPro400(null);
+    this.selectDatalogger(null);
     void this.router
       .navigate(['/configuracion'], {
-        queryParams: { deviceId: null, combistatoId: null, pr500Id: null, pro400Id: null },
+        queryParams: {
+          deviceId: null,
+          combistatoId: null,
+          pr500Id: null,
+          pro400Id: null,
+          dataloggerId: null,
+        },
         replaceUrl: true,
       })
       .finally(() => {
@@ -3338,6 +3420,103 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.pr500s.find((p) => p.id === this.editingPr500Id) ?? null;
   }
 
+  openAddDataloggerModal(): void {
+    this.combistatoProvisioningOpen = false;
+    this.combistatoProvisioningCredentials = null;
+    this.pro400ProvisioningOpen = false;
+    this.pro400ProvisioningCredentials = null;
+    this.pro400ModalMode = null;
+    this.pr500ProvisioningOpen = false;
+    this.pr500ProvisioningCredentials = null;
+    this.pr500ModalMode = null;
+    this.provisioningOpen = false;
+    this.provisioningCredentials = null;
+    this.dataloggerProvisioningOpen = false;
+    this.dataloggerProvisioningCredentials = null;
+    this.dataloggerModalMode = 'add';
+    this.editingDataloggerId = null;
+    this.dataloggerForm.reset({ name: 'Datalogger ', location: '', moduleId: '' });
+  }
+
+  openEditDataloggerModal(d: DashboardDatalogger): void {
+    this.dataloggerModalMode = 'edit';
+    this.editingDataloggerId = d.id;
+    this.dataloggerForm.patchValue({
+      name: d.name,
+      location: d.location === 'Sin ubicación' ? '' : d.location,
+      moduleId: d.moduleId ?? '',
+    });
+  }
+
+  closeDataloggerModal(): void {
+    this.dataloggerModalMode = null;
+    this.editingDataloggerId = null;
+    this.addDataloggerSubmitting = false;
+  }
+
+  async submitDataloggerForm(): Promise<void> {
+    if (this.dataloggerForm.invalid) {
+      this.dataloggerForm.markAllAsTouched();
+      return;
+    }
+    const v = this.dataloggerForm.getRawValue();
+    if (this.dataloggerModalMode === 'add') {
+      this.addDataloggerSubmitting = true;
+      try {
+        const result = await this.dataloggerStore.addDataloggerFromFormAsync({
+          name: v.name ?? '',
+          location: v.location ?? '',
+          moduleId: v.moduleId ?? '',
+        });
+        if (!result.ok) {
+          alert(result.error);
+          return;
+        }
+        this.closeDataloggerModal();
+        this.selectDatalogger(result.id);
+        this.dataloggerProvisioningCredentials = result.credentials;
+        this.dataloggerProvisioningOpen = true;
+      } finally {
+        this.addDataloggerSubmitting = false;
+      }
+      return;
+    }
+    if (this.dataloggerModalMode === 'edit' && this.editingDataloggerId) {
+      this.addDataloggerSubmitting = true;
+      try {
+        const result = await this.dataloggerStore.updateDataloggerMeta(this.editingDataloggerId, {
+          name: v.name ?? '',
+          location: v.location ?? '',
+          moduleId: v.moduleId ?? '',
+        });
+        if (!result.ok) {
+          alert(result.error ?? 'No se pudo guardar.');
+          return;
+        }
+      } finally {
+        this.addDataloggerSubmitting = false;
+      }
+    }
+    this.closeDataloggerModal();
+  }
+
+  async confirmDeleteDatalogger(d: DashboardDatalogger): Promise<void> {
+    if (!confirm(`¿Eliminar Datalogger «${d.name}»? Se borrarán parámetros e historial en la nube.`)) return;
+    const r = await this.dataloggerStore.removeDataloggerAsync(d.id);
+    if (!r.ok) {
+      alert(r.error ?? 'No se pudo eliminar.');
+      return;
+    }
+    if (this.selectedDataloggerId === d.id) {
+      this.selectedDataloggerId = null;
+    }
+  }
+
+  get editingDatalogger(): DashboardDatalogger | null {
+    if (!this.editingDataloggerId) return null;
+    return this.dataloggers.find((d) => d.id === this.editingDataloggerId) ?? null;
+  }
+
   openAddDeviceModal(preset: 'pro400' | 'pro300' | 'generic' = 'generic'): void {
     this.combistatoProvisioningOpen = false;
     this.combistatoProvisioningCredentials = null;
@@ -3359,7 +3538,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     });
   }
 
-  openAddEquipment(kind: 'pr500' | 'pro400' | 'pro300'): void {
+  openAddEquipment(kind: 'pr500' | 'pro400' | 'pro300' | 'datalogger'): void {
     if (kind === 'pr500') {
       this.openAddPr500Modal();
       return;
@@ -3370,6 +3549,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (kind === 'pro400') {
       this.openAddPro400Modal();
+      return;
+    }
+    if (kind === 'datalogger') {
+      this.openAddDataloggerModal();
       return;
     }
     this.openAddDeviceModal('generic');
@@ -3519,6 +3702,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.pr500ProvisioningCredentials = null;
     this.pro400ProvisioningOpen = false;
     this.pro400ProvisioningCredentials = null;
+    this.dataloggerProvisioningOpen = false;
+    this.dataloggerProvisioningCredentials = null;
   }
 
   copyProvisioning(text: string): void {
@@ -4709,15 +4894,142 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
-  equipmentSheetAvailable(): boolean {
-    return (
-      this.environment.deviceCloudSync &&
-      !!this.selectedDeviceId &&
-      this.isUuidDeviceId(this.selectedDeviceId)
-    );
+  goToEquipmentSheetForTarget(target: EquipmentFichaTarget, e?: Event): void {
+    e?.stopPropagation();
+    void this.router.navigate(['/ficha-equipo'], {
+      queryParams: { equipKind: target.kind, equipId: target.id, deviceId: null },
+      replaceUrl: true,
+    });
   }
 
-  /** Recarga fichas tras sincronizar ruta/query/dispositivo (debounce para no duplicar peticiones). */
+  /** @deprecated Usar goToEquipmentSheetForTarget */
+  goToEquipmentSheet(deviceId: string, e?: Event): void {
+    e?.stopPropagation();
+    void this.router.navigate(['/ficha-equipo'], {
+      queryParams: { equipKind: 'device', equipId: deviceId, deviceId: null },
+      replaceUrl: true,
+    });
+  }
+
+  get equipmentFichaTargets(): EquipmentFichaTarget[] {
+    return buildEquipmentFichaTargets({
+      devices: this.devices,
+      pro400s: this.pro400s,
+      combistatos: this.combistatos,
+      pr500s: this.pr500s,
+      dataloggers: this.dataloggers,
+      cloudSync: this.environment.deviceCloudSync,
+      isUuid: (id) => this.isUuidDeviceId(id),
+    });
+  }
+
+  get selectedEquipmentFichaTarget(): EquipmentFichaTarget | null {
+    const ref = parseEquipmentFichaTargetKey(this.equipmentFichaTargetKey);
+    return findEquipmentFichaTarget(this.equipmentFichaTargets, ref);
+  }
+
+  get selectedEquipmentFichaRef(): EquipmentFichaRef | null {
+    const t = this.selectedEquipmentFichaTarget;
+    return t ? equipmentFichaRefFromTarget(t) : null;
+  }
+
+  equipmentFichaTargetLabel(t: EquipmentFichaTarget): string {
+    return equipmentFichaTargetOptionLabel(t);
+  }
+
+  selectedEquipmentFichaOnline(): boolean {
+    const t = this.selectedEquipmentFichaTarget;
+    if (!t) return false;
+    switch (t.kind) {
+      case 'device': {
+        const d = this.devices.find((x) => x.id === t.id);
+        if (d) return d.online;
+        return this.pro400s.find((x) => x.id === t.id)?.online ?? false;
+      }
+      case 'pr500':
+        return this.pr500s.find((x) => x.id === t.id)?.online ?? false;
+      case 'combistato':
+        return this.combistatos.find((x) => x.id === t.id)?.online ?? false;
+      case 'datalogger':
+        return this.dataloggers.find((x) => x.id === t.id)?.online ?? false;
+      default:
+        return false;
+    }
+  }
+
+  equipmentFichaChartAvailable(): boolean {
+    return !!this.equipmentChartDeviceForFicha();
+  }
+
+  private equipmentChartDeviceForFicha(): DashboardDevice | null {
+    const t = this.selectedEquipmentFichaTarget;
+    if (!t || t.kind !== 'device') return null;
+    const d = this.devices.find((x) => x.id === t.id);
+    if (d) return d;
+    const p4 = this.pro400s.find((x) => x.id === t.id);
+    if (!p4) return null;
+    return {
+      id: p4.id,
+      name: p4.name,
+      location: p4.location,
+      moduleId: p4.moduleId,
+      online: p4.online,
+      updatedAtLabel: p4.updatedAtLabel,
+      lastSeenLabel: p4.lastSeenLabel,
+    } as unknown as DashboardDevice;
+  }
+
+  private sensorNamesForChartDevice(d: DashboardDevice | null): { s1: string; s2: string } {
+    return {
+      s1: d?.sensor1Label?.trim() || 'Sensor 1',
+      s2: d?.sensor2Label?.trim() || 'Sensor 2',
+    };
+  }
+
+  selectEquipmentFichaTarget(key: string | null, syncQueryToUrl = true): void {
+    const prev = this.equipmentFichaTargetKey;
+    this.equipmentFichaTargetKey = key;
+    if (prev !== key) {
+      this.lastEquipmentLogFichaId = null;
+    }
+    const path = this.router.url.split('?')[0];
+    if (path === '/ficha-equipo' && this.equipmentSheetAvailable() && key && key !== prev) {
+      void this.loadEquipmentPage();
+    }
+    if (syncQueryToUrl && path === '/ficha-equipo') {
+      const ref = parseEquipmentFichaTargetKey(key);
+      this.skipQueryParamDeviceSync = true;
+      void this.router
+        .navigate(['/ficha-equipo'], {
+          queryParams: ref
+            ? { equipKind: ref.kind, equipId: ref.entityId, deviceId: null }
+            : { equipKind: null, equipId: null, deviceId: null },
+          replaceUrl: true,
+        })
+        .finally(() => {
+          this.skipQueryParamDeviceSync = false;
+        });
+    }
+  }
+
+  equipmentCanOpenFicha(kind: EquipmentFichaKind, id: string): boolean {
+    return this.environment.deviceCloudSync && this.isUuidDeviceId(id);
+  }
+
+  /** @deprecated Usar equipmentCanOpenFicha */
+  deviceCanOpenEquipmentSheet(device: DashboardDevice): boolean {
+    return this.equipmentCanOpenFicha('device', device.id);
+  }
+
+  equipmentSheetAvailable(): boolean {
+    return this.environment.deviceCloudSync && !!this.selectedEquipmentFichaRef;
+  }
+
+  private equipmentFichaRefOrNull(): EquipmentFichaRef | null {
+    return this.selectedEquipmentFichaRef;
+  }
+
+  /** Ficha técnica en la nube para cualquier equipo con UUID. */
   private scheduleEquipmentPageReload(): void {
     if (this.equipmentPageReloadTimer != null) {
       clearTimeout(this.equipmentPageReloadTimer);
@@ -4725,7 +5037,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.equipmentPageReloadTimer = setTimeout(() => {
       this.equipmentPageReloadTimer = null;
       if (this.router.url.split('?')[0] !== '/ficha-equipo') return;
-      if (!this.equipmentSheetAvailable() || !this.selectedDeviceId) return;
+      if (!this.equipmentSheetAvailable()) return;
       void this.loadEquipmentPage();
     }, 120);
   }
@@ -4736,17 +5048,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
     );
   }
 
-  /** Ficha técnica en la nube solo para equipos con UUID de panel. */
-  deviceCanOpenEquipmentSheet(device: DashboardDevice): boolean {
-    return this.environment.deviceCloudSync && this.isUuidDeviceId(device.id);
-  }
-
-  goToEquipmentSheet(deviceId: string, e?: Event): void {
-    e?.stopPropagation();
-    void this.router.navigate(['/ficha-equipo'], {
-      queryParams: { deviceId },
-      replaceUrl: true,
-    });
+  private mapEquipmentDbError(err: string): string {
+    const low = err.toLowerCase();
+    if (
+      low.includes('does not exist') ||
+      low.includes('schema cache') ||
+      low.includes('could not find') ||
+      low.includes('device_equipment_fichas') ||
+      low.includes('equipment_kind')
+    ) {
+      return 'Falta la migración en Supabase. Ejecutá el SQL: FRONTEND/supabase/sql/061_equipment_fichas_all_devices.sql (Editor SQL → Run). Luego recargá la página.';
+    }
+    return err;
   }
 
   async loadEquipmentPage(): Promise<void> {
@@ -4758,24 +5071,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.lastEquipmentPanelDeviceId = null;
       return;
     }
-    const id = this.selectedDeviceId as string;
+    const ref = this.selectedEquipmentFichaRef!;
     this.equipmentLoading = true;
     this.equipmentFeedback = '';
     try {
       await this.loadUserBranding();
-      let { rows: fichas, error: errFichas } = await this.equipmentSheet.listFichas(id);
+      let { rows: fichas, error: errFichas } = await this.equipmentSheet.listFichas(ref);
       if (errFichas) {
         this.equipmentFichas = [];
         this.selectedFichaId = null;
         this.lastEquipmentPanelDeviceId = null;
-        const low = errFichas.toLowerCase();
-        this.equipmentFeedback =
-          low.includes('does not exist') ||
-          low.includes('schema cache') ||
-          low.includes('could not find') ||
-          low.includes('device_equipment_fichas')
-            ? 'Ejecutá en Supabase el SQL: 021_device_equipment_ficha.sql y 022_device_equipment_fichas.sql'
-            : errFichas;
+        this.equipmentFeedback = this.mapEquipmentDbError(errFichas);
         return;
       }
       if (!fichas.length) {
@@ -4804,8 +5110,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.initLogDateTimeDefaults();
       }
       void this.notifyMaintenanceForAllFichasIfDue(fichas);
-      if (this.selectedFichaId && fichas.length && id !== this.lastEquipmentPanelDeviceId) {
-        this.lastEquipmentPanelDeviceId = id;
+      const panelKey = this.equipmentFichaTargetKey;
+      if (this.selectedFichaId && fichas.length && panelKey !== this.lastEquipmentPanelDeviceId) {
+        this.lastEquipmentPanelDeviceId = panelKey;
         this.resetEquipmentSectionPanels();
       }
     } finally {
@@ -4969,19 +5276,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private async loadEquipmentLogsAndPhotos(): Promise<void> {
-    const devId = this.selectedDeviceId;
+    const ref = this.selectedEquipmentFichaRef;
     const fid = this.selectedFichaId;
-    if (!devId || !fid) {
+    if (!ref || !fid) {
       this.equipmentLogRows = [];
       this.equipmentPhotos = [];
       return;
     }
-    const { rows: logs, error: errLog } = await this.equipmentSheet.listLog(devId, fid);
+    const { rows: logs, error: errLog } = await this.equipmentSheet.listLog(ref, fid);
     this.equipmentLogRows = errLog ? [] : logs;
     if (errLog && !this.equipmentFeedback) {
       this.equipmentFeedback = errLog;
     }
-    const { rows: photos, error: errPh } = await this.equipmentSheet.listPhotos(devId, fid);
+    const { rows: photos, error: errPh } = await this.equipmentSheet.listPhotos(ref, fid);
     this.equipmentPhotos = errPh ? [] : photos;
     if (errPh && !this.equipmentFeedback) {
       this.equipmentFeedback = errPh;
@@ -4989,13 +5296,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   async addEquipmentFicha(): Promise<void> {
-    if (!this.equipmentSheetAvailable() || !this.selectedDeviceId) return;
+    const ref = this.selectedEquipmentFichaRef;
+    if (!this.equipmentSheetAvailable() || !ref) return;
     if (this.assertEquipmentNotViewer()) return;
     const n = this.equipmentFichas.length + 1;
     const label = `Cámara ${n}`;
-    const { id, error } = await this.equipmentSheet.createFicha(this.selectedDeviceId, label);
+    const { id, error } = await this.equipmentSheet.createFicha(ref, label);
     if (error || !id) {
-      this.equipmentFeedback = error ?? 'No se pudo agregar la ficha.';
+      this.equipmentFeedback = error ? this.mapEquipmentDbError(error) : 'No se pudo agregar la ficha.';
       return;
     }
     this.selectedFichaId = id;
@@ -5008,7 +5316,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async deleteEquipmentFicha(): Promise<void> {
     const fid = this.selectedFichaId;
-    if (!fid || !this.selectedDeviceId) return;
+    if (!fid || !this.selectedEquipmentFichaRef) return;
     if (this.assertEquipmentNotViewer()) return;
     const isLast = this.equipmentFichas.length <= 1;
     const msg = isLast
@@ -5263,9 +5571,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
         expansionType === 'valve' ? this.eqExpansionValveBrandForm.trim() || null : null;
       const expansionValveModel =
         expansionType === 'valve' ? this.eqExpansionValveModelForm.trim() || null : null;
+      const ref = this.selectedEquipmentFichaRef!;
       const { error } = await this.equipmentSheet.upsertFicha({
         id: this.selectedFichaId,
-        deviceId: this.selectedDeviceId!,
+        deviceId: ref.entityId,
+        equipmentKind: ref.kind,
         sortOrder: cur?.sortOrder ?? 0,
         label: this.eqFichaLabelForm.trim() || 'Sin nombre',
         status: this.eqFichaStatusForm.trim() || 'draft',
@@ -5333,7 +5643,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.equipmentSavedCardTimer = null;
         this.equipmentSavedCard = null;
       }, 12000);
-      const { rows: refreshed } = await this.equipmentSheet.listFichas(this.selectedDeviceId!);
+      const { rows: refreshed } = await this.equipmentSheet.listFichas(ref);
       if (refreshed.length) {
         this.equipmentFichas = refreshed;
         const active = refreshed.find((f) => f.id === this.selectedFichaId) ?? refreshed[0];
@@ -5351,7 +5661,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Mantenimiento: notificación en celular (Service Worker) o navegador; una vez por día por ficha. */
   private async notifyMaintenanceForAllFichasIfDue(fichas: DeviceEquipmentFichaRow[]): Promise<void> {
     if (typeof window === 'undefined') return;
-    const devName = this.selectedDevice?.name ?? 'Equipo';
+    const devName = this.selectedEquipmentFichaTarget?.name ?? 'Equipo';
     const now = Date.now();
     const dayKey = this.isoToDateInput(new Date(now).toISOString());
 
@@ -5432,12 +5742,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.equipmentFeedback = 'Revisá fecha y hora del trabajo realizado.';
       return;
     }
-    const { error } = await this.equipmentSheet.insertLog(
-      this.selectedDeviceId!,
-      this.selectedFichaId,
-      iso,
-      note
-    );
+    const ref = this.selectedEquipmentFichaRef!;
+    const { error } = await this.equipmentSheet.insertLog(ref, this.selectedFichaId, iso, note);
     if (error) {
       this.equipmentFeedback = error;
       return;
@@ -5470,12 +5776,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.equipmentFeedback = '';
     try {
       const cap = this.photoCaptionForm.trim() || null;
-      const { error } = await this.equipmentSheet.uploadPhoto(
-        this.selectedDeviceId!,
-        this.selectedFichaId,
-        file,
-        cap
-      );
+      const ref = this.selectedEquipmentFichaRef!;
+      const { error } = await this.equipmentSheet.uploadPhoto(ref, this.selectedFichaId, file, cap);
       if (error) {
         this.equipmentFeedback = error;
         return;
@@ -5609,7 +5911,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   async exportEquipmentPdf(): Promise<void> {
-    if (!this.equipmentSheetAvailable() || !this.selectedDevice) return;
+    const target = this.selectedEquipmentFichaTarget;
+    const ref = this.selectedEquipmentFichaRef;
+    if (!this.equipmentSheetAvailable() || !target || !ref) return;
+    const chartDev = this.equipmentChartDeviceForFicha();
+    if (this.equipmentPdfIncludeChart && !chartDev) {
+      alert('El gráfico de temperatura/corriente solo está disponible para paneles y PRO400.');
+      return;
+    }
     if (this.equipmentPdfIncludeChart) {
       const ok = window.confirm(
         'Vas a incluir un gráfico de temperatura y corriente en el PDF. ' +
@@ -5628,9 +5937,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const JsPDF = jspdfMod.default;
       const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       doc.setFont('helvetica', 'normal');
-      const dev = this.selectedDevice;
-      const devId = dev.id;
-      const { rows: allFichas, error: fe } = await this.equipmentSheet.listFichas(devId);
+      const devId = ref.entityId;
+      const chartDevResolved = chartDev!;
+      const sensorNames = this.sensorNamesForChartDevice(chartDevResolved);
+      const { rows: allFichas, error: fe } = await this.equipmentSheet.listFichas(ref);
       if (fe || !allFichas.length) {
         this.equipmentFeedback = fe ?? 'No hay fichas para exportar.';
         return;
@@ -5698,7 +6008,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       doc.text(reportSubtitle, textX, y);
       y += 6;
       doc.setFontSize(9);
-      doc.text(doc.splitTextToSize(`Dispositivo: ${dev.name}`, textMaxW), textX, y);
+      doc.text(doc.splitTextToSize(`Equipo: [${target.typeLabel}] ${target.name}`, textMaxW), textX, y);
       y += 5;
       doc.setTextColor(95);
       doc.setFontSize(8);
@@ -5921,7 +6231,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(0);
 
-        const { rows: logs } = await this.equipmentSheet.listLog(devId, ficha.id);
+        const { rows: logs } = await this.equipmentSheet.listLog(ref, ficha.id);
         y += 2;
         y = drawSectionTitle(`Trabajo realizado — ${ficha.label}`, y);
         doc.setFontSize(8.3);
@@ -5941,7 +6251,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         }
         doc.setTextColor(0);
 
-        const { rows: photos } = await this.equipmentSheet.listPhotos(devId, ficha.id);
+        const { rows: photos } = await this.equipmentSheet.listPhotos(ref, ficha.id);
         let imgY = y + 4;
         for (const ph of photos) {
           try {
@@ -5982,8 +6292,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         }
       };
 
-      if (this.equipmentPdfIncludeChart) {
-        const chartPack = await this.readingsForEquipmentChart(devId);
+      if (this.equipmentPdfIncludeChart && chartDev) {
+        const chartPack = await this.readingsForEquipmentChart(chartDev.id);
         bumpPageIfNeeded(115);
         yPos = drawSectionTitle('Anexo: gráfico (temperatura / corriente)', yPos);
         doc.setFontSize(8.4);
@@ -6008,10 +6318,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
           !chartPack.error && chartPack.rows.length >= 2
             ? this.renderEquipmentPdfChartDataUrl(
                 chartPack.rows,
-                dev,
+                chartDevResolved,
                 chartPack.rangeLabel,
-                this.selectedSensor1Name,
-                this.selectedSensor2Name
+                sensorNames.s1,
+                sensorNames.s2
               )
             : null;
         if (chartImg) {
@@ -6028,8 +6338,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         }
       }
 
-      if (this.equipmentPdfIncludeReadings) {
-        const annex = await this.readingsForEquipmentPdfAnnex(devId);
+      if (this.equipmentPdfIncludeReadings && chartDev) {
+        const annex = await this.readingsForEquipmentPdfAnnex(chartDev.id);
         bumpPageIfNeeded(50);
         yPos = drawSectionTitle('Anexo: lecturas (temperaturas y corriente, últimos 7 días)', yPos);
         doc.setFontSize(8.4);
@@ -6042,9 +6352,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
         doc.setTextColor(0);
         yPos += 2;
         if (annex.rows.length) {
-          const s1 = this.selectedSensor1Name;
-          const s2 = this.selectedSensor2Name;
-          const nomV = dev.nominalVoltageV;
+          const s1 = sensorNames.s1;
+          const s2 = sensorNames.s2;
+          const nomV = chartDevResolved.nominalVoltageV;
           const has2 = annex.rows.some((r) => r.temp2C != null && Number.isFinite(r.temp2C));
           const hasCurrent = annex.rows.some(
             (r) => effectiveCurrentAWithNominal(r, nomV) != null
@@ -6083,7 +6393,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         }
       }
 
-      if (this.equipmentPdfIncludeAlarms) {
+      if (this.equipmentPdfIncludeAlarms && ref.kind === 'device') {
         await this.loadAlarmHistory();
         const evs = this.alarmHistoryItems
           .filter((e) => e.deviceId === devId)
@@ -6127,11 +6437,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
         doc.setPage(i);
         doc.setFontSize(8);
         doc.setTextColor(110);
-        doc.text(`${brandingTitle} · ${dev.name}`, marginX, 292, { maxWidth: 120 });
+        doc.text(`${brandingTitle} · ${target.name}`, marginX, 292, { maxWidth: 120 });
         doc.text(`Página ${i} de ${totalPages}`, pageW - marginX, 292, { align: 'right' });
       }
       doc.setTextColor(0);
-      const safe = dev.name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);
+      const safe = target.name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);
       doc.save(`ficha_equipo_${safe}_${this.pdfDateStamp()}.pdf`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

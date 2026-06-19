@@ -2470,6 +2470,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
     let chartImgData: string | null = null;
     let chartImgW = 0;
     let chartImgH = 0;
+    let chartCaptureFailed = false;
     const captureEl = this.chartPdfCapture?.nativeElement;
     if (captureEl && this.hasChartData) {
       try {
@@ -2492,6 +2493,7 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
         chartImgH = canvas.height;
       } catch {
         chartImgData = null;
+        chartCaptureFailed = true;
       }
     }
 
@@ -2604,6 +2606,11 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
       const safe = name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ]+/gi, '_').replace(/_+/g, '_').slice(0, 48);
       doc.save(`analisis_${safe}_${this.pdfDateStamp()}.pdf`);
+      if (chartCaptureFailed) {
+        alert(
+          'PDF guardado con la tabla de datos. No se pudo capturar la imagen del gráfico (probá otro navegador o estilo de gráfico).'
+        );
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       alert(`No se pudo generar el PDF: ${msg}`);

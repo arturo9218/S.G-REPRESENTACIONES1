@@ -2,6 +2,28 @@ import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } fro
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
+import {
+  exitFullscreenBestEffort,
+  isCurrentFullscreen,
+  requestFullscreenBestEffort,
+} from '../core/chart-fullscreen';
+import {
+  chartStyleLabel,
+  chartZoomHostIn,
+  chartZoomHostIsActive,
+  chartZoomHostOut,
+  chartZoomHostPanFromDrag,
+  chartZoomHostPinch,
+  chartZoomHostReset,
+  chartZoomHostSlice,
+  chartZoomHostWheel,
+} from '../core/chart-history-interaction';
+import {
+  downloadDeviceChartPdf,
+  pdfCellDate,
+  pdfCellNum,
+  pdfCellOn,
+} from '../core/device-chart-pdf';
 import { environment } from '../../environments/environment';
 import { isSupabaseConfigured } from '../core/supabase-config';
 import { mergePr500Params, PR500_PSI_PER_BAR, pr500BarToPsi } from '../pr500/pr500-params.defaults';
@@ -176,7 +198,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
   /** Contenedor del SVG para API de pantalla completa. */
   @ViewChild('chartStage') private chartStage?: ElementRef<HTMLElement>;
+  @ViewChild('chartPdfCapture') chartPdfCapture?: ElementRef<HTMLElement>;
   chartFullscreen = false;
+  pdfExporting = false;
   /** Zoom horizontal fraccional sobre el rango cargado (0..1). */
   chartZoomLo = 0;
   chartZoomHi = 1;
@@ -220,46 +244,23 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     if (!el) return;
     const w = Math.max(1, el.getBoundingClientRect().width);
     const dxNorm = (ev.clientX - this.dragStartClientX) / w;
-    const span = this.dragStartHi - this.dragStartLo;
-    let lo = this.dragStartLo - dxNorm * span;
-    let hi = this.dragStartHi - dxNorm * span;
-    if (lo < 0) {
-      hi -= lo;
-      lo = 0;
-    }
-    if (hi > 1) {
-      lo -= hi - 1;
-      hi = 1;
-    }
-    lo = Math.max(0, lo);
-    hi = Math.min(1, hi);
-    if (hi - lo < 0.05) return;
-    this.chartZoomLo = lo;
-    this.chartZoomHi = hi;
-    this.rebuildChartGeometry();
+    chartZoomHostPanFromDrag(this, dxNorm, this.dragStartLo, this.dragStartHi);
   }
 
   @HostListener('document:fullscreenchange')
   @HostListener('document:webkitfullscreenchange')
   onChartFullscreenChange(): void {
     const el = this.chartStage?.nativeElement;
-    const doc = document as Document & { webkitFullscreenElement?: Element | null };
-    const fs = document.fullscreenElement ?? doc.webkitFullscreenElement;
-    this.chartFullscreen = !!el && fs === el;
+    this.chartFullscreen = isCurrentFullscreen(el ?? null);
   }
 
   toggleChartFullscreen(): void {
     const el = this.chartStage?.nativeElement;
     if (!el) return;
-    const doc = document as Document & { webkitFullscreenElement?: Element | null };
-    const active = document.fullscreenElement ?? doc.webkitFullscreenElement;
-    const anyEl = el as HTMLElement & { webkitRequestFullscreen?: () => void };
-    if (!active) {
-      const req = el.requestFullscreen?.bind(el) ?? anyEl.webkitRequestFullscreen?.bind(el);
-      void req?.();
+    if (isCurrentFullscreen(el)) {
+      void exitFullscreenBestEffort();
     } else {
-      const d = document as Document & { webkitExitFullscreen?: () => Promise<void> };
-      void (document.exitFullscreen?.() ?? d.webkitExitFullscreen?.());
+      void requestFullscreenBestEffort(el);
     }
   }
 
@@ -504,54 +505,56 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   }
 
   get chartZoomIsActive(): boolean {
-    return this.chartZoomLo > 0.0001 || this.chartZoomHi < 0.9999;
+    return chartZoomHostIsActive(this);
   }
 
   chartZoomIn(): void {
-    this.adjustZoom(0.72);
+    chartZoomHostIn(this);
   }
 
   chartZoomOut(): void {
-    this.adjustZoom(1 / 0.72);
+    chartZoomHostOut(this);
   }
 
   resetChartZoom(): void {
-    this.chartZoomLo = 0;
-    this.chartZoomHi = 1;
+    chartZoomHostReset(this);
     this.cursorActive = false;
-    this.rebuildChartGeometry();
   }
 
-  private adjustZoom(factor: number): void {
-    const span = this.chartZoomHi - this.chartZoomLo;
-    const center = this.chartZoomLo + span / 2;
-    let next = span * factor;
-    next = Math.max(0.05, Math.min(1, next));
-    let lo = center - next / 2;
-    let hi = center + next / 2;
-    if (lo < 0) {
-      hi -= lo;
-      lo = 0;
-    }
-    if (hi > 1) {
-      lo -= hi - 1;
-      hi = 1;
-    }
-    this.chartZoomLo = Math.max(0, lo);
-    this.chartZoomHi = Math.min(1, hi);
-    if (this.chartZoomHi - this.chartZoomLo < 0.05) {
-      this.chartZoomHi = Math.min(1, this.chartZoomLo + 0.05);
-    }
-    this.rebuildChartGeometry();
+  onChartWheel(ev: WheelEvent): void {
+    chartZoomHostWheel(this, ev, this.chartStage?.nativeElement, this.zoomedPoints.length > 0);
   }
 
-  private getZoomedPoints(src: Pr500ReadingRow[]): Pr500ReadingRow[] {
-    if (!src.length || !this.chartZoomIsActive) return src;
-    const n = src.length;
-    const i0 = Math.max(0, Math.min(n - 1, Math.floor(this.chartZoomLo * (n - 1))));
-    const i1 = Math.max(i0 + 1, Math.min(n, Math.ceil(this.chartZoomHi * (n - 1)) + 1));
-    const out = src.slice(i0, i1);
-    return out.length >= 2 ? out : src.slice(Math.max(0, i0 - 1), Math.min(n, i1 + 1));
+  async downloadChartPdf(): Promise<void> {
+    if (this.pdfExporting || !this.readings.length) return;
+    this.pdfExporting = true;
+    this.cursorActive = false;
+    try {
+      await downloadDeviceChartPdf({
+        title: 'Historial PR500',
+        deviceName: this.pr500Name,
+        rangeLabel: this.pdfRangeLabel(),
+        styleLabel: chartStyleLabel(this.chartStyleOptions, this.chartStylePreset),
+        rows: this.readings as unknown as Record<string, unknown>[],
+        columns: [
+          { header: 'Fecha', cell: (r) => pdfCellDate(r['created_at']) },
+          { header: 'Presión bar', cell: (r) => pdfCellNum(r['pressure_bar'], 2) },
+          { header: 'C1', cell: (r) => pdfCellOn(r['comp1_on']) },
+          { header: 'C2', cell: (r) => pdfCellOn(r['comp2_on']) },
+          { header: 'C3', cell: (r) => pdfCellOn(r['comp3_on']) },
+          { header: 'Alarma', cell: (r) => pdfCellOn(r['alarm_on']) },
+          { header: 'Succión °C', cell: (r) => pdfCellNum(r['temp_suction_c'], 1) },
+        ],
+        fileSlug: this.pr500Name || 'pr500',
+        captureEl: this.chartPdfCapture?.nativeElement,
+      });
+    } finally {
+      this.pdfExporting = false;
+    }
+  }
+
+  private pdfRangeLabel(): string {
+    return `${this.filterFrom || '—'} → ${this.filterTo || '—'}`;
   }
 
   /** Última lectura del rango cargado (para cabecera del gráfico). */
@@ -877,8 +880,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     return [...new Set(merged)].sort((a, b) => a - b);
   }
 
-  private rebuildChartGeometry(): void {
-    const pts = this.getZoomedPoints(this.displayPoints);
+  rebuildChartGeometry(): void {
+    const pts = chartZoomHostSlice(this, this.displayPoints);
     this.zoomedPoints = pts;
     if (pts.length === 0) {
       this.pressurePath = '';
@@ -1191,36 +1194,6 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     ev.preventDefault();
   }
 
-  onChartWheel(ev: WheelEvent): void {
-    const el = this.chartStage?.nativeElement;
-    if (!el || !this.zoomedPoints.length) return;
-    const r = el.getBoundingClientRect();
-    if (r.width <= 1) return;
-    const xNorm = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
-    const span = this.chartZoomHi - this.chartZoomLo;
-    const center = this.chartZoomLo + xNorm * span;
-    const factor = ev.deltaY < 0 ? 0.82 : 1 / 0.82;
-    let next = span * factor;
-    next = Math.max(0.05, Math.min(1, next));
-    let lo = center - next * xNorm;
-    let hi = lo + next;
-    if (lo < 0) {
-      hi -= lo;
-      lo = 0;
-    }
-    if (hi > 1) {
-      lo -= hi - 1;
-      hi = 1;
-    }
-    lo = Math.max(0, lo);
-    hi = Math.min(1, hi);
-    if (hi - lo < 0.05) return;
-    this.chartZoomLo = lo;
-    this.chartZoomHi = hi;
-    this.rebuildChartGeometry();
-    ev.preventDefault();
-  }
-
   onChartTouchStart(ev: TouchEvent): void {
     if (!this.zoomedPoints.length) return;
     this.noteTouchTapStart(ev);
@@ -1260,23 +1233,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       const t0 = ev.touches[0];
       const t1 = ev.touches[1];
       const dist = Math.max(6, Math.abs(t1.clientX - t0.clientX));
-      let next = this.touchStartSpan * (this.touchStartDist / dist);
-      next = Math.max(0.05, Math.min(1, next));
-      const span0 = this.touchStartZoomHi - this.touchStartZoomLo;
-      const center = this.touchStartZoomLo + this.touchStartCenterNorm * span0;
-      let lo = center - next * this.touchStartCenterNorm;
-      let hi = lo + next;
-      if (lo < 0) {
-        hi -= lo;
-        lo = 0;
-      }
-      if (hi > 1) {
-        lo -= hi - 1;
-        hi = 1;
-      }
-      this.chartZoomLo = Math.max(0, lo);
-      this.chartZoomHi = Math.min(1, hi);
-      this.rebuildChartGeometry();
+      this.chartZoomLo = this.touchStartZoomLo;
+      this.chartZoomHi = this.touchStartZoomHi;
+      chartZoomHostPinch(this, this.touchStartDist / dist, this.touchStartCenterNorm);
       ev.preventDefault();
       return;
     }
@@ -1284,24 +1243,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     if (this.touchMode === 'pan' && ev.touches.length === 1) {
       const t = ev.touches[0];
       const dxNorm = (t.clientX - this.dragStartClientX) / r.width;
-      const span = this.dragStartHi - this.dragStartLo;
-      let lo = this.dragStartLo - dxNorm * span;
-      let hi = this.dragStartHi - dxNorm * span;
-      if (lo < 0) {
-        hi -= lo;
-        lo = 0;
-      }
-      if (hi > 1) {
-        lo -= hi - 1;
-        hi = 1;
-      }
-      lo = Math.max(0, lo);
-      hi = Math.min(1, hi);
-      if (hi - lo < 0.05) return;
       if (Math.abs(dxNorm) > 0.002) this.touchPanDidNudge = true;
-      this.chartZoomLo = lo;
-      this.chartZoomHi = hi;
-      this.rebuildChartGeometry();
+      chartZoomHostPanFromDrag(this, dxNorm, this.dragStartLo, this.dragStartHi);
       ev.preventDefault();
     }
   }

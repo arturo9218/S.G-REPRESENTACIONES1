@@ -1,0 +1,89 @@
+<article class="card card--combistato" *ngIf="dataloggerId">
+  <h2 class="card__title card__title--sm">Datalogger — parámetros AR12–AR48</h2>
+  <p class="card__hint card__hint--tight">
+    Los canales de sensor son <strong>fijos de fábrica</strong>. Activá cada uno con <strong>AR24–AR34</strong> (1/0).
+    Escala SCT en AR21–AR23. <strong>AR14</strong> = tensión de línea (W). <strong>AR35–AR48</strong> = corrección
+    de temperatura, consumo y presión.
+  </p>
+
+  <p class="combistato-chart-link" *ngIf="dataloggerId">
+    <a class="btn btn--ghost btn--block" routerLink="/ayuda">Manual completo y PDF (Ayuda)</a>
+  </p>
+
+  <p class="combistato-chart-link" *ngIf="dataloggerId">
+    <a
+      class="btn btn--ghost btn--block"
+      routerLink="/chart-datalogger"
+      [queryParams]="{ dataloggerId: dataloggerId }"
+      >Ver gráfico histórico</a
+    >
+  </p>
+
+  <p class="ui-loading combistato-status" *ngIf="loading" aria-busy="true">
+    <span class="ui-spinner" aria-hidden="true"></span>
+    Cargando parámetros…
+  </p>
+
+  <fieldset class="notify-panel-fieldset" *ngIf="model as m" [disabled]="!canEdit || loading || saving">
+    <ng-container *ngFor="let sec of sections">
+      <details class="combistato-details" [open]="sec.id === 'channels-temp'">
+        <summary class="combistato-details__summary">{{ sec.title }}</summary>
+        <p class="combistato-section-intro" *ngIf="sec.intro">{{ sec.intro }}</p>
+        <div class="notify-panel notify-panel__grid combistato-details__grid">
+          <label class="notify-panel__field notify-panel__field--param" *ngFor="let f of sec.fields">
+            <span class="notify-panel__field-label">
+              <span class="param-code">{{ f.code }}</span>
+              <span class="param-label-text">{{ f.label }}</span>
+            </span>
+            <span class="param-help" *ngIf="f.help">{{ f.help }}</span>
+            <select
+              *ngIf="f.input === 'sct-scale'; else dlgOnOffOrText"
+              class="notify-panel__select"
+              [ngModel]="m[f.key]"
+              (ngModelChange)="onSctScaleChange(f.key, $event)"
+              [name]="'dlg-' + sec.id + '-' + (f.key + '')"
+            >
+              <option *ngFor="let v of sctScaleOptions" [ngValue]="v">{{ v }} A / 1 V</option>
+            </select>
+            <ng-template #dlgOnOffOrText>
+              <select
+                *ngIf="f.input === 'on-off'; else dlgTextInput"
+                class="notify-panel__select"
+                [ngModel]="m[f.key]"
+                (ngModelChange)="onOnOffChange(f.key, $event)"
+                [name]="'dlg-' + sec.id + '-' + (f.key + '')"
+              >
+                <option *ngFor="let o of onOffOptions" [ngValue]="o.value">{{ o.label }}</option>
+              </select>
+              <ng-template #dlgTextInput>
+                <input
+                  type="text"
+                  inputmode="decimal"
+                  autocomplete="off"
+                  [ngModel]="drafts[f.key + '']"
+                  (ngModelChange)="onDraftChange(f.key, $event)"
+                  (blur)="onFieldBlur(f.key)"
+                  [name]="'dlg-' + sec.id + '-' + (f.key + '')"
+                />
+              </ng-template>
+            </ng-template>
+          </label>
+        </div>
+      </details>
+    </ng-container>
+  </fieldset>
+
+  <p class="ui-feedback" *ngIf="feedback" [class.ui-feedback--warn]="feedback.includes('No se pudo')">
+    {{ feedback }}
+  </p>
+
+  <div class="combistato-actions">
+    <button type="button" class="btn btn--secondary" [disabled]="loading" (click)="reload()">Recargar</button>
+    <button type="button" class="btn btn--secondary" [disabled]="!canEdit || loading" (click)="resetDefaults()">
+      Valores por defecto
+    </button>
+    <button type="button" class="btn btn--primary" [disabled]="!canEdit || loading || saving" (click)="save()">
+      {{ saving ? 'Guardando…' : 'Guardar en la nube' }}
+    </button>
+  </div>
+</article>

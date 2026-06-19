@@ -25,6 +25,22 @@ function ensureRecoveryHashOnResetRoute(): void {
 
 ensureRecoveryHashOnResetRoute();
 
+/** En local, un Service Worker viejo de producción deja la pestaña en negro o con caché rota. */
+async function clearDevServiceWorkers(): Promise<void> {
+  if (environment.production || typeof navigator === 'undefined') return;
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 const sentryDsn = typeof environment.sentryDsn === 'string' ? environment.sentryDsn.trim() : '';
 if (sentryDsn) {
   Sentry.init({
@@ -34,4 +50,20 @@ if (sentryDsn) {
   });
 }
 
-platformBrowserDynamic().bootstrapModule(AppModule).catch((err) => console.error(err));
+void clearDevServiceWorkers().finally(() => {
+  platformBrowserDynamic()
+    .bootstrapModule(AppModule)
+    .catch((err) => {
+      console.error(err);
+      const root = document.querySelector('app-root');
+      if (root) {
+        root.innerHTML =
+          '<div style="padding:2rem;min-height:100vh;background:#0b1220;color:#e8eef7;font-family:system-ui">' +
+          '<h1 style="margin-top:0">Error al iniciar la app</h1>' +
+          '<p>Recargá con <strong>Ctrl+Shift+R</strong> o abrí <a href="/login" style="color:#38bdf8">/login</a>.</p>' +
+          '<pre style="color:#fca5a5;white-space:pre-wrap;font-size:0.8rem">' +
+          String(err?.message ?? err) +
+          '</pre></div>';
+      }
+    });
+});

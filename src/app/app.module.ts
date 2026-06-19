@@ -11,12 +11,16 @@ import { RegisterComponent } from './register/register.component';
 import { ForgotPasswordComponent } from './forgot-password/forgot-password.component';
 import { ResetPasswordComponent } from './reset-password/reset-password.component';
 import { DashboardComponent } from './dashboard/dashboard.component';
+import { DevicesPageComponent } from './devices/devices-page.component';
 import { ChartAnalysisComponent } from './chart-analysis/chart-analysis.component';
 import { CombistatoSettingsComponent } from './combistato/combistato-settings.component';
 import { Pro400SettingsComponent } from './pro400/pro400-settings.component';
 import { CombistatoChartComponent } from './combistato-chart/combistato-chart.component';
 import { Pr500SettingsComponent } from './pr500/pr500-settings.component';
 import { Pr500ChartComponent } from './pr500-chart/pr500-chart.component';
+import { Pro400ChartComponent } from './pro400-chart/pro400-chart.component';
+import { DataloggerSettingsComponent } from './datalogger/datalogger-settings.component';
+import { DataloggerChartComponent } from './datalogger-chart/datalogger-chart.component';
 import { InicioPageComponent } from './inicio/inicio-page.component';
 import { AyudaPageComponent } from './ayuda/ayuda-page.component';
 import { HerramientasPageComponent } from './herramientas/herramientas-page.component';
@@ -41,12 +45,16 @@ export function rootErrorHandlerFactory(): ErrorHandler {
     ForgotPasswordComponent,
     ResetPasswordComponent,
     DashboardComponent,
+    DevicesPageComponent,
     ChartAnalysisComponent,
     CombistatoSettingsComponent,
     Pro400SettingsComponent,
     CombistatoChartComponent,
     Pr500SettingsComponent,
     Pr500ChartComponent,
+    Pro400ChartComponent,
+    DataloggerSettingsComponent,
+    DataloggerChartComponent,
     InicioPageComponent,
     AyudaPageComponent,
     HerramientasPageComponent,

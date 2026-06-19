@@ -5,7 +5,7 @@
       <h1 class="pr5-title">{{ pr500Name }}</h1>
       <p class="pr5-sub">
         Curva de presión de proceso en el rango elegido. La nube guarda siempre bar; si el control está en
-        <strong>psi</strong>, el eje izquierdo usa esa unidad. Si el firmware envía sonda de succión y recalentamiento,
+        <strong>psi</strong>, el eje izquierdo usa esa unidad. Si el PR500 envía sonda de succión y recalentamiento,
         podés superponer <strong>°C</strong> en el eje derecho. Debajo: marcha ON/OFF de compresores y alarma (escalón o barras).
       </p>
     </div>
@@ -73,6 +73,9 @@
       <button type="button" class="btn btn--primary btn--block" [disabled]="loading" (click)="applyFilters()">
         Aplicar rango
       </button>
+      <button type="button" class="btn btn--ghost btn--block" [disabled]="pdfExporting || !readings.length" (click)="downloadChartPdf()">
+        {{ pdfExporting ? 'Generando PDF…' : 'Descargar PDF' }}
+      </button>
       <button type="button" class="btn btn--ghost btn--block pr5-tall-btn" (click)="toggleChartTallLayout()">
         {{ chartTallLayout ? 'Gráficos: tamaño normal' : 'Gráficos más altos' }}
       </button>
@@ -102,7 +105,7 @@
         <div class="pr5-main__actions">
           <p class="pr5-main__unit">Eje Y: {{ pressureYUnit }}</p>
           <span class="pr5-main__zoom-hint" *ngIf="displayPoints.length"
-            >PC: rueda · Móvil: toque = valor · Zoom: pellizco / arrastre · Estilo: panel izquierdo</span
+            >PC: rueda · doble clic = ver todo · Móvil: toque = valor · Zoom: pellizco / arrastre · Estilo: panel izquierdo</span
           >
           <div class="pr5-main__zoom-btns" *ngIf="displayPoints.length">
             <button type="button" class="btn btn--ghost pr5-zoom-btn" (click)="chartZoomIn()">+</button>
@@ -162,6 +165,7 @@
         </span>
       </div>
 
+      <div #chartPdfCapture class="pr5-pdf-capture">
       <div class="pr5-chart" *ngIf="displayPoints.length">
         <div
           #chartStage
@@ -447,6 +451,7 @@
             ></span>
           </div>
         </div>
+      </div>
       </div>
 
       <div class="pr5-states" *ngIf="displayPoints.length && (showComp1 || showComp2 || showComp3 || showAlarm)">

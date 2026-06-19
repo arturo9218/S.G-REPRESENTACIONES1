@@ -1,6 +1,7 @@
 import { PR500_SECTIONS } from '../pr500/pr500-sections';
 import { COMBISTATO_SECTIONS } from '../combistato/combistato-sections';
 import { PRO400_SECTIONS } from '../pro400/pro400-sections';
+import { DATALOGGER_SECTIONS } from '../datalogger/datalogger-sections';
 
 export interface InicioManualItem {
   term: string;
@@ -15,7 +16,7 @@ export interface InicioManualBlock {
 }
 
 export interface InicioDeviceManual {
-  id: 'pr500' | 'pro400' | 'pro300';
+  id: 'pr500' | 'pro400' | 'pro300' | 'datalogger';
   title: string;
   subtitle: string;
   intro: string;
@@ -41,9 +42,9 @@ const PR500_LOGIC: Record<string, string> = {
   AR08:
     'Horas entre cambios de “desfase” de mapeo etapa→relé. Solo actúa con AR28 = 0. Cero = sin rotación. Ver desglose en el manual.',
   AR28:
-    'En cero, el reparto entre bornes sigue la rotación de AR08. En uno, el equipo elige los compresores con menos horas de marcha acumuladas (solo entre los primeros según la cantidad configurada en AR09). Recomendado si solo tenés dos máquinas cableadas en C1 y C2.',
+    'En cero, el reparto entre contactores sigue la rotación de AR08. En uno, el PR500 elige los compresores con menos horas de marcha acumuladas (solo entre los primeros según la cantidad configurada en AR09). Recomendado si solo tenés dos máquinas cableadas en C1 y C2.',
   AR09:
-    'Cuántas etapas lógicas de demanda por presión puede activar el control a la vez (1, 2 o 3). No define qué borne R1/R2/R3 se usa: eso lo combinan AR28 y AR08.',
+    'Cuántas etapas lógicas de demanda por presión puede activar el control a la vez (1, 2 o 3). No define qué contactor C1/C2/C3 se usa: eso lo combinan AR28 y AR08.',
   AR10:
     'Si ponés cero, no hay alarma por presión baja. Con un valor, la presión no debe quedar por debajo durante el tiempo de AR12; si lo hace, salta alarma, se apagan compresores y hay que reconocer con AR16.',
   AR11:
@@ -72,7 +73,7 @@ const PR500_LOGIC: Record<string, string> = {
     'Con fallo de sensor confirmado, cuántos segundos los compresores configurados (AR09) quedan encendidos juntos en ese modo de emergencia.',
   AR25: 'Cuántos segundos permanecen apagados entre cada ciclo de ese modo de emergencia.',
   AR26:
-    'Tensión mínima en el pin del sensor para considerar la señal válida. Debajo de este valor se trata como cable suelto o corto.',
+    'Tensión mínima de la señal del sensor para considerar la lectura válida. Debajo de este valor se trata como cable suelto o corto.',
   AR27:
     'Tensión máxima válida. Por encima, señal inválida (típico cable abierto hacia alimentación). Debe quedar al menos 0,05 V de ventana entre AR26 y AR27.',
   AR29: 'Activa la lectura de sonda de succión en el PR500. Cero = solo presión y compresores.',
@@ -95,7 +96,7 @@ const PR500_EXAMPLES: Record<string, string> = {
   AR08:
     'Ver desglose AR08 en el manual: incluye tabla de mapeo, AR28 = 0 vs 1 y por qué a veces aparece C3 con dos compresores.',
   AR28:
-    'Solo 2 compresores en R1 y R2: AR09 = 2, AR28 = 1 (balanceo por horas). Así no se energiza un tercer borne vacío.',
+    'Solo 2 compresores en C1 y C2: AR09 = 2, AR28 = 1 (balanceo por horas). Así no se energiza un tercer contactor vacío.',
   AR09:
     'Ver el desglose AR09 en el manual (varias filas): incluye 2 compresores en C1/C2, 3 máquinas y errores frecuentes.',
   AR10: 'Proteger vacío: AR10 = 1,5 bar (misma unidad que AR15), AR12 = 60 s.',
@@ -183,38 +184,38 @@ function buildAr09ManualItems(): InicioManualItem[] {
     {
       term: 'AR09 — Qué controla (etapas lógicas)',
       detail:
-        'AR09 vale 1, 2 o 3. Fija cuántas etapas de demanda por presión puede pedir marcha el automático a la vez (según AR02, AR03, AR04 y AR22). La etapa 0 es la primera escalón; la 1 la segunda; la 2 la tercera. Con AR09 = 2 solo existen etapas 0 y 1: la tercera etapa lógica nunca entra, aunque tengas un tercer borne cableado.',
+        'AR09 vale 1, 2 o 3. Fija cuántas etapas de demanda por presión puede pedir marcha el automático a la vez (según AR02, AR03, AR04 y AR22). La etapa 0 es la primera escalón; la 1 la segunda; la 2 la tercera. Con AR09 = 2 solo existen etapas 0 y 1: la tercera etapa lógica nunca entra, aunque tengas un tercer contactor cableado.',
       example:
         'Presión baja y el control necesita más capacidad: con AR09 = 2 pueden pedirse las etapas 0 y 1 a la vez (dos compresores en paralelo si la presión y los tiempos AR05–AR07 lo permiten).',
     },
     {
       term: 'AR09 — Qué NO es (errores frecuentes)',
       detail:
-        'No es “cuántos cables hay en la pared”. No es “solo usar R1 y R2” (eso depende de AR28 y AR08). No es “un solo motor a la vez”: si dos etapas piden ON, pueden quedar dos compresores encendidos juntos. C1, C2 y C3 en la app son los tres relés físicos; pueden mostrarse aunque en planta solo haya dos máquinas si el mapeo apunta al tercer borne.',
+        'No es “cuántos cables hay en la pared”. No es “solo usar C1 y C2” (eso depende de AR28 y AR08). No es “un solo motor a la vez”: si dos etapas piden ON, pueden quedar dos compresores encendidos juntos. C1, C2 y C3 en la app son los tres contactores; pueden mostrarse aunque en planta solo haya dos máquinas si el mapeo apunta al tercer contactor.',
     },
     {
       term: 'AR09 = 1',
       detail:
         'Solo la etapa lógica 0 participa. Un escalón de potencia automático. Útil con un solo compresor en servicio o cuando querés limitar el automático a una máquina.',
-      example: 'Un compresor en R1 → AR09 = 1. AR28 puede quedar en 0 o 1; con una sola etapa el reparto entre bornes casi no importa.',
+      example: 'Un compresor en C1 → AR09 = 1. AR28 puede quedar en 0 o 1; con una sola etapa el reparto entre contactores casi no importa.',
     },
     {
       term: 'AR09 = 2',
       detail:
-        'Hasta dos etapas lógicas (0 y 1) pueden estar activas según presión. No desactiva el borne R3 por sí solo: con AR28 = 0 y AR08 > 0, una etapa puede mapearse a C3 aunque no tengas “tercera máquina”. Para dos compresores reales en C1 y C2 usá AR09 = 2 y AR28 = 1 (balanceo por horas solo entre esos dos bornes).',
+        'Hasta dos etapas lógicas (0 y 1) pueden estar activas según presión. No desactiva el contactor C3 por sí solo: con AR28 = 0 y AR08 > 0, una etapa puede mapearse a C3 aunque no tengas “tercera máquina”. Para dos compresores reales en C1 y C2 usá AR09 = 2 y AR28 = 1 (balanceo por horas solo entre esos dos contactores).',
       example:
-        'Dos compresores en R1 y R2, R3 vacío: AR09 = 2, AR28 = 1, AR08 = 0 (o AR08 alto si no querés rotación). AR17/AR18/AR19 = 0.',
+        'Dos compresores en C1 y C2, C3 vacío: AR09 = 2, AR28 = 1, AR08 = 0 (o AR08 alto si no querés rotación). AR17/AR18/AR19 = 0.',
     },
     {
       term: 'AR09 = 3',
       detail:
-        'Las tres etapas lógicas pueden participar. Instalación con tres compresores o tres escalones de potencia por presión. Con AR28 = 1 el balanceo reparte desgaste entre los tres primeros relés del pool (R1, R2 y R3).',
+        'Las tres etapas lógicas pueden participar. Instalación con tres compresores o tres escalones de potencia por presión. Con AR28 = 1 el balanceo reparte desgaste entre C1, C2 y C3.',
       example: 'Tres máquinas en paralelo por presión → AR09 = 3; AR28 = 1 para reparto por horómetro o AR28 = 0 + AR08 si preferís rotación de lead.',
     },
     {
       term: 'AR09 + AR28 + AR08 (cómo se leen juntos)',
       detail:
-        'AR09 = cuántas etapas pueden pedir marcha. AR28 = 0: cada etapa se asigna a un relé con rotación (AR08 cambia el “desfase” entre R1/R2/R3; no apaga R1 al prender R2). AR28 = 1: solo se usan los primeros AR09 relés (índices 0…AR09−1), eligiendo los de menos horas ON. Si en telemetría ves C3 con dos compresores en planta, revisá AR28, AR08 y que no tengas AR19 = 1 en prueba.',
+        'AR09 = cuántas etapas pueden pedir marcha. AR28 = 0: cada etapa se asigna a un contactor con rotación (AR08 cambia el “desfase” entre C1/C2/C3; no apaga C1 al prender C2). AR28 = 1: solo se usan los primeros AR09 contactores, eligiendo los de menos horas ON. Si en telemetría ves C3 con dos compresores en planta, revisá AR28, AR08 y que no tengas AR19 = 1 en prueba.',
       example:
         'AR28 = 0, AR08 = 24, AR09 = 2, ambas etapas ON: según la rotación puede verse C2 + C3 (no es fallo de AR09). Solución típica: AR28 = 1 y AR09 = 2.',
     },
@@ -330,13 +331,13 @@ function buildPro400DeviceManual(): InicioDeviceManual {
         {
           term: 'Un solo relé',
           detail:
-            'El PRO400 usa un único contactor (compresor y deshielo comparten la misma salida en la plaqueta). No hay relé de ventilador físico: fan_on en la app es estado lógico del control.',
+            'El PRO400 usa un único contactor (compresor y deshielo comparten la misma salida). No hay relé de ventilador físico: fan_on en la app es estado lógico del control.',
         },
       ],
     },
     {
       title: 'Botonera y display',
-      intro: 'Mismas combinaciones que el PRO300 en la plaqueta estándar.',
+      intro: 'Mismas combinaciones que el PRO300.',
       items: [
         {
           term: 'Menú parámetros (A01…A50)',
@@ -345,7 +346,7 @@ function buildPro400DeviceManual(): InicioDeviceManual {
         {
           term: 'Portal WiFi',
           detail:
-            'SET solo ~4 s, o SET + ABAJO / UP / VOLVER ~0,8 s, o GPIO0 a GND al encender. Configurá red, ID de módulo y token.',
+            'SET solo ~4 s, o SET + ABAJO / UP / VOLVER ~0,8 s, o portal forzado al encender. Configurá red, ID de módulo y token.',
         },
         {
           term: 'Deshielo manual',
@@ -359,7 +360,7 @@ function buildPro400DeviceManual(): InicioDeviceManual {
         {
           term: 'Códigos A vs AR',
           detail:
-            'En el display 7-seg verás A01, A02, … (firmware). En la app y en este manual son AR01, AR02, … Es el mismo parámetro.',
+            'En el display 7-seg verás A01, A02, … (equipo). En la app y en este manual son AR01, AR02, … Es el mismo parámetro.',
           example: 'A09 en el equipo = AR09 intervalo de deshielo en la app.',
         },
       ],
@@ -372,7 +373,100 @@ function buildPro400DeviceManual(): InicioDeviceManual {
     title: 'PRO400 — Manual completo (AR01 a AR26 + AR50)',
     subtitle: 'Controlador de cámara: 1 sonda + un relé compresor/deshielo',
     intro:
-      'Controlador de cámara con una sonda NTC y un relé en la plaqueta PRO300. En la app verás AR01…AR26 y AR50; en el equipo A01…A26 y A50. Abajo van en el mismo orden que Configuración → PRO400. Ajustá, guardá y verificá la curva en la nube.',
+      'Controlador de cámara con una sonda NTC y un relé. En la app verás AR01…AR26 y AR50; en el equipo A01…A26 y A50. Abajo van en el mismo orden que Configuración → PRO400. Ajustá, guardá y verificá la curva en la nube.',
+    blocks,
+  };
+}
+
+const DATALOGGER_EXAMPLES: Record<string, string> = {
+  AR12: 'Monitoreo cada minuto: AR12 = 60. Prueba en banco: AR12 = 15.',
+  AR13: 'Sin WiFi estable: AR13 = 0 hasta tener red; luego AR13 = 1.',
+  AR14: 'Línea 220 V monofásico: AR14 = 220. Trifásico 380 V entre fases: AR14 = 380.',
+  AR21: 'Módulo SCT con jumper 30 A/1 V en C1 → AR21 = 30, guardar y sincronizar (comando pull).',
+  AR24: 'Solo T1 cableada al inicio: AR24 = 1, AR25–AR29 = 0.',
+  AR33: 'Succión con transductor 4–20 mA: AR33 = 1; verificar lectura con comando raw en consola serie.',
+  AR35: 'Sonda marca −17,8 °C y termómetro −18,0 °C → AR35 = −0,2 °C.',
+  AR41: 'Pinza lee 0,3 A de más con carga conocida → AR41 = −0,3 A.',
+  AR47: 'Manómetro 3,10 bar y pantalla 3,00 bar → AR47 = +0,10 bar.',
+};
+
+function buildDataloggerDeviceManual(): InicioDeviceManual {
+  const factoryChannelItems: InicioManualItem[] = [
+    { term: 'AR01 — T1', detail: 'Canal de temperatura 1. Asignación de fábrica; no editable en la app.' },
+    { term: 'AR02 — T2', detail: 'Canal de temperatura 2.' },
+    { term: 'AR03 — T3', detail: 'Canal de temperatura 3.' },
+    { term: 'AR04 — T4', detail: 'Canal de temperatura 4.' },
+    { term: 'AR05 — T5', detail: 'Canal de temperatura 5.' },
+    { term: 'AR06 — T6', detail: 'Canal de temperatura 6.' },
+    { term: 'AR07 — C1', detail: 'Canal de corriente / consumo 1 (módulo SCT).' },
+    { term: 'AR08 — C2', detail: 'Canal de corriente 2.' },
+    { term: 'AR09 — C3', detail: 'Canal de corriente 3.' },
+    { term: 'AR10 — P1', detail: 'Canal de presión 1 (transductor 4–20 mA, igual PR500).' },
+    { term: 'AR11 — P2', detail: 'Canal de presión 2.' },
+  ];
+
+  const paramBlocks: InicioManualBlock[] = DATALOGGER_SECTIONS.map((section) => ({
+    title: section.title,
+    intro: section.intro,
+    items: section.fields.map((field) => ({
+      term: `${field.code} — ${field.label}`,
+      detail: field.help ?? `Parámetro ${field.code}: ${field.label}.`,
+      example: DATALOGGER_EXAMPLES[field.code],
+    })),
+  }));
+
+  const blocks: InicioManualBlock[] = [
+    {
+      title: 'Alta y operación',
+      intro: 'Credenciales, WiFi y consola serie del Datalogger.',
+      items: [
+        {
+          term: 'Alta en la app',
+          detail:
+            'Inicio → Agregar Datalogger. Copiá moduleId y deviceToken al portal WiFi del equipo (Datalogger-Setup). Sin eso no hay telemetría ni parámetros.',
+          example: 'moduleId ARTURO, token de 6 dígitos, api_url de ingest-reading.',
+        },
+        {
+          term: 'Sincronizar parámetros',
+          detail:
+            'Tras guardar AR12–AR48 en la app, el Datalogger baja la config con el comando pull o en el próximo envío si cambiaron los parámetros.',
+          example: 'Consola serie: escribí pull y verificá escalas SCT.',
+        },
+        {
+          term: 'Comandos serie (115200)',
+          detail:
+            'En consola: help (ayuda), status (estado), raw (valores de calibración), tx (envío manual a la nube), pull (bajar parámetros desde la app) y wifi (portal de red).',
+          example:
+            'Sin carga en la pinza SCT, raw debe mostrar corriente cerca de 0 A. En presión, verifica lectura estable a 0,5 bar con el transductor calibrado.',
+        },
+        {
+          term: 'Presión 4-20 mA',
+          detail:
+            'Mismo cableado que PR500. Positivo del transmisor a 150 ohm y a la entrada de presión del Datalogger. Negativo a masa común. Escala de 0,5 bar (4 mA) a 8 bar (20 mA).',
+        },
+        {
+          term: 'Escala SCT',
+          detail:
+            'AR21, AR22 y AR23 deben coincidir con el jumper del módulo SCT (10, 20, 30, 50 o 60 A por cada 1 V de salida). Corriente en A = voltaje de salida x valor del AR del canal.',
+          example: 'Jumper 30 A/1 V en C1: AR21 = 30, guardar en la app y ejecutar pull.',
+        },
+      ],
+    },
+    {
+      title: 'Canales de fábrica (AR01-AR11)',
+      intro:
+        'Cada sensor tiene un canal fijo en el Datalogger. No se cambian desde la app. AR24 a AR34 activan o desactivan cada canal.',
+      items: factoryChannelItems,
+    },
+    ...paramBlocks,
+  ];
+
+  return {
+    id: 'datalogger',
+    title: 'Datalogger — Manual completo (AR12 a AR48)',
+    subtitle: '6 temperaturas, 3 consumos y 2 presiones',
+    intro:
+      'Datalogger multi-canal: 6 temperaturas, 3 consumos y 2 presiones. En la app configurás AR12–AR48 (telemetría, sensores activos, escalas SCT, correcciones y alarmas). Los canales AR01–AR11 son de fábrica. Abajo van en el mismo orden que Configuración → Datalogger.',
     blocks,
   };
 }
@@ -381,4 +475,5 @@ export const INICIO_DEVICE_MANUALS: InicioDeviceManual[] = [
   buildPr500DeviceManual(),
   buildPro400DeviceManual(),
   buildPro300DeviceManual(),
+  buildDataloggerDeviceManual(),
 ];

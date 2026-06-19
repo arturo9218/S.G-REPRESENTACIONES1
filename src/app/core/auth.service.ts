@@ -41,6 +41,21 @@ export class AuthService {
   }
 
   async getSession(): Promise<Session | null> {
+    const timeoutMs = 7000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.readSessionWithRetries(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private async readSessionWithRetries(): Promise<Session | null> {
     // En múltiples pestañas el lock de Supabase puede fallar de forma transitoria.
     // Evitamos que ese rechazo rompa el flujo de la app.
     for (let i = 0; i < 4; i++) {

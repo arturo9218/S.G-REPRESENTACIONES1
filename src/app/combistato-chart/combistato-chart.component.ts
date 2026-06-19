@@ -11,6 +11,30 @@ import { ActivatedRoute, Router } from '@angular/router';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
+import { ChartStylePreset } from '../core/models/dashboard.models';
+import { buildChartTrendSegments, type ChartTrendSegment } from '../core/chart-trend';
+import {
+  exitFullscreenBestEffort,
+  isCurrentFullscreen,
+  requestFullscreenBestEffort,
+} from '../core/chart-fullscreen';
+import {
+  chartStyleLabel,
+  chartZoomHostIn,
+  chartZoomHostIsActive,
+  chartZoomHostOut,
+  chartZoomHostPanFromDrag,
+  chartZoomHostPinch,
+  chartZoomHostReset,
+  chartZoomHostSlice,
+  chartZoomHostWheel,
+} from '../core/chart-history-interaction';
+import {
+  downloadDeviceChartPdf,
+  pdfCellDate,
+  pdfCellNum,
+  pdfCellOn,
+} from '../core/device-chart-pdf';
 import { environment } from '../../environments/environment';
 import { isSupabaseConfigured } from '../core/supabase-config';
 
@@ -29,39 +53,6 @@ export interface CombistatoReadingRow {
 const LS_PREFIX = 'ar-combistato-chart-series-v1:';
 const MAX_FETCH = 8000;
 const MAX_DRAW_POINTS = 1600;
-
-function getFullscreenElement(): Element | null {
-  const d = document as Document & {
-    webkitFullscreenElement?: Element | null;
-    mozFullScreenElement?: Element | null;
-  };
-  return document.fullscreenElement ?? d.webkitFullscreenElement ?? d.mozFullScreenElement ?? null;
-}
-
-function isCurrentFullscreen(host: HTMLElement | null): boolean {
-  if (!host) return false;
-  return getFullscreenElement() === host;
-}
-
-async function requestFullscreenBestEffort(el: HTMLElement): Promise<void> {
-  const anyEl = el as HTMLElement & {
-    webkitRequestFullscreen?: () => Promise<void> | void;
-  };
-  if (typeof anyEl.requestFullscreen === 'function') {
-    await anyEl.requestFullscreen();
-  } else if (typeof anyEl.webkitRequestFullscreen === 'function') {
-    anyEl.webkitRequestFullscreen();
-  }
-}
-
-async function exitFullscreenBestEffort(): Promise<void> {
-  const d = document as Document & { webkitExitFullscreen?: () => Promise<void> | void };
-  if (typeof document.exitFullscreen === 'function') {
-    await document.exitFullscreen();
-  } else if (typeof d.webkitExitFullscreen === 'function') {
-    d.webkitExitFullscreen();
-  }
-}
 
 @Component({
   selector: 'app-combistato-chart',
@@ -87,6 +78,17 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   showDoor = true;
   showHistogram = true;
 
+  private readonly chartStyleStorageKey = 'ar_combistato_chart_style_v1';
+  chartStylePreset: ChartStylePreset = 'area';
+  readonly chartStyleOptions: { value: ChartStylePreset; label: string }[] = [
+    { value: 'area', label: 'Área (relleno suave)' },
+    { value: 'line', label: 'Solo líneas' },
+    { value: 'minimal', label: 'Minimal (limpio)' },
+    { value: 'technical', label: 'Técnico (rejilla)' },
+    { value: 'trend', label: 'Tendencia (color por subida/bajada)' },
+  ];
+  chartTallLayout = false;
+
   readings: CombistatoReadingRow[] = [];
   displayPoints: CombistatoReadingRow[] = [];
 
@@ -94,6 +96,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   readonly tempPlot = { x0: 4, x1: 99, y0: 4, y1: 52 };
   tempPath1 = '';
   tempPath2 = '';
+  tempTrendSegs1: ChartTrendSegment[] = [];
+  tempTrendSegs2: ChartTrendSegment[] = [];
   tempMin = -30;
   tempMax = 10;
   timeLabels: { x: number; text: string }[] = [];
@@ -127,9 +131,18 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   private touchStartDist = 0;
   private touchStartSpan = 1;
   private touchStartCenterNorm = 0.5;
+  private touchStartZoomLo = 0;
+  private touchStartZoomHi = 1;
+
+  pdfExporting = false;
 
   @ViewChild('fullscreenRoot', { static: true })
   fullscreenRoot!: ElementRef<HTMLElement>;
+
+  @ViewChild('chartStage', { static: false })
+  chartStage?: ElementRef<HTMLElement>;
+
+  @ViewChild('chartPdfCapture') chartPdfCapture?: ElementRef<HTMLElement>;
 
   private sub?: Subscription;
   private realtimeChannel: RealtimeChannel | null = null;
@@ -154,6 +167,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       this.combistatoId = id && id.length > 10 ? id : null;
       this.initDefaultRange();
       this.loadSeriesPrefs();
+      this.loadChartStylePreset();
       if (this.combistatoId) {
         void this.loadAll();
       } else {
@@ -181,27 +195,15 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   @HostListener('document:mousemove', ['$event'])
   onDocMouseMove(ev: MouseEvent): void {
     if (!this.draggingPan) return;
-    const el = this.fullscreenRoot?.nativeElement?.querySelector('.cb-chart-wrap') as HTMLElement | null;
+    const el =
+      this.chartStage?.nativeElement ??
+      (this.fullscreenRoot?.nativeElement?.querySelector('.pr5-svg-wrap:not(.pr5-svg-wrap--hist):not(.pr5-svg-wrap--states)') as
+        | HTMLElement
+        | null);
     if (!el) return;
     const w = Math.max(1, el.getBoundingClientRect().width);
     const dxNorm = (ev.clientX - this.dragStartClientX) / w;
-    const span = this.dragStartHi - this.dragStartLo;
-    let lo = this.dragStartLo - dxNorm * span;
-    let hi = this.dragStartHi - dxNorm * span;
-    if (lo < 0) {
-      hi -= lo;
-      lo = 0;
-    }
-    if (hi > 1) {
-      lo -= hi - 1;
-      hi = 1;
-    }
-    lo = Math.max(0, lo);
-    hi = Math.min(1, hi);
-    if (hi - lo < 0.06) return;
-    this.chartZoomLo = lo;
-    this.chartZoomHi = hi;
-    this.rebuildChartGeometry();
+    chartZoomHostPanFromDrag(this, dxNorm, this.dragStartLo, this.dragStartHi);
   }
 
   async toggleFullscreen(): Promise<void> {
@@ -432,63 +434,104 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     void this.loadAll();
   }
 
+  applyPresetRange(hours: 24 | 48 | 168): void {
+    const to = new Date();
+    const from = new Date(to.getTime() - hours * 3600 * 1000);
+    this.filterTo = this.toLocalInput(to);
+    this.filterFrom = this.toLocalInput(from);
+    this.resetChartZoom();
+    void this.loadAll();
+  }
+
+  loadChartStylePreset(): void {
+    try {
+      const v = localStorage.getItem(this.chartStyleStorageKey) as ChartStylePreset | null;
+      if (v && this.chartStyleOptions.some((o) => o.value === v)) {
+        this.chartStylePreset = v;
+      }
+    } catch {
+      this.chartStylePreset = 'area';
+    }
+  }
+
+  onChartStyleChange(): void {
+    try {
+      localStorage.setItem(this.chartStyleStorageKey, this.chartStylePreset);
+    } catch {
+      /* ignore */
+    }
+    this.rebuildChartGeometry();
+  }
+
+  chartShowsAreaFill(): boolean {
+    return this.chartStylePreset === 'area' || this.chartStylePreset === 'technical';
+  }
+
+  toggleChartTallLayout(): void {
+    this.chartTallLayout = !this.chartTallLayout;
+  }
+
   get chartZoomIsActive(): boolean {
-    return this.chartZoomLo > 0.0001 || this.chartZoomHi < 0.9999;
+    return chartZoomHostIsActive(this);
   }
 
   chartZoomIn(): void {
-    this.adjustZoom(0.72);
+    chartZoomHostIn(this);
   }
 
   chartZoomOut(): void {
-    this.adjustZoom(1 / 0.72);
+    chartZoomHostOut(this);
   }
 
   resetChartZoom(): void {
-    this.chartZoomLo = 0;
-    this.chartZoomHi = 1;
+    chartZoomHostReset(this);
     this.cursorActive = false;
-    this.rebuildChartGeometry();
   }
 
-  private adjustZoom(factor: number): void {
-    const span = this.chartZoomHi - this.chartZoomLo;
-    const center = this.chartZoomLo + span / 2;
-    let next = span * factor;
-    next = Math.max(0.06, Math.min(1, next));
-    let lo = center - next / 2;
-    let hi = center + next / 2;
-    if (lo < 0) {
-      hi -= lo;
-      lo = 0;
-    }
-    if (hi > 1) {
-      lo -= hi - 1;
-      hi = 1;
-    }
-    this.chartZoomLo = Math.max(0, lo);
-    this.chartZoomHi = Math.min(1, hi);
-    if (this.chartZoomHi - this.chartZoomLo < 0.06) {
-      this.chartZoomHi = Math.min(1, this.chartZoomLo + 0.06);
-    }
-    this.rebuildChartGeometry();
+  onChartWheel(ev: WheelEvent): void {
+    chartZoomHostWheel(this, ev, this.chartStage?.nativeElement, this.displayPoints.length > 0);
   }
 
-  private getZoomedPoints(src: CombistatoReadingRow[]): CombistatoReadingRow[] {
-    if (!src.length || !this.chartZoomIsActive) return src;
-    const n = src.length;
-    const i0 = Math.max(0, Math.min(n - 1, Math.floor(this.chartZoomLo * (n - 1))));
-    const i1 = Math.max(i0 + 1, Math.min(n, Math.ceil(this.chartZoomHi * (n - 1)) + 1));
-    const out = src.slice(i0, i1);
-    return out.length >= 2 ? out : src.slice(Math.max(0, i0 - 1), Math.min(n, i1 + 1));
+  async downloadChartPdf(): Promise<void> {
+    if (this.pdfExporting || !this.readings.length) return;
+    this.pdfExporting = true;
+    this.cursorActive = false;
+    try {
+      await downloadDeviceChartPdf({
+        title: 'Historial Combistato',
+        deviceName: this.combistatoName,
+        rangeLabel: this.pdfRangeLabel(),
+        styleLabel: chartStyleLabel(this.chartStyleOptions, this.chartStylePreset),
+        rows: this.readings as unknown as Record<string, unknown>[],
+        columns: [
+          { header: 'Fecha', cell: (r) => pdfCellDate(r['created_at']) },
+          { header: 'S1 °C', cell: (r) => pdfCellNum(r['temp1_c'], 2) },
+          { header: 'S2 °C', cell: (r) => pdfCellNum(r['temp2_c'], 2) },
+          { header: 'Comp', cell: (r) => pdfCellOn(r['comp_on']) },
+          { header: 'Fan', cell: (r) => pdfCellOn(r['fan_on']) },
+          { header: 'Defrost', cell: (r) => pdfCellOn(r['defrost_on']) },
+          { header: 'Puerta', cell: (r) => pdfCellOn(r['door_open']) },
+        ],
+        fileSlug: this.combistatoName || 'combistato',
+        captureEl: this.chartPdfCapture?.nativeElement,
+      });
+    } finally {
+      this.pdfExporting = false;
+    }
   }
 
-  private rebuildChartGeometry(): void {
-    const pts = this.getZoomedPoints(this.displayPoints);
+  private pdfRangeLabel(): string {
+    return `${this.filterFrom || '—'} → ${this.filterTo || '—'}`;
+  }
+
+  rebuildChartGeometry(): void {
+    const pts = chartZoomHostSlice(this, this.displayPoints);
     this.zoomedPoints = pts;
     if (pts.length === 0) {
       this.tempPath1 = '';
       this.tempPath2 = '';
+      this.tempTrendSegs1 = [];
+      this.tempTrendSegs2 = [];
       this.timeLabels = [];
       this.activityRects = [];
       this.histBars = [];
@@ -548,6 +591,23 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
 
     this.tempPath1 = pathFor((p) => p.temp1_c, this.showTemp1);
     this.tempPath2 = pathFor((p) => p.temp2_c, this.showTemp2);
+    const eps = Math.max((this.tempMax - this.tempMin) * 0.002, 0.02);
+    if (this.chartStylePreset === 'trend' && this.showTemp1) {
+      this.tempTrendSegs1 = buildChartTrendSegments(
+        pts.map((p) => ({ x: xAt(p.created_at), y: p.temp1_c })),
+        eps
+      );
+    } else {
+      this.tempTrendSegs1 = [];
+    }
+    if (this.chartStylePreset === 'trend' && this.showTemp2) {
+      this.tempTrendSegs2 = buildChartTrendSegments(
+        pts.map((p) => ({ x: xAt(p.created_at), y: p.temp2_c })),
+        eps
+      );
+    } else {
+      this.tempTrendSegs2 = [];
+    }
 
     this.timeLabels = [
       { x: this.tempPlot.x0, text: this.fmtShort(pts[0].created_at) },
@@ -650,7 +710,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
 
   onTempTouchStart(ev: TouchEvent): void {
     if (!this.zoomedPoints.length) return;
-    const chartEl = this.fullscreenRoot?.nativeElement?.querySelector('.cb-svg--temp') as SVGElement | null;
+    const chartEl = this.chartStage?.nativeElement;
     if (!chartEl) return;
     const r = chartEl.getBoundingClientRect();
     if (ev.touches.length >= 2) {
@@ -659,6 +719,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       this.touchMode = 'pinch';
       this.touchStartDist = Math.abs(t1.clientX - t0.clientX);
       this.touchStartSpan = this.chartZoomHi - this.chartZoomLo;
+      this.touchStartZoomLo = this.chartZoomLo;
+      this.touchStartZoomHi = this.chartZoomHi;
       this.touchStartCenterNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / Math.max(1, r.width)));
       ev.preventDefault();
       return;
@@ -673,7 +735,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   }
 
   onTempTouchMove(ev: TouchEvent): void {
-    const chartEl = this.fullscreenRoot?.nativeElement?.querySelector('.cb-svg--temp') as SVGElement | null;
+    const chartEl = this.chartStage?.nativeElement;
     if (!chartEl || !this.zoomedPoints.length) return;
     const r = chartEl.getBoundingClientRect();
     if (r.width <= 1) return;
@@ -683,44 +745,16 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       const t1 = ev.touches[1];
       const dist = Math.max(6, Math.abs(t1.clientX - t0.clientX));
       const centerNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / r.width));
-      let next = this.touchStartSpan * (this.touchStartDist / dist);
-      next = Math.max(0.06, Math.min(1, next));
-      let lo = centerNorm - next * centerNorm;
-      let hi = lo + next;
-      if (lo < 0) {
-        hi -= lo;
-        lo = 0;
-      }
-      if (hi > 1) {
-        lo -= hi - 1;
-        hi = 1;
-      }
-      this.chartZoomLo = Math.max(0, lo);
-      this.chartZoomHi = Math.min(1, hi);
-      this.rebuildChartGeometry();
+      this.chartZoomLo = this.touchStartZoomLo;
+      this.chartZoomHi = this.touchStartZoomHi;
+      chartZoomHostPinch(this, this.touchStartDist / dist, centerNorm);
       ev.preventDefault();
       return;
     }
 
     if (this.touchMode === 'pan' && ev.touches.length === 1) {
       const dxNorm = (ev.touches[0].clientX - this.dragStartClientX) / r.width;
-      const span = this.dragStartHi - this.dragStartLo;
-      let lo = this.dragStartLo - dxNorm * span;
-      let hi = this.dragStartHi - dxNorm * span;
-      if (lo < 0) {
-        hi -= lo;
-        lo = 0;
-      }
-      if (hi > 1) {
-        lo -= hi - 1;
-        hi = 1;
-      }
-      lo = Math.max(0, lo);
-      hi = Math.min(1, hi);
-      if (hi - lo < 0.06) return;
-      this.chartZoomLo = lo;
-      this.chartZoomHi = hi;
-      this.rebuildChartGeometry();
+      chartZoomHostPanFromDrag(this, dxNorm, this.dragStartLo, this.dragStartHi);
       ev.preventDefault();
     }
   }

@@ -204,7 +204,7 @@ export const PRO400_SECTIONS: Pro400SectionMeta[] = [
   {
     id: 'dig',
     title: 'Entrada digital',
-    intro: 'AR26: sensor de puerta opcional (requiere cableado en GPIO y habilitación en firmware).',
+    intro: 'AR26: sensor de puerta opcional (requiere cableado y habilitación con AR26 distinto de 0).',
     fields: [
       {
         key: 'F26',
@@ -217,7 +217,7 @@ export const PRO400_SECTIONS: Pro400SectionMeta[] = [
   {
     id: 'hw',
     title: 'Hardware',
-    intro: 'AR50: polaridad del único relé en la plaqueta (bit 5 del segundo CD4094).',
+    intro: 'AR50: polaridad del único relé del PRO400.',
     fields: [
       {
         key: 'F50',

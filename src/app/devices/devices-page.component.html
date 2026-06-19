@@ -1,0 +1,699 @@
+<div class="grid-main__left">
+          <div
+            class="devices-sync-bar"
+            *ngIf="h.hasAnyEquipment"
+            [class.devices-sync-bar--stale]="h.lastDataRefreshStale"
+            role="status"
+          >
+            <span
+              class="devices-sync-bar__dot"
+              [class.devices-sync-bar__dot--live]="h.deviceStore.isCloudSyncActive()"
+              aria-hidden="true"
+            ></span>
+            <span class="devices-sync-bar__text">
+              <ng-container *ngIf="h.lastDataRefreshLabel; else syncNoData">
+                Última lectura:
+                <strong>{{ h.lastDataRefreshLabel }}</strong>
+                <span *ngIf="h.lastDataRefreshAgeLabel"> ({{ h.lastDataRefreshAgeLabel }})</span>
+              </ng-container>
+              <ng-template #syncNoData>Sin lecturas recientes en la cuenta</ng-template>
+            </span>
+            <span class="devices-sync-bar__meta">
+              Consulta app ~{{ h.readingsPollIntervalSec }} s
+              <ng-container *ngIf="h.deviceStore.isCloudSyncActive()"> · Nube activa</ng-container>
+              <ng-container *ngIf="!h.deviceStore.isCloudSyncActive()"> · Modo local</ng-container>
+            </span>
+          </div>
+          <div class="device-solo-banner" *ngIf="h.isDeviceSoloView" role="status">
+            <div class="device-solo-banner__text">
+              <span class="device-solo-banner__label">Viendo solo</span>
+              <strong class="device-solo-banner__name">{{ h.deviceSoloFocusLabel }}</strong>
+            </div>
+            <button type="button" class="device-solo-banner__btn" (click)="h.clearDeviceSoloView()">
+              Ver todos los equipos
+            </button>
+          </div>
+
+          <div
+            id="section-pro400-cards"
+            class="device-section"
+            *ngIf="
+              h.showPro400SectionInView &&
+              h.environment.deviceCloudSync &&
+              h.deviceStore.isCloudSyncActive() &&
+              h.pro400sForView.length
+            "
+          >
+            <div class="device-section__head">
+              <div class="device-section__titles">
+                <h2 class="device-section__title">PRO400</h2>
+                <p class="device-section__hint">
+                  Controlador con <strong>una sonda</strong> y un relé (compresor / deshielo). En la app se edita
+                  <strong>AR01–AR26</strong> (+ AR50 hardware). Botón en cada tarjeta →
+                  <strong>Configuración</strong>.
+                </p>
+              </div>
+              <button type="button" class="btn btn--ghost btn--sm" (click)="h.openAddPro400Modal()">+ PRO400</button>
+            </div>
+            <div class="device-grid">
+              <article
+                class="device-card device-card--combistato"
+                *ngFor="let p of h.pro400sForView; trackBy: h.trackByPro400Id"
+                [attr.id]="'fleet-card-pro400-' + p.id"
+                [class.device-card--selected]="p.id === h.selectedPro400Id"
+                (click)="h.selectPro400(p.id)"
+              >
+                <header class="device-card__head">
+                  <div class="device-card__head-text">
+                    <h3 class="device-card__name">{{ p.name }}</h3>
+                    <span class="device-card__id">ID panel: {{ p.id }}</span>
+                    <span class="device-card__module" *ngIf="p.moduleId">ID dispositivo: {{ p.moduleId }}</span>
+                  </div>
+                  <div class="device-card__head-actions">
+                    <span class="device-card__status" [class.device-card__status--off]="!p.online">
+                      <span class="device-card__dot"></span>
+                      {{ p.online ? 'Online' : 'Offline' }}
+                    </span>
+                  </div>
+                </header>
+                <div class="device-card__head-line" aria-hidden="true"></div>
+                <div class="device-card__temps" [class.device-card__temps--pending]="p.lastTemp1C == null">
+                  <ng-container *ngIf="p.lastTemp1C != null; else pro400NoTemp">
+                    <div class="device-card__temps-inner device-card__temps-inner--single">
+                      <span class="device-card__sensor-label">Sonda</span>
+                      <span class="device-card__sensor-value" [attr.aria-label]="h.formatTempCard(p.lastTemp1C)">
+                        <span class="device-card__sensor-value-num">{{ h.formatTempCardValueOnly(p.lastTemp1C) }}</span>
+                        <span
+                          *ngIf="h.formatTempCardValueOnly(p.lastTemp1C) !== '—'"
+                          class="device-card__sensor-value-unit"
+                          aria-hidden="true"
+                          >°C</span
+                        >
+                      </span>
+                      <div class="device-card__sensor-foot device-card__sensor-foot--relays">
+                        <span
+                          class="device-card__relay-pill device-card__relay-pill--static"
+                          [class.device-card__relay-pill--on]="p.lastCompOn === true || p.lastDefrostOn === true"
+                          title="Relé (compresor o deshielo)"
+                          >REL</span
+                        >
+                        <span class="device-card__sensor-time">{{ p.lastSeenLabel || p.updatedAtLabel }}</span>
+                        <a
+                          class="device-card__chart-link"
+                          [routerLink]="['/chart-pro400']"
+                          [queryParams]="{ pro400Id: p.id }"
+                          (click)="$event.stopPropagation()"
+                          title="Ver gráfico"
+                          aria-label="Ver gráfico"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16l4-4 3 3 5-6" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                    <div class="device-card__defrost-strip" *ngIf="p.lastPhase" [attr.data-phase]="p.lastPhase">
+                      <span class="device-card__defrost-pill">{{ h.combistatoPhaseLabel(p.lastPhase) }}</span>
+                      <div class="device-card__defrost-info">
+                        <ng-container *ngIf="h.pro400PhaseHasTimer(p)">
+                          <span><strong>Transcurrido</strong> {{ h.formatMinSec(p.lastPhaseElapsedS) }}</span>
+                          <span *ngIf="h.pro400PhaseRemainingS(p) != null"
+                            ><strong>Faltan</strong> {{ h.formatMinSec(h.pro400PhaseRemainingS(p)) }}</span
+                          >
+                        </ng-container>
+                      </div>
+                    </div>
+                  </ng-container>
+                  <ng-template #pro400NoTemp>
+                    <div class="device-card__temps-inner device-card__temps-inner--empty">
+                      <span class="device-card__sensor-label device-card__sensor-label--muted">
+                        Esperando primera lectura del PRO400
+                      </span>
+                      <span class="device-card__sensor-subline device-card__sensor-subline--hint">
+                        Último envío: {{ p.lastSeenLabel || p.updatedAtLabel }}
+                      </span>
+                    </div>
+                  </ng-template>
+                </div>
+                <footer class="device-card__foot">
+                  <span class="device-card__meta device-card__meta--owner" *ngIf="h.isAdminView && p.ownerUserId">
+                    Cuenta {{ h.formatOwnerUserIdShort(p.ownerUserId) }}
+                  </span>
+                  <span class="device-card__meta">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    {{ p.location }}
+                  </span>
+                </footer>
+                <div class="device-card__actions">
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Parámetros AR01 a AR26 de ' + p.name"
+                    (click)="h.goPro400Settings(p, $event)"
+                  >
+                    AR01–AR26
+                  </button>
+                  <a
+                    class="device-card__btn device-card__btn--link"
+                    [routerLink]="['/chart-pro400']"
+                    [queryParams]="{ pro400Id: p.id }"
+                    (click)="$event.stopPropagation()"
+                    title="Gráfico histórico"
+                    >Gráfico</a
+                  >
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Editar nombre de ' + p.name"
+                    (click)="h.openEditPro400Modal(p); $event.stopPropagation()"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    class="device-card__btn device-card__btn--danger"
+                    [attr.aria-label]="'Eliminar PRO400 ' + p.name"
+                    (click)="h.confirmDeletePro400(p); $event.stopPropagation()"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div
+            id="section-combistatos-cards"
+            class="device-section"
+            *ngIf="
+              h.showCombistatoSectionInView &&
+              h.environment.deviceCloudSync &&
+              h.deviceStore.isCloudSyncActive()
+            "
+          >
+            <div class="device-section__head">
+              <div class="device-section__titles">
+                <h2 class="device-section__title">PRO300</h2>
+                <p class="device-section__hint">
+                  Controlador de cámara con dos sondas, compresor / ventilador / deshielo. En la app se edita por
+                  <strong>AR01–AR48</strong>. Botón en cada tarjeta →
+                  <strong>Configuración</strong>.
+                </p>
+              </div>
+            </div>
+            <div class="device-grid device-grid--combistatos" *ngIf="h.combistatosForView.length">
+              <article
+                class="device-card device-card--combistato"
+                *ngFor="let c of h.combistatosForView; trackBy: h.trackByCombistatoId"
+                [attr.id]="'fleet-card-combistato-' + c.id"
+                [class.device-card--selected]="c.id === h.selectedCombistatoId"
+                (click)="h.selectCombistato(c.id)"
+              >
+                <header class="device-card__head">
+                  <div class="device-card__head-text">
+                    <h3 class="device-card__name">{{ c.name }}</h3>
+                    <span class="device-card__role-pill device-card__role-pill--editor">PRO300</span>
+                    <span class="device-card__id">ID: {{ c.id }}</span>
+                    <span class="device-card__module" *ngIf="c.moduleId">ID módulo: {{ c.moduleId }}</span>
+                  </div>
+                  <div class="device-card__head-actions">
+                    <span class="device-card__status" [class.device-card__status--off]="!c.online">
+                      <span class="device-card__dot"></span>
+                      {{ c.online ? 'Online' : 'Sin conexión' }}
+                    </span>
+                  </div>
+                </header>
+                <div class="device-card__head-line" aria-hidden="true"></div>
+                <div
+                  class="device-card__temps"
+                  [class.device-card__temps--pending]="c.lastTemp1C == null && c.lastTemp2C == null"
+                >
+                  <ng-container *ngIf="c.lastTemp1C != null || c.lastTemp2C != null; else combistatoNoTemp">
+                    <div class="device-card__temps-inner">
+                      <div class="device-card__sensor-col">
+                        <span class="device-card__sensor-label">Sonda 1 · ambiente</span>
+                        <span
+                          class="device-card__sensor-value"
+                          [attr.aria-label]="h.formatTempCard(c.lastTemp1C ?? null)"
+                        >
+                          <span class="device-card__sensor-value-num">{{
+                            h.formatTempCardValueOnly(c.lastTemp1C ?? null)
+                          }}</span>
+                          <span
+                            *ngIf="h.formatTempCardValueOnly(c.lastTemp1C ?? null) !== '—'"
+                            class="device-card__sensor-value-unit"
+                            aria-hidden="true"
+                            >°C</span
+                          >
+                        </span>
+                        <div class="device-card__sensor-foot">
+                          <span class="device-card__sensor-time">{{ c.lastSeenLabel }}</span>
+                        </div>
+                      </div>
+                      <div class="device-card__sensor-col">
+                        <span class="device-card__sensor-label">Sonda 2 · evaporador</span>
+                        <span
+                          class="device-card__sensor-value"
+                          [attr.aria-label]="h.formatTempCard(c.lastTemp2C ?? null)"
+                        >
+                          <span class="device-card__sensor-value-num">{{
+                            h.formatTempCardValueOnly(c.lastTemp2C ?? null)
+                          }}</span>
+                          <span
+                            *ngIf="h.formatTempCardValueOnly(c.lastTemp2C ?? null) !== '—'"
+                            class="device-card__sensor-value-unit"
+                            aria-hidden="true"
+                            >°C</span
+                          >
+                        </span>
+                        <div class="device-card__sensor-foot device-card__sensor-foot--relays">
+                          <button
+                            type="button"
+                            class="device-card__relay-pill"
+                            [class.device-card__relay-pill--on]="c.lastCompOn === true"
+                            [class.device-card__relay-pill--forced]="(c.lastCompForcedRemainingS ?? 0) > 0"
+                            [attr.title]="h.combistatoRelayTooltip('comp', c)"
+                            (click)="h.onCombistatoRelayClick('comp', c)"
+                          >
+                            COMP<span
+                              class="device-card__relay-pill-timer"
+                              *ngIf="(c.lastCompForcedRemainingS ?? 0) > 0"
+                              >· {{ h.formatMinSec(c.lastCompForcedRemainingS) }}</span
+                            >
+                          </button>
+                          <button
+                            type="button"
+                            class="device-card__relay-pill"
+                            [class.device-card__relay-pill--on]="c.lastFanOn === true"
+                            [class.device-card__relay-pill--forced]="(c.lastFanForcedRemainingS ?? 0) > 0"
+                            [attr.title]="h.combistatoRelayTooltip('fan', c)"
+                            (click)="h.onCombistatoRelayClick('fan', c)"
+                          >
+                            VENT<span
+                              class="device-card__relay-pill-timer"
+                              *ngIf="(c.lastFanForcedRemainingS ?? 0) > 0"
+                              >· {{ h.formatMinSec(c.lastFanForcedRemainingS) }}</span
+                            >
+                          </button>
+                          <button
+                            type="button"
+                            class="device-card__relay-pill"
+                            [class.device-card__relay-pill--on]="c.lastDefrostOn === true"
+                            [attr.title]="h.combistatoRelayTooltip('def', c)"
+                            (click)="h.onCombistatoRelayClick('def', c)"
+                          >
+                            DEF</button
+                          >
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      class="device-card__defrost-strip"
+                      *ngIf="c.lastPhase"
+                      [attr.data-phase]="c.lastPhase"
+                    >
+                      <span class="device-card__defrost-pill">
+                        {{ h.combistatoPhaseLabel(c.lastPhase) }}
+                      </span>
+                      <div class="device-card__defrost-info">
+                        <ng-container *ngIf="h.combistatoPhaseHasTimer(c)">
+                          <span><strong>Transcurrido</strong> {{ h.formatMinSec(c.lastPhaseElapsedS) }}</span>
+                          <span *ngIf="h.combistatoPhaseRemainingS(c) != null"
+                            ><strong>Faltan</strong> {{ h.formatMinSec(h.combistatoPhaseRemainingS(c)) }}</span
+                          >
+                        </ng-container>
+                        <span *ngIf="c.lastPhase === 'defrost' && c.defrostTargetC != null"
+                          ><strong>Corte ≤</strong> {{ c.defrostTargetC | number: '1.0-1' }}°C</span
+                        >
+                      </div>
+                    </div>
+                  </ng-container>
+                  <ng-template #combistatoNoTemp>
+                    <div class="device-card__temps-inner device-card__temps-inner--empty">
+                      <span class="device-card__sensor-label device-card__sensor-label--muted">
+                        Esperando primera lectura del PRO300
+                      </span>
+                      <span class="device-card__sensor-subline device-card__sensor-subline--hint">
+                        Último envío: {{ c.lastSeenLabel }}
+                      </span>
+                    </div>
+                  </ng-template>
+                </div>
+                <footer class="device-card__foot">
+                  <span class="device-card__meta device-card__meta--owner" *ngIf="h.isAdminView && c.ownerUserId">
+                    Cuenta {{ h.formatOwnerUserIdShort(c.ownerUserId) }}
+                  </span>
+                  <span class="device-card__meta">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    {{ c.location }}
+                  </span>
+                </footer>
+                <div class="device-card__actions">
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Parámetros AR01 a AR48 de ' + c.name"
+                    (click)="h.goCombistatoSettings(c, $event)"
+                  >
+                    AR01–AR48
+                  </button>
+                  <a
+                    class="device-card__btn device-card__btn--link"
+                    [routerLink]="['/chart-combistato']"
+                    [queryParams]="{ combistatoId: c.id }"
+                    (click)="$event.stopPropagation()"
+                    title="Gráfico histórico"
+                    >Gráfico</a
+                  >
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Editar nombre de ' + c.name"
+                    (click)="h.openEditCombistatoModal(c); $event.stopPropagation()"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    class="device-card__btn device-card__btn--danger"
+                    [attr.aria-label]="'Eliminar PRO300 ' + c.name"
+                    (click)="h.confirmDeleteCombistato(c); $event.stopPropagation()"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </article>
+            </div>
+            <p class="card__hint card__hint--tight" *ngIf="!h.combistatos.length">
+              No hay PRO300. Agregá equipos desde <strong>Inicio</strong> (PR500, PRO400 y PRO300 en el alta).
+            </p>
+          </div>
+
+          <div
+            id="section-pr500-cards"
+            class="device-section"
+            *ngIf="
+              h.showPr500SectionInView &&
+              h.environment.deviceCloudSync &&
+              h.deviceStore.isCloudSyncActive()
+            "
+          >
+            <div class="device-section__head">
+              <div class="device-section__titles">
+                <h2 class="device-section__title">PR500</h2>
+                <p class="device-section__hint">
+                  <strong>Central frigorífica</strong>: presión de proceso, setpoints y etapas. En la app
+                  <strong>AR01–AR34</strong>; botón en cada tarjeta →
+                  <strong>Configuración</strong>. La telemetría
+                  llega por la misma función de ingesta que paneles y PRO300, con <code>pressure_bar</code> en el POST.
+                </p>
+              </div>
+            </div>
+            <div class="device-grid device-grid--combistatos" *ngIf="h.pr500sForView.length">
+              <article
+                class="device-card device-card--combistato"
+                *ngFor="let p of h.pr500sForView; trackBy: h.trackByPr500Id"
+                [attr.id]="'fleet-card-pr500-' + p.id"
+                [class.device-card--selected]="p.id === h.selectedPr500Id"
+                (click)="h.selectPr500(p.id)"
+              >
+                <header class="device-card__head">
+                  <div class="device-card__head-text">
+                    <h3 class="device-card__name">{{ p.name }}</h3>
+                    <span class="device-card__role-pill device-card__role-pill--editor">PR500</span>
+                    <span class="device-card__id">ID: {{ p.id }}</span>
+                    <span class="device-card__module" *ngIf="p.moduleId">ID módulo: {{ p.moduleId }}</span>
+                  </div>
+                  <div class="device-card__head-actions">
+                    <span class="device-card__status" [class.device-card__status--off]="!p.online">
+                      <span class="device-card__dot"></span>
+                      {{ p.online ? 'Online' : 'Sin conexión' }}
+                    </span>
+                  </div>
+                </header>
+                <div class="device-card__head-line" aria-hidden="true"></div>
+                <div class="device-card__temps">
+                  <ng-container *ngIf="p.lastPressureBar != null; else pr500NoPressure">
+                    <div class="device-card__temps-inner device-card__temps-inner--single">
+                      <span class="device-card__sensor-label"
+                        >Presión de proceso ({{ h.pr500PressureDisplayUnit(p) }})</span
+                      >
+                      <span
+                        class="device-card__sensor-value"
+                        [attr.aria-label]="
+                          (h.pr500PressureDisplayValue(p) | number : (p.pressureDisplayPsi ? '1.1-2' : '1.2-2')) +
+                          ' ' +
+                          h.pr500PressureDisplayUnit(p)
+                        "
+                      >
+                        <span class="device-card__sensor-value-num">{{
+                          h.pr500PressureDisplayValue(p) | number : (p.pressureDisplayPsi ? '1.1-2' : '1.2-2')
+                        }}</span>
+                        <span class="device-card__sensor-value-unit" aria-hidden="true">{{
+                          h.pr500PressureDisplayUnit(p)
+                        }}</span>
+                      </span>
+                      <span class="device-card__sensor-subline" *ngIf="h.pr500CompressorLine(p) as compLine">{{
+                        compLine
+                      }}</span>
+                      <span class="device-card__sensor-subline device-card__sensor-subline--muted" *ngIf="h.pr500RuntimeHoursLine(p) as hm">{{
+                        hm
+                      }}</span>
+                      <span class="device-card__sensor-subline device-card__sensor-subline--muted" *ngIf="h.pr500TempSuperheatLine(p) as ts">{{
+                        ts
+                      }}</span>
+                      <div class="device-card__sensor-foot">
+                        <span class="device-card__sensor-time">Último envío: {{ p.lastSeenLabel }}</span>
+                        <a
+                          class="device-card__chart-link"
+                          [routerLink]="['/chart-pr500']"
+                          [queryParams]="{ pr500Id: p.id }"
+                          (click)="$event.stopPropagation()"
+                          title="Gráfico histórico"
+                          aria-label="Gráfico histórico PR500 (presión de proceso)"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16l4-4 3 3 5-6" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                  </ng-container>
+                  <ng-template #pr500NoPressure>
+                    <div class="device-card__temps-inner device-card__temps-inner--empty">
+                      <span class="device-card__sensor-value device-card__sensor-value--muted">Sin lectura de presión</span>
+                      <span class="device-card__sensor-label device-card__sensor-label--muted"
+                        >Último contacto: {{ p.lastSeenLabel }}</span
+                      >
+                    </div>
+                  </ng-template>
+                </div>
+                <footer class="device-card__foot">
+                  <span class="device-card__meta device-card__meta--owner" *ngIf="h.isAdminView && p.ownerUserId">
+                    Cuenta {{ h.formatOwnerUserIdShort(p.ownerUserId) }}
+                  </span>
+                  <span class="device-card__meta">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    {{ p.location }}
+                  </span>
+                </footer>
+                <div class="device-card__actions">
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Parámetros AR01 a AR34 de ' + p.name"
+                    (click)="h.goPr500Settings(p, $event)"
+                  >
+                    AR01–AR34
+                  </button>
+                  <a
+                    class="device-card__btn device-card__btn--link"
+                    [routerLink]="['/chart-pr500']"
+                    [queryParams]="{ pr500Id: p.id }"
+                    (click)="$event.stopPropagation()"
+                    title="Gráfico histórico de presión"
+                    >Gráfico</a
+                  >
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Editar nombre de ' + p.name"
+                    (click)="h.openEditPr500Modal(p); $event.stopPropagation()"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    class="device-card__btn device-card__btn--danger"
+                    [attr.aria-label]="'Eliminar PR500 ' + p.name"
+                    (click)="h.confirmDeletePr500(p); $event.stopPropagation()"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </article>
+            </div>
+            <p class="card__hint card__hint--tight" *ngIf="!h.pr500s.length">
+              No hay controladores PR500. Agregá uno desde <strong>Inicio → Agregar equipo → PR500</strong>.
+            </p>
+          </div>
+
+          <div
+            id="section-datalogger-cards"
+            class="device-section"
+            *ngIf="
+              h.showDataloggerSectionInView &&
+              h.environment.deviceCloudSync &&
+              h.deviceStore.isCloudSyncActive()
+            "
+          >
+            <div class="device-section__head">
+              <div class="device-section__titles">
+                <h2 class="device-section__title">Datalogger</h2>
+                <p class="device-section__hint">
+                  <strong>Multi-canal</strong>: 6 temperaturas, 3 consumos y 2 presiones.
+                  <strong>AR24–AR34</strong> activan cada sensor (1/0).
+                  <strong>AR14</strong> = tensión de línea para vatios. <strong>AR21–AR23</strong> = escala SCT.
+                  <strong>AR35–AR48</strong> = corrección temp / consumo / presión.
+                </p>
+              </div>
+              <button type="button" class="btn btn--ghost btn--sm" (click)="h.openAddDataloggerModal()">+ Datalogger</button>
+            </div>
+            <div class="device-grid device-grid--combistatos" *ngIf="h.dataloggersForView.length">
+              <article
+                class="device-card device-card--combistato"
+                *ngFor="let d of h.dataloggersForView; trackBy: h.trackByDataloggerId"
+                [attr.id]="'fleet-card-datalogger-' + d.id"
+                [class.device-card--selected]="d.id === h.selectedDataloggerId"
+                (click)="h.selectDatalogger(d.id)"
+              >
+                <header class="device-card__head">
+                  <div class="device-card__head-text">
+                    <h3 class="device-card__name">{{ d.name }}</h3>
+                    <span class="device-card__role-pill device-card__role-pill--editor">Datalogger</span>
+                    <span class="device-card__id">ID: {{ d.id }}</span>
+                    <span class="device-card__module" *ngIf="d.moduleId">ID módulo: {{ d.moduleId }}</span>
+                  </div>
+                  <div class="device-card__head-actions">
+                    <span class="device-card__status" [class.device-card__status--off]="!d.online">
+                      <span class="device-card__dot"></span>
+                      {{ d.online ? 'Online' : 'Sin conexión' }}
+                    </span>
+                  </div>
+                </header>
+                <div class="device-card__head-line" aria-hidden="true"></div>
+                <div
+                  class="device-card__temps"
+                  [class.device-card__temps--pending]="
+                    h.dataloggerHasEnabledSensors(d) && !h.dataloggerHasTelemetry(d)
+                  "
+                >
+                  <ng-container *ngIf="h.dataloggerHasEnabledSensors(d); else dlgNoSensors">
+                    <div class="device-card__temps-inner device-card__temps-inner--datalogger">
+                      <div class="device-card__sensor-grid">
+                        <div
+                          class="device-card__sensor-cell"
+                          *ngFor="let s of h.dataloggerCardSensors(d); trackBy: h.trackByDataloggerSensorKey"
+                          [class.device-card__sensor-cell--empty]="!s.hasValue"
+                        >
+                          <span class="device-card__sensor-label">{{ s.label }}</span>
+                          <span
+                            class="device-card__sensor-value device-card__sensor-value--compact"
+                            [attr.aria-label]="s.valueText + (s.valueText !== '—' ? ' ' + s.unit : '')"
+                          >
+                            <span class="device-card__sensor-value-num">{{ s.valueText }}</span>
+                            <span
+                              *ngIf="s.valueText !== '—'"
+                              class="device-card__sensor-value-unit"
+                              aria-hidden="true"
+                              >{{ s.unit }}</span
+                            >
+                          </span>
+                          <span class="device-card__sensor-subline device-card__sensor-subline--muted" *ngIf="s.subline">{{
+                            s.subline
+                          }}</span>
+                        </div>
+                      </div>
+                      <div class="device-card__sensor-foot device-card__sensor-foot--datalogger">
+                        <span class="device-card__sensor-time">Último envío: {{ d.lastSeenLabel || d.updatedAtLabel }}</span>
+                        <a
+                          class="device-card__chart-link"
+                          [routerLink]="['/chart-datalogger']"
+                          [queryParams]="{ dataloggerId: d.id }"
+                          (click)="$event.stopPropagation()"
+                          title="Gráfico histórico"
+                          aria-label="Gráfico histórico Datalogger"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16l4-4 3 3 5-6" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                  </ng-container>
+                  <ng-template #dlgNoSensors>
+                    <div class="device-card__temps-inner device-card__temps-inner--empty">
+                      <span class="device-card__sensor-label device-card__sensor-label--muted">
+                        Ningún sensor activo
+                      </span>
+                      <span class="device-card__sensor-subline device-card__sensor-subline--hint">
+                        Activá canales en <strong>AR24–AR34</strong> (Configuración → AR12–AR48).
+                      </span>
+                    </div>
+                  </ng-template>
+                </div>
+                <footer class="device-card__foot">
+                  <span class="device-card__meta device-card__meta--owner" *ngIf="h.isAdminView && d.ownerUserId">
+                    Cuenta {{ h.formatOwnerUserIdShort(d.ownerUserId) }}
+                  </span>
+                  <span class="device-card__meta">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    {{ d.location }}
+                  </span>
+                </footer>
+                <div class="device-card__actions">
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Parámetros AR12 a AR48 de ' + d.name"
+                    (click)="h.goDataloggerSettings(d, $event)"
+                  >
+                    AR12–AR48
+                  </button>
+                  <a
+                    class="device-card__btn device-card__btn--link"
+                    [routerLink]="['/chart-datalogger']"
+                    [queryParams]="{ dataloggerId: d.id }"
+                    (click)="$event.stopPropagation()"
+                    title="Gráfico histórico"
+                    >Gráfico</a
+                  >
+                  <button
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Editar nombre de ' + d.name"
+                    (click)="h.openEditDataloggerModal(d); $event.stopPropagation()"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    class="device-card__btn device-card__btn--danger"
+                    [attr.aria-label]="'Eliminar Datalogger ' + d.name"
+                    (click)="h.confirmDeleteDatalogger(d); $event.stopPropagation()"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </article>
+            </div>
+            <p class="card__hint card__hint--tight" *ngIf="!h.dataloggers.length">
+              No hay Dataloggers. Agregá uno desde <strong>Inicio → Agregar equipo → Datalogger</strong>.
+            </p>
+          </div>
+
+
+</div>

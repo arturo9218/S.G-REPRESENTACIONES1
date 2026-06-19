@@ -231,10 +231,19 @@ export function danfossDistributorFactor(pressureDropBar: number): number {
   return 0.9;
 }
 
-/** Corrección suave si Tc difiere del punto nominal de la tabla (38 °C). */
+/** Tablas TE2 / T2 Danfoss: Tc = 25 °C, SH apertura 6 K. */
+export const DANFOSS_T2_TE2_TC_NOMINAL_C = 25;
+
+/** Mínimo cap / carga corregida para aceptar un cartucho (≥ 100 %). */
+export const ORIFICE_MIN_CAPACITY_RATIO = 1;
+
+/**
+ * A mayor Tc, el cartucho rinde menos kW → sube la carga corregida a cubrir.
+ * Referencia: tablas TE2 a Tc 25 °C (no 38 °C).
+ */
 export function danfossCondensingFactor(condTempC: number): number {
-  const tc = Number.isFinite(condTempC) ? condTempC : 38;
-  return 1 + (tc - 38) * 0.012;
+  const tc = Number.isFinite(condTempC) ? condTempC : DANFOSS_T2_TE2_TC_NOMINAL_C;
+  return 1 + (tc - DANFOSS_T2_TE2_TC_NOMINAL_C) * 0.012;
 }
 
 export function danfossElementRange(teC: number): { id: DanfossElementRange; label: string; mopNote: string } {
@@ -306,7 +315,7 @@ export function selectDanfossValve(input: {
   const t2 = selectT2Te2Orifice(input, requiredKw);
   if (!t2) return null;
 
-  const t2Overflow = t2.orifice === '06' && requiredKw > t2.rated * 0.98;
+  const t2Overflow = t2.orifice === '06' && requiredKw > t2.rated * ORIFICE_MIN_CAPACITY_RATIO;
   const linePick = pickDanfossValveLine({
     requiredKw,
     evapTempC: input.evapTempC,
@@ -404,7 +413,7 @@ function selectT2Te2Orifice(
   for (const orifice of DANFOSS_ORIFICES) {
     const cap = danfossOrificeCapacityKw(input.refrigerantId, orifice.id, input.evapTempC);
     if (cap == null) return null;
-    if (cap >= requiredKw * 0.98) {
+    if (cap >= requiredKw * ORIFICE_MIN_CAPACITY_RATIO) {
       selected = orifice.id;
       rated = cap;
       const idx = DANFOSS_ORIFICES.findIndex((o) => o.id === orifice.id);

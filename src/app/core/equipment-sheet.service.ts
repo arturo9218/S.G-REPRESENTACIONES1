@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { AuthService } from './auth.service';
+import type { EquipmentFichaKind, EquipmentFichaRef } from './equipment-ficha-target';
 
 const BUCKET = 'equipment-photos';
 const BRANDING_BUCKET = 'branding-logos';
@@ -90,7 +91,7 @@ export interface UserBrandingRow {
 export type EquipmentFichaPayload = Omit<
   DeviceEquipmentFichaRow,
   'deviceId' | 'updatedAt'
-> & { deviceId: string };
+> & { deviceId: string; equipmentKind?: EquipmentFichaKind };
 
 @Injectable({
   providedIn: 'root',
@@ -164,12 +165,13 @@ export class EquipmentSheetService {
   }
 
   async listFichas(
-    deviceId: string
+    ref: EquipmentFichaRef
   ): Promise<{ rows: DeviceEquipmentFichaRow[]; error: string | null }> {
     const { data, error } = await this.auth.client
       .from('device_equipment_fichas')
       .select('*')
-      .eq('device_id', deviceId)
+      .eq('device_id', ref.entityId)
+      .eq('equipment_kind', ref.kind)
       .order('sort_order', { ascending: true })
       .order('label', { ascending: true });
     if (error) {
@@ -180,9 +182,11 @@ export class EquipmentSheetService {
 
   async upsertFicha(payload: EquipmentFichaPayload): Promise<{ error: string | null }> {
     const now = new Date().toISOString();
+    const kind = payload.equipmentKind ?? 'device';
     const row = {
       id: payload.id,
       device_id: payload.deviceId,
+      equipment_kind: kind,
       sort_order: payload.sortOrder,
       label: payload.label.trim() || 'Sin nombre',
       status: payload.status || 'draft',
@@ -239,13 +243,14 @@ export class EquipmentSheetService {
   }
 
   async createFicha(
-    deviceId: string,
+    ref: EquipmentFichaRef,
     label: string
   ): Promise<{ id: string | null; error: string | null }> {
     const { data: maxRows } = await this.auth.client
       .from('device_equipment_fichas')
       .select('sort_order')
-      .eq('device_id', deviceId)
+      .eq('device_id', ref.entityId)
+      .eq('equipment_kind', ref.kind)
       .order('sort_order', { ascending: false })
       .limit(1);
     const maxSo =
@@ -256,7 +261,8 @@ export class EquipmentSheetService {
     const { data, error } = await this.auth.client
       .from('device_equipment_fichas')
       .insert({
-        device_id: deviceId,
+        device_id: ref.entityId,
+        equipment_kind: ref.kind,
         sort_order: sortOrder,
         label: label.trim() || `Cámara ${sortOrder + 1}`,
         maintenance_notify_enabled: true,
@@ -288,13 +294,14 @@ export class EquipmentSheetService {
   }
 
   async listLog(
-    deviceId: string,
+    ref: EquipmentFichaRef,
     fichaId: string
   ): Promise<{ rows: DeviceEquipmentLogRow[]; error: string | null }> {
     const { data, error } = await this.auth.client
       .from('device_equipment_log')
       .select('*')
-      .eq('device_id', deviceId)
+      .eq('device_id', ref.entityId)
+      .eq('equipment_kind', ref.kind)
       .eq('ficha_id', fichaId)
       .order('occurred_at', { ascending: false });
     if (error) {
@@ -316,13 +323,14 @@ export class EquipmentSheetService {
   }
 
   async insertLog(
-    deviceId: string,
+    ref: EquipmentFichaRef,
     fichaId: string,
     occurredAtIso: string,
     note: string
   ): Promise<{ error: string | null }> {
     const { error } = await this.auth.client.from('device_equipment_log').insert({
-      device_id: deviceId,
+      device_id: ref.entityId,
+      equipment_kind: ref.kind,
       ficha_id: fichaId,
       occurred_at: occurredAtIso,
       note: note.trim(),
@@ -336,13 +344,14 @@ export class EquipmentSheetService {
   }
 
   async listPhotos(
-    deviceId: string,
+    ref: EquipmentFichaRef,
     fichaId: string
   ): Promise<{ rows: DeviceEquipmentPhotoRow[]; error: string | null }> {
     const { data, error } = await this.auth.client
       .from('device_equipment_photos')
       .select('*')
-      .eq('device_id', deviceId)
+      .eq('device_id', ref.entityId)
+      .eq('equipment_kind', ref.kind)
       .eq('ficha_id', fichaId)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true });
@@ -450,7 +459,7 @@ export class EquipmentSheetService {
   }
 
   async uploadPhoto(
-    deviceId: string,
+    ref: EquipmentFichaRef,
     fichaId: string,
     file: File,
     caption: string | null
@@ -458,7 +467,7 @@ export class EquipmentSheetService {
     const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
     const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
     const name = `${crypto.randomUUID()}.${safeExt}`;
-    const path = `${deviceId}/${fichaId}/${name}`;
+    const path = `${ref.entityId}/${fichaId}/${name}`;
     const { error: upErr } = await this.auth.client.storage.from(BUCKET).upload(path, file, {
       cacheControl: '3600',
       upsert: false,
@@ -470,7 +479,8 @@ export class EquipmentSheetService {
     const { data: maxRows } = await this.auth.client
       .from('device_equipment_photos')
       .select('sort_order')
-      .eq('device_id', deviceId)
+      .eq('device_id', ref.entityId)
+      .eq('equipment_kind', ref.kind)
       .eq('ficha_id', fichaId)
       .order('sort_order', { ascending: false })
       .limit(1);
@@ -480,7 +490,8 @@ export class EquipmentSheetService {
         : 0;
     const sortOrder = maxSo + 1;
     const { error: insErr } = await this.auth.client.from('device_equipment_photos').insert({
-      device_id: deviceId,
+      device_id: ref.entityId,
+      equipment_kind: ref.kind,
       ficha_id: fichaId,
       storage_path: path,
       sort_order: sortOrder,
