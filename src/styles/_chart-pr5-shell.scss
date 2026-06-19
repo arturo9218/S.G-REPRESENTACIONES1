@@ -750,3 +750,109 @@ $motor-none: #64748b;
   line-height: 1.45;
   max-width: 52rem;
 }
+
+@media (max-width: 640px) {
+  .page--dark.pr5-page {
+    padding: 0.55rem 0.65rem 0.75rem;
+  }
+
+  .pr5-head {
+    gap: 0.75rem;
+    margin-bottom: 0.65rem;
+    padding-bottom: 0.55rem;
+  }
+
+  .pr5-title {
+    font-size: 1.2rem;
+  }
+
+  .pr5-sub {
+    display: none;
+  }
+
+  .pr5-head-actions {
+    width: 100%;
+    justify-content: stretch;
+
+    .btn {
+      flex: 1 1 auto;
+      padding: 0.45rem 0.65rem;
+      font-size: 0.8rem;
+    }
+  }
+
+  .pr5-side {
+    padding: 0.85rem 0.9rem;
+  }
+
+  .pr5-side__lead {
+    font-size: 0.76rem;
+  }
+
+  .pr5-main {
+    padding: 0.75rem 0.65rem 0.85rem;
+  }
+
+  .pr5-main__head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
+  }
+
+  .pr5-main__actions {
+    justify-content: flex-start;
+    gap: 0.35rem;
+  }
+
+  .pr5-main__zoom-hint {
+    display: none;
+  }
+
+  .pr5-main__unit {
+    font-size: 0.72rem;
+  }
+
+  .pr5-legend {
+    gap: 0.35rem;
+    margin-bottom: 0.45rem;
+  }
+
+  .pr5-legend__item,
+  .pr5-legend__pill {
+    font-size: 0.68rem;
+  }
+
+  .pr5-svg-wrap {
+    min-height: max(240px, 52svh);
+    border-radius: 10px;
+  }
+
+  .pr5-main--charts-tall .pr5-svg-wrap:not(.pr5-svg-wrap--hist) {
+    min-height: max(320px, 68svh);
+  }
+
+  .pr5-states__grid {
+    grid-template-columns: 3.6rem minmax(0, 1fr);
+    gap: 0.4rem;
+  }
+
+  .pr5-states__labels {
+    font-size: 0.64rem;
+    min-height: 72px;
+  }
+
+  .pr5-states__svg {
+    min-height: 96px;
+  }
+
+  .pr5-zoom-btn {
+    min-width: 2.4rem;
+    padding: 0.35rem 0.6rem;
+  }
+
+  .pr5-fs-btn,
+  .pr5-tall-btn--inline {
+    font-size: 0.72rem;
+    padding: 0.32rem 0.5rem;
+  }
+}
