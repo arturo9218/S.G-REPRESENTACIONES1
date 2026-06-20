@@ -6,7 +6,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { processThresholdAlarms } from '../_shared/process-threshold-alarms.ts';
 import {
-  combistatoOfflineCooldownMs,
+  combistatoDefrostSuppressesTempAlarms,
   combistatoParamsToThresholdRow,
   parseCombistatoAlarmParams,
 } from '../_shared/combistato-param-alarms.ts';
@@ -262,27 +262,41 @@ Deno.serve(async (req) => {
           temp_breach_episode_started_at: combi.temp_breach_episode_started_at as string | null,
         });
         const hys = alarmP.hysteresisC;
-        combiPushDiag = await processThresholdAlarms({
-          supabase,
-          thresholdsTable: 'combistatos',
-          thresholdsIdColumn: 'id',
-          entityId: combi.id,
-          ownerUserId: combiOwner,
-          entityName: combiName,
-          sensor1Label: 'Sonda 1 (AR24/AR25)',
-          sensor2Label: 'Sonda 2',
-          t1,
-          t2: t2 == null ? null : (t2 as number),
-          th: thRow,
-          alarmEventsTable: 'combistato_alarm_events',
-          alarmEventsIdColumn: 'combistato_id',
-          pushTag: `alarm-combistato-${combi.id}`,
-          pushNavigate: `/alertas?combistatoId=${encodeURIComponent(combi.id)}`,
-          pushDataIdKey: 'combistatoId',
-          compareHigh: 'gte',
-          compareLow: 'lte',
-          isTempInRange: (tc) => tc < alarmP.highC - hys && tc > alarmP.lowC + hys,
-        });
+        const defrostOn = ingestBool(payload.defrost_on);
+        const suppressTempAlarms = combistatoDefrostSuppressesTempAlarms(phase, defrostOn);
+        if (suppressTempAlarms) {
+          if (combi.temp_breach_episode_started_at || combi.last_push_temp_breach_at) {
+            await supabase
+              .from('combistatos')
+              .update({
+                temp_breach_episode_started_at: null,
+                last_push_temp_breach_at: null,
+              })
+              .eq('id', combi.id);
+          }
+        } else {
+          combiPushDiag = await processThresholdAlarms({
+            supabase,
+            thresholdsTable: 'combistatos',
+            thresholdsIdColumn: 'id',
+            entityId: combi.id,
+            ownerUserId: combiOwner,
+            entityName: combiName,
+            sensor1Label: 'Sonda 1 (AR24/AR25)',
+            sensor2Label: 'Sonda 2',
+            t1,
+            t2: t2 == null ? null : (t2 as number),
+            th: thRow,
+            alarmEventsTable: 'combistato_alarm_events',
+            alarmEventsIdColumn: 'combistato_id',
+            pushTag: `alarm-combistato-${combi.id}`,
+            pushNavigate: `/alertas?combistatoId=${encodeURIComponent(combi.id)}`,
+            pushDataIdKey: 'combistatoId',
+            compareHigh: 'gte',
+            compareLow: 'lte',
+            isTempInRange: (tc) => tc < alarmP.highC - hys && tc > alarmP.lowC + hys,
+          });
+        }
 
         // Devolvemos `params_updated_at` (de combistatos) para que el firmware
         // pueda detectar cambios sin esperar el pull periódico de 2 min y

@@ -61,3 +61,17 @@ export function combistatoOfflineCooldownMs(params: unknown): number {
   const p = parseCombistatoAlarmParams(params);
   return Math.max(MIN_PUSH_COOLDOWN_MS, Math.round(p.delayMin * 60 * 1000));
 }
+
+/** Durante deshielo/goteo/post-deshielo no alarmar por temperatura (mismo criterio que el equipo). */
+const DEFROST_SUPPRESS_PHASES = new Set(['defrost', 'drip', 'post_defrost']);
+
+export function combistatoDefrostSuppressesTempAlarms(
+  phase: string | null | undefined,
+  defrostOn?: boolean | null
+): boolean {
+  if (defrostOn === true) return true;
+  if (typeof phase === 'string' && DEFROST_SUPPRESS_PHASES.has(phase.trim().toLowerCase())) {
+    return true;
+  }
+  return false;
+}

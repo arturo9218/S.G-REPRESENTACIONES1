@@ -1456,13 +1456,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
       const high = c.alarmHighC ?? null;
       const low = c.alarmLowC ?? null;
+      const inDefrostCycle =
+        c.lastDefrostOn === true ||
+        c.lastPhase === 'defrost' ||
+        c.lastPhase === 'drip' ||
+        c.lastPhase === 'post_defrost';
       const readingLabel =
         lastAt != null
           ? `Medición: ${this.formatFullDateTime(lastAt)}`
           : `Ahora: ${this.formatFullDateTime(nowMs)}`;
 
       const t1 = c.lastTemp1C;
-      if (t1 != null) {
+      if (t1 != null && !inDefrostCycle) {
         if (high != null && t1 >= high) {
           out.push({
             id: `${c.id}-t1-high`,
