@@ -224,3 +224,30 @@ export function buildChartTimeAxis(
 
   return { timeLabels, xGridLines };
 }
+
+/** Panel actividad / motores: solo zona de trazado en SVG; horas en HTML. */
+export const CHART_ACTIVITY_TIME_AXIS = {
+  viewBoxHeight: 82,
+  plotY0: 6,
+  plotY1: 82,
+  labelY: 90,
+  titleY: 94.8,
+  titleX: 51.9,
+  tickLen: 2.4,
+} as const;
+
+/** Gráficos secundarios con eje tiempo (consumo, presión, etc.). */
+export const CHART_PANEL_TIME_AXIS = {
+  viewBoxHeight: 42,
+  plotY0: 4,
+  plotY1: 42,
+  labelY: 48,
+  titleY: 51.2,
+  titleX: 51.9,
+  tickLen: 2.2,
+} as const;
+
+export function chartFormatTimeRangeLabel(t0Ms: number, t1Ms: number): string {
+  const span = Math.max(t1Ms - t0Ms, 60_000);
+  return `${chartFormatTimeAxisLabel(t0Ms, span)} — ${chartFormatTimeAxisLabel(t1Ms, span)}`;
+}

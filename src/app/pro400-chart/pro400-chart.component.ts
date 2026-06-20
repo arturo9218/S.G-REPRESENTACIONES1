@@ -29,10 +29,28 @@ import {
   chartZoomHostSlice,
   chartZoomHostWheel,
 } from '../core/chart-history-interaction';
-import { CHART_SVG_PRESERVE_ASPECT, chartViewBoxXFromClientX } from '../core/chart-svg-coords';
+import {
+  CHART_SVG_PRESERVE_ASPECT,
+  CHART_TEMP_PLOT,
+  CHART_TEMP_VIEWBOX_HEIGHT,
+  chartPlotNormFromClientX,
+  chartViewBoxXFromClientX,
+} from '../core/chart-svg-coords';
+import {
+  buildChartTimeAxis,
+  buildTempYAxisTicks,
+  chartAxisMaxTimeLabels,
+  CHART_ACTIVITY_TIME_AXIS,
+  chartFormatTimeRangeLabel,
+  type ChartPlotBounds,
+  type ChartTimeLabel,
+  type ChartYAxisTick,
+} from '../core/chart-axis.utils';
 import {
   chartPagePanelsDefaults,
+  chartSectionHeightsDefaults,
   loadChartPagePanels,
+  loadChartSectionHeights,
   persistChartPagePanels,
 } from '../core/chart-page-layout';
 import {
@@ -89,7 +107,7 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     { value: 'technical', label: 'Técnico (rejilla)' },
     { value: 'trend', label: 'Tendencia (color por subida/bajada)' },
   ];
-  chartTallLayout = false;
+  sectionHeights = chartSectionHeightsDefaults();
 
   private readonly layoutStorageKey = 'ar_pro400_chart_panels_v1';
   sidePanelOpen = chartPagePanelsDefaults().sideOpen;
@@ -98,13 +116,21 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
   readings: Pro400ReadingRow[] = [];
   displayPoints: Pro400ReadingRow[] = [];
 
-  /** SVG viewBox 0 0 100 56 — temperaturas */
-  readonly tempPlot = { x0: 4, x1: 99, y0: 4, y1: 52 };
+  /** Misma geometría que PRO300 (viewBox panorámico 0 0 100 × 58). */
+  readonly plot: ChartPlotBounds = { ...CHART_TEMP_PLOT };
+  readonly chartViewBoxHeight = CHART_TEMP_VIEWBOX_HEIGHT;
   tempPath = '';
+  tempAreaPath = '';
   tempTrendSegs: ChartTrendSegment[] = [];
   tempMin = -30;
   tempMax = 10;
-  timeLabels: { x: number; text: string }[] = [];
+  yAxisTicks: ChartYAxisTick[] = [];
+  yGridLines: string[] = [];
+  xGridLines: string[] = [];
+  timeLabels: ChartTimeLabel[] = [];
+  timeRangeLabel = '';
+  readonly activityTimeAxis = CHART_ACTIVITY_TIME_AXIS;
+  private axisLabelBucket = chartAxisMaxTimeLabels();
 
   /** Franjas actividad: [ { lane, x0, x1, on } ] en coords 0–100 */
   activityRects: { lane: number; x0: number; x1: number; on: boolean }[] = [];
@@ -112,6 +138,9 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
   /** Histograma temp1 en rango visible */
   histBars: { x: number; h: number; w: number }[] = [];
   histMaxCount = 1;
+  histLo = 0;
+  histHi = 0;
+  readonly histViewBoxHeight = 44;
 
   /** Refleja si esta vista está en pantalla completa del navegador. */
   isFullscreenUi = false;
@@ -187,6 +216,16 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     const el = this.fullscreenRoot?.nativeElement;
     if (el && isCurrentFullscreen(el)) {
       void exitFullscreenBestEffort();
+    }
+  }
+
+  @HostListener('window:resize')
+  @HostListener('window:orientationchange')
+  onChartViewportChange(): void {
+    const bucket = chartAxisMaxTimeLabels();
+    if (bucket !== this.axisLabelBucket && this.readings.length) {
+      this.axisLabelBucket = bucket;
+      this.rebuildChartGeometry();
     }
   }
 
@@ -467,8 +506,19 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     return this.chartStylePreset === 'area' || this.chartStylePreset === 'technical';
   }
 
-  toggleChartTallLayout(): void {
-    this.chartTallLayout = !this.chartTallLayout;
+  toggleMainChartTall(): void {
+    this.sectionHeights.mainTall = !this.sectionHeights.mainTall;
+    this.persistChartPanels();
+  }
+
+  toggleHistChartTall(): void {
+    this.sectionHeights.histTall = !this.sectionHeights.histTall;
+    this.persistChartPanels();
+  }
+
+  toggleActivityChartTall(): void {
+    this.sectionHeights.activityTall = !this.sectionHeights.activityTall;
+    this.persistChartPanels();
   }
 
   toggleSidePanel(): void {
@@ -491,12 +541,14 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     const p = loadChartPagePanels(this.layoutStorageKey);
     this.sidePanelOpen = p.sideOpen;
     this.extrasPanelOpen = p.extrasOpen;
+    this.sectionHeights = loadChartSectionHeights(this.layoutStorageKey);
   }
 
   private persistChartPanels(): void {
     persistChartPagePanels(this.layoutStorageKey, {
       sideOpen: this.sidePanelOpen,
       extrasOpen: this.extrasPanelOpen,
+      heights: { ...this.sectionHeights },
     });
   }
 
@@ -523,8 +575,8 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
       ev,
       this.chartStage?.nativeElement,
       this.displayPoints.length > 0,
-      this.tempPlot.x0,
-      this.tempPlot.x1
+      this.plot.x0,
+      this.plot.x1
     );
   }
 
@@ -567,11 +619,18 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     this.zoomedPoints = pts;
     if (pts.length === 0) {
       this.tempPath = '';
+      this.tempAreaPath = '';
       this.tempTrendSegs = [];
+      this.yAxisTicks = [];
+      this.yGridLines = [];
+      this.xGridLines = [];
       this.timeLabels = [];
+      this.timeRangeLabel = '';
       this.activityRects = [];
       this.histBars = [];
       this.histMaxCount = 1;
+      this.histLo = 0;
+      this.histHi = 0;
       this.cursorActive = false;
       return;
     }
@@ -584,7 +643,7 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
 
     const xAt = (iso: string) => {
       const tx = new Date(iso).getTime();
-      return this.tempPlot.x0 + ((tx - t0) / span) * (this.tempPlot.x1 - this.tempPlot.x0);
+      return this.plot.x0 + ((tx - t0) / span) * (this.plot.x1 - this.plot.x0);
     };
 
     let minT = Infinity;
@@ -603,8 +662,7 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     this.tempMin = minT - pad;
     this.tempMax = maxT + pad;
     const tr = this.tempMax - this.tempMin || 1;
-    const yAt = (c: number) =>
-      this.tempPlot.y1 - ((c - this.tempMin) / tr) * (this.tempPlot.y1 - this.tempPlot.y0);
+    const yAt = (c: number) => this.plot.y1 - ((c - this.tempMin) / tr) * (this.plot.y1 - this.plot.y0);
 
     const pathFor = (getter: (p: Pro400ReadingRow) => number | null | undefined, show: boolean) => {
       if (!show) return '';
@@ -622,6 +680,9 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     };
 
     this.tempPath = pathFor((p) => p.temp1_c, this.showTemp);
+    const closeArea = (path: string) =>
+      path ? `${path} L${this.plot.x1.toFixed(2)},${this.plot.y1.toFixed(2)} L${this.plot.x0.toFixed(2)},${this.plot.y1.toFixed(2)} Z` : '';
+    this.tempAreaPath = closeArea(this.tempPath);
     if (this.chartStylePreset === 'trend' && this.showTemp) {
       const eps = Math.max((this.tempMax - this.tempMin) * 0.002, 0.02);
       this.tempTrendSegs = buildChartTrendSegments(
@@ -635,11 +696,14 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
       this.tempTrendSegs = [];
     }
 
-    this.timeLabels = [
-      { x: this.tempPlot.x0, text: this.fmtShort(pts[0].created_at) },
-      { x: (this.tempPlot.x0 + this.tempPlot.x1) / 2, text: this.fmtShort(new Date((t0 + t1) / 2).toISOString()) },
-      { x: this.tempPlot.x1, text: this.fmtShort(pts[pts.length - 1].created_at) },
-    ];
+    const timeAxis = buildChartTimeAxis(this.plot, t0, t1, span, xAt);
+    this.timeLabels = timeAxis.timeLabels;
+    this.xGridLines = timeAxis.xGridLines;
+    this.timeRangeLabel = chartFormatTimeRangeLabel(t0, t1);
+
+    const yAxis = buildTempYAxisTicks(this.plot, this.tempMin, this.tempMax, yAt);
+    this.yAxisTicks = yAxis.ticks;
+    this.yGridLines = yAxis.gridLines;
 
     const lanes: { key: keyof Pro400ReadingRow; show: boolean; lane: number }[] = [
       { key: 'comp_on', show: this.showComp, lane: 0 },
@@ -679,6 +743,8 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
   private buildHistogram(pts: Pro400ReadingRow[]): void {
     this.histBars = [];
     this.histMaxCount = 1;
+    this.histLo = 0;
+    this.histHi = 0;
     if (!this.showHistogram || pts.length < 2) return;
 
     const vals: number[] = [];
@@ -692,6 +758,8 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
       lo -= 0.5;
       hi += 0.5;
     }
+    this.histLo = lo;
+    this.histHi = hi;
     const bins = 24;
     const w = 100 / bins;
     const counts = new Array(bins).fill(0);
@@ -707,8 +775,27 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     }
   }
 
-  activityLaneY(lane: number): number {
-    return 10 + lane * 20;
+  activityLaneVisible(lane: number): boolean {
+    if (lane === 0) return this.showComp;
+    if (lane === 1) return this.showDefrost;
+    return this.showDoor;
+  }
+
+  cursorTooltipHeight(): number {
+    return 5.8;
+  }
+
+  cursorTimeTextY(): number {
+    return this.plot.y0 + 9.5;
+  }
+
+  histBarY(ratio: number): number {
+    return 44 - this.barDisplayHeight(ratio);
+  }
+
+  histTempLabel(v: number): string {
+    const span = this.histHi - this.histLo;
+    return `${v.toFixed(span < 2 ? 1 : 0)}°`;
   }
 
   backToApp(): void {
@@ -720,7 +807,7 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
   }
 
   barDisplayHeight(ratio: number): number {
-    return Math.max(0.6, ratio * 36);
+    return Math.max(0.6, ratio * 34);
   }
 
   startTempPan(ev: MouseEvent): void {
@@ -745,7 +832,12 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
       this.touchStartSpan = this.chartZoomHi - this.chartZoomLo;
       this.touchStartZoomLo = this.chartZoomLo;
       this.touchStartZoomHi = this.chartZoomHi;
-      this.touchStartCenterNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / Math.max(1, r.width)));
+      this.touchStartCenterNorm = chartPlotNormFromClientX(
+        (t0.clientX + t1.clientX) * 0.5,
+        this.plot.x0,
+        this.plot.x1,
+        chartEl
+      ) ?? 0.5;
       ev.preventDefault();
       return;
     }
@@ -768,7 +860,12 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
       const t0 = ev.touches[0];
       const t1 = ev.touches[1];
       const dist = Math.max(6, Math.abs(t1.clientX - t0.clientX));
-      const centerNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / r.width));
+      const centerNorm = chartPlotNormFromClientX(
+        (t0.clientX + t1.clientX) * 0.5,
+        this.plot.x0,
+        this.plot.x1,
+        chartEl
+      ) ?? 0.5;
       this.chartZoomLo = this.touchStartZoomLo;
       this.chartZoomHi = this.touchStartZoomHi;
       chartZoomHostPinch(this, this.touchStartDist / dist, centerNorm);
@@ -805,9 +902,9 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
       this.cursorActive = false;
       return;
     }
-    const cx = Math.max(this.tempPlot.x0, Math.min(this.tempPlot.x1, x));
+    const cx = Math.max(this.plot.x0, Math.min(this.plot.x1, x));
     this.cursorX = cx;
-    const ratio = (cx - this.tempPlot.x0) / Math.max(0.0001, this.tempPlot.x1 - this.tempPlot.x0);
+    const ratio = (cx - this.plot.x0) / Math.max(0.0001, this.plot.x1 - this.plot.x0);
     const targetMs = this.zoomStartMs + ratio * this.zoomSpanMs;
 
     let best = this.zoomedPoints[0];
@@ -822,8 +919,7 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     }
 
     const tr = this.tempMax - this.tempMin || 1;
-    const yAt = (v: number) =>
-      this.tempPlot.y1 - ((v - this.tempMin) / tr) * (this.tempPlot.y1 - this.tempPlot.y0);
+    const yAt = (v: number) => this.plot.y1 - ((v - this.tempMin) / tr) * (this.plot.y1 - this.plot.y0);
     this.cursorY = yAt(best.temp1_c);
     this.cursorLabelTemp = Number.isFinite(best.temp1_c) ? `${best.temp1_c.toFixed(2)} °C` : '—';
     this.cursorLabelTime = new Date(best.created_at).toLocaleString('es-AR', {

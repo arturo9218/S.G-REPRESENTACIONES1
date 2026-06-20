@@ -84,9 +84,6 @@
       <button type="button" class="btn btn--ghost btn--block" [disabled]="pdfExporting || !readings.length" (click)="downloadChartPdf()">
         {{ pdfExporting ? 'Generando PDF…' : 'Descargar PDF' }}
       </button>
-      <button type="button" class="btn btn--ghost btn--block pr5-tall-btn" (click)="toggleChartTallLayout()">
-        {{ chartTallLayout ? 'Gráficos: tamaño normal' : 'Gráficos más altos' }}
-      </button>
       <dl class="pr5-side__meta" *ngIf="displayPoints.length">
         <div class="pr5-side__meta-row">
           <dt>Eje vertical</dt>
@@ -109,7 +106,6 @@
 
     <section
       class="pr5-main card"
-      [class.pr5-main--charts-tall]="chartTallLayout"
       [class.pr5-main--focus-chart]="!extrasPanelOpen"
     >
       <div class="pr5-main__head">
@@ -152,9 +148,9 @@
             type="button"
             class="btn btn--ghost pr5-tall-btn pr5-tall-btn--inline"
             *ngIf="displayPoints.length"
-            (click)="toggleChartTallLayout()"
+            (click)="toggleMainChartTall()"
           >
-            {{ chartTallLayout ? 'Menos alto' : 'Más alto' }}
+            {{ sectionHeights.mainTall ? 'Normal' : 'Más alto' }}
           </button>
           <button
             type="button"
@@ -199,6 +195,7 @@
         <div
           #chartStage
           class="pr5-svg-wrap pr5-svg-wrap--main"
+          [class.pr5-svg-wrap--tall]="sectionHeights.mainTall"
           [class.pr5-svg-wrap--style-line]="chartStylePreset === 'line'"
           [class.pr5-svg-wrap--style-minimal]="chartStylePreset === 'minimal'"
           [class.pr5-svg-wrap--style-technical]="chartStylePreset === 'technical'"
@@ -493,13 +490,18 @@
       </div>
 
       <ng-container *ngIf="extrasPanelOpen">
-      <div class="pr5-states" *ngIf="displayPoints.length && (showComp1 || showComp2 || showComp3 || showAlarm)">
+      <div class="pr5-states" *ngIf="displayPoints.length && (showComp1 || showComp2 || showComp3 || showAlarm)" [class.pr5-states--tall]="sectionHeights.activityTall">
         <div class="pr5-states__head">
-          <h3 class="pr5-states__title">Motores y alarma en el tiempo</h3>
-          <p class="pr5-states__hint" *ngIf="showMotorStepChart">
-            Línea escalón: <strong>arriba = ON</strong>, abajo = OFF (entre lecturas). Misma escala de tiempo que el gráfico de arriba.
-          </p>
-          <p class="pr5-states__hint" *ngIf="!showMotorStepChart">Vista por tramos (barras). Activá «Gráfico escalón» en el panel para ver curvas ON/OFF.</p>
+          <div class="pr5-states__head-text">
+            <h3 class="pr5-states__title">Motores y alarma en el tiempo</h3>
+            <p class="pr5-states__hint" *ngIf="showMotorStepChart">
+              Línea escalón: <strong>arriba = ON</strong>, abajo = OFF (entre lecturas). Misma escala de tiempo que el gráfico de arriba.
+            </p>
+            <p class="pr5-states__hint" *ngIf="!showMotorStepChart">Vista por tramos (barras). Activá «Gráfico escalón» en el panel para ver curvas ON/OFF.</p>
+          </div>
+          <button type="button" class="btn btn--ghost pr5-section-tall-btn" (click)="toggleActivityChartTall()">
+            {{ sectionHeights.activityTall ? 'Normal' : 'Más alto' }}
+          </button>
         </div>
         <div class="pr5-states__grid">
           <div class="pr5-states__labels">
@@ -508,7 +510,12 @@
             <span *ngIf="showComp3">C3</span>
             <span *ngIf="showAlarm">Alarma</span>
           </div>
-          <svg class="pr5-states__svg" viewBox="0 0 100 96" preserveAspectRatio="none">
+          <div class="pr5-panel-chart">
+            <svg
+              class="pr5-states__svg pr5-panel-chart__plot"
+              [attr.viewBox]="'0 0 100 ' + activityTimeAxis.viewBoxHeight"
+              preserveAspectRatio="none"
+            >
             <defs>
               <clipPath id="pr5MotorLaneClip">
                 <rect x="0" y="4" width="100" height="80" rx="0.2" />
@@ -519,8 +526,8 @@
                 class="pr5-step-grid"
                 [attr.x1]="lb.x"
                 [attr.x2]="lb.x"
-                y1="6"
-                y2="82"
+                [attr.y1]="activityTimeAxis.plotY0"
+                [attr.y2]="activityTimeAxis.plotY1"
                 vector-effect="non-scaling-stroke"
               />
             </ng-container>
@@ -580,8 +587,22 @@
                 </ng-container>
               </ng-container>
             </g>
-            <text *ngFor="let lb of timeLabels" class="pr5-x-tick" [attr.x]="lb.x" y="92" [attr.text-anchor]="lb.anchor ?? 'middle'">{{ lb.text }}</text>
-          </svg>
+            </svg>
+            <div class="pr5-panel-time-foot">
+              <div class="pr5-panel-time-foot__ticks">
+                <span
+                  *ngFor="let lb of timeLabels"
+                  class="pr5-panel-time-foot__tick"
+                  [class.pr5-panel-time-foot__tick--start]="lb.anchor === 'start'"
+                  [class.pr5-panel-time-foot__tick--end]="lb.anchor === 'end'"
+                  [style.left.%]="lb.x"
+                >
+                  {{ lb.text }}
+                </span>
+              </div>
+              <div class="pr5-panel-time-foot__title">Tiempo (local)</div>
+            </div>
+          </div>
         </div>
       </div>
 

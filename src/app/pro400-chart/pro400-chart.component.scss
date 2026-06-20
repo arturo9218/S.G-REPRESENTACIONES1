@@ -1,15 +1,5 @@
 @import '../../styles/chart-pr5-shell';
 
-.pr5-svg-wrap--hist,
-.pr5-svg-wrap--states {
-  min-height: 140px;
-  flex: 0 0 auto;
-}
-
-.p4-svg--temp {
-  min-height: 100%;
-}
-
 .p4-line {
   stroke: #4ade80;
   stroke-width: 0.55;
@@ -18,24 +8,6 @@
 
 .p4-hist-bar {
   fill: rgba(56, 189, 248, 0.55);
-}
-
-.p4-act-grid {
-  display: grid;
-  grid-template-columns: minmax(5.5rem, 7rem) minmax(0, 1fr);
-  gap: 0.5rem;
-  align-items: stretch;
-}
-
-.p4-act-labels {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-around;
-  gap: 0.35rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: $muted;
-  padding: 0.35rem 0;
 }
 
 .p4-act-rect {

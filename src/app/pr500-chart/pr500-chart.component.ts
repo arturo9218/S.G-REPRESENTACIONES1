@@ -21,6 +21,8 @@ import {
 import {
   buildChartTimeAxis,
   chartAxisMaxTimeLabels,
+  CHART_ACTIVITY_TIME_AXIS,
+  chartFormatTimeRangeLabel,
   type ChartTimeLabel,
 } from '../core/chart-axis.utils';
 import {
@@ -32,7 +34,9 @@ import {
 } from '../core/chart-svg-coords';
 import {
   chartPagePanelsDefaults,
+  chartSectionHeightsDefaults,
   loadChartPagePanels,
+  loadChartSectionHeights,
   persistChartPagePanels,
 } from '../core/chart-page-layout';
 import {
@@ -162,6 +166,8 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   readonly chartViewBoxHeight = CHART_TEMP_VIEWBOX_HEIGHT;
   /** Marcas del eje X: posición, texto y segmento de marca bajo el gráfico. */
   timeLabels: ChartTimeLabel[] = [];
+  timeRangeLabel = '';
+  readonly activityTimeAxis = CHART_ACTIVITY_TIME_AXIS;
   yAxisTicks: { y: number; label: string; markX0: number; markX1: number }[] = [];
   yGridLines: string[] = [];
   /** Rejilla vertical en marcas de tiempo (trazos suaves). */
@@ -175,9 +181,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   /** Vista escalón vs barras por tramo. */
   showMotorStepChart = true;
   readonly activityLabels = ['C1', 'C2', 'C3', 'Alarma'];
-  /** Gráficos de presión + motores más altos (localStorage). */
-  private readonly chartTallStorageKey = 'ar_pr500_chart_tall_v1';
-  chartTallLayout = false;
+  sectionHeights = chartSectionHeightsDefaults();
 
   private readonly layoutStorageKey = 'ar_pr500_chart_panels_v1';
   sidePanelOpen = chartPagePanelsDefaults().sideOpen;
@@ -239,7 +243,6 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadChartStylePreset();
-    this.loadChartTallLayout();
     this.loadChartPanels();
     this.sub = this.route.queryParamMap.subscribe((q) => {
       const id = q.get('pr500Id');
@@ -323,12 +326,22 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     const p = loadChartPagePanels(this.layoutStorageKey);
     this.sidePanelOpen = p.sideOpen;
     this.extrasPanelOpen = p.extrasOpen;
+    this.sectionHeights = loadChartSectionHeights(this.layoutStorageKey);
+    // Migración: tall global antiguo → panel principal
+    try {
+      if (localStorage.getItem('ar_pr500_chart_tall_v1') === '1' && !p.heights) {
+        this.sectionHeights.mainTall = true;
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   private persistChartPanels(): void {
     persistChartPagePanels(this.layoutStorageKey, {
       sideOpen: this.sidePanelOpen,
       extrasOpen: this.extrasPanelOpen,
+      heights: { ...this.sectionHeights },
     });
   }
 
@@ -380,21 +393,14 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     this.rebuildChartGeometry();
   }
 
-  loadChartTallLayout(): void {
-    try {
-      this.chartTallLayout = localStorage.getItem(this.chartTallStorageKey) === '1';
-    } catch {
-      this.chartTallLayout = false;
-    }
+  toggleMainChartTall(): void {
+    this.sectionHeights.mainTall = !this.sectionHeights.mainTall;
+    this.persistChartPanels();
   }
 
-  toggleChartTallLayout(): void {
-    this.chartTallLayout = !this.chartTallLayout;
-    try {
-      localStorage.setItem(this.chartTallStorageKey, this.chartTallLayout ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
+  toggleActivityChartTall(): void {
+    this.sectionHeights.activityTall = !this.sectionHeights.activityTall;
+    this.persistChartPanels();
   }
 
   onMotorViewToggle(): void {
@@ -966,6 +972,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       this.tempAxisTicks = [];
       this.plot.x1 = 99.5;
       this.timeLabels = [];
+      this.timeRangeLabel = '';
       this.yAxisTicks = [];
       this.yGridLines = [];
       this.xGridLines = [];
@@ -1174,6 +1181,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     const timeAxis = buildChartTimeAxis({ x0, x1, y0, y1 }, t0, t1, span, xAt);
     this.timeLabels = timeAxis.timeLabels;
     this.xGridLines = timeAxis.xGridLines;
+    this.timeRangeLabel = chartFormatTimeRangeLabel(t0, t1);
     this.activityRects = this.buildActivityRects(pts, xAt);
     const laneY = (lane: number) => {
       const base = 8 + lane * 20;

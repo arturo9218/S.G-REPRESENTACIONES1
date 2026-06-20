@@ -1,12 +1,6 @@
 @import '../../styles/chart-pr5-shell';
 @import '../pr500-chart/pr500-motors';
 
-.pr5-svg-wrap--hist {
-  min-height: 160px;
-  flex: 0 0 auto;
-  overflow: visible;
-}
-
 .cb-line {
   stroke-width: 0.55;
   vector-effect: non-scaling-stroke;

@@ -33,10 +33,28 @@ import {
   chartZoomHostSlice,
   chartZoomHostWheel,
 } from '../core/chart-history-interaction';
-import { CHART_SVG_PRESERVE_ASPECT, chartViewBoxXFromClientX } from '../core/chart-svg-coords';
+import {
+  CHART_SVG_PRESERVE_ASPECT,
+  CHART_TEMP_PLOT,
+  CHART_TEMP_VIEWBOX_HEIGHT,
+  chartPlotNormFromClientX,
+  chartViewBoxXFromClientX,
+} from '../core/chart-svg-coords';
+import {
+  buildChartTimeAxis,
+  buildTempYAxisTicks,
+  chartAxisMaxTimeLabels,
+  CHART_PANEL_TIME_AXIS,
+  chartFormatTimeRangeLabel,
+  type ChartPlotBounds,
+  type ChartTimeLabel,
+  type ChartYAxisTick,
+} from '../core/chart-axis.utils';
 import {
   chartPagePanelsDefaults,
+  chartSectionHeightsDefaults,
   loadChartPagePanels,
+  loadChartSectionHeights,
   persistChartPagePanels,
 } from '../core/chart-page-layout';
 import {
@@ -133,7 +151,7 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     { value: 'technical', label: 'Técnico (rejilla)' },
     { value: 'trend', label: 'Tendencia (color por subida/bajada)' },
   ];
-  chartTallLayout = false;
+  sectionHeights = chartSectionHeightsDefaults();
 
   private readonly layoutStorageKey = 'ar_datalogger_chart_panels_v1';
   sidePanelOpen = chartPagePanelsDefaults().sideOpen;
@@ -143,14 +161,23 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
   displayPoints: DataloggerReadingRow[] = [];
   private dataloggerParams: DataloggerFormModel | null = null;
 
-  /** SVG viewBox 0 0 100 56 — temperaturas */
-  readonly tempPlot = { x0: 4, x1: 99, y0: 4, y1: 52 };
+  readonly plot: ChartPlotBounds = { ...CHART_TEMP_PLOT };
+  readonly chartViewBoxHeight = CHART_TEMP_VIEWBOX_HEIGHT;
   tempPath = '';
-  timeLabels: { x: number; text: string }[] = [];
+  yAxisTicks: ChartYAxisTick[] = [];
+  yGridLines: string[] = [];
+  xGridLines: string[] = [];
+  timeLabels: ChartTimeLabel[] = [];
+  timeRangeLabel = '';
+  readonly panelTimeAxis = CHART_PANEL_TIME_AXIS;
+  private axisLabelBucket = chartAxisMaxTimeLabels();
 
   /** Histograma temperaturas en rango visible */
   histBars: { x: number; h: number; w: number }[] = [];
   histMaxCount = 1;
+  histLo = 0;
+  histHi = 0;
+  readonly histViewBoxHeight = 44;
 
   /** Refleja si esta vista está en pantalla completa del navegador. */
   isFullscreenUi = false;
@@ -226,6 +253,16 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     const el = this.fullscreenRoot?.nativeElement;
     if (el && isCurrentFullscreen(el)) {
       void exitFullscreenBestEffort();
+    }
+  }
+
+  @HostListener('window:resize')
+  @HostListener('window:orientationchange')
+  onChartViewportChange(): void {
+    const bucket = chartAxisMaxTimeLabels();
+    if (bucket !== this.axisLabelBucket && this.readings.length) {
+      this.axisLabelBucket = bucket;
+      this.rebuildChartGeometry();
     }
   }
 
@@ -514,8 +551,19 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     return this.chartStylePreset === 'area' || this.chartStylePreset === 'technical';
   }
 
-  toggleChartTallLayout(): void {
-    this.chartTallLayout = !this.chartTallLayout;
+  toggleMainChartTall(): void {
+    this.sectionHeights.mainTall = !this.sectionHeights.mainTall;
+    this.persistChartPanels();
+  }
+
+  toggleHistChartTall(): void {
+    this.sectionHeights.histTall = !this.sectionHeights.histTall;
+    this.persistChartPanels();
+  }
+
+  toggleActivityChartTall(): void {
+    this.sectionHeights.activityTall = !this.sectionHeights.activityTall;
+    this.persistChartPanels();
   }
 
   toggleSidePanel(): void {
@@ -538,12 +586,14 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     const p = loadChartPagePanels(this.layoutStorageKey);
     this.sidePanelOpen = p.sideOpen;
     this.extrasPanelOpen = p.extrasOpen;
+    this.sectionHeights = loadChartSectionHeights(this.layoutStorageKey);
   }
 
   private persistChartPanels(): void {
     persistChartPagePanels(this.layoutStorageKey, {
       sideOpen: this.sidePanelOpen,
       extrasOpen: this.extrasPanelOpen,
+      heights: { ...this.sectionHeights },
     });
   }
 
@@ -570,8 +620,8 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       ev,
       this.chartStage?.nativeElement,
       this.displayPoints.length > 0,
-      this.tempPlot.x0,
-      this.tempPlot.x1
+      this.plot.x0,
+      this.plot.x1
     );
   }
 
@@ -620,8 +670,14 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       this.powerPaths = ['', '', ''];
       this.pressPaths = ['', ''];
       this.timeLabels = [];
+      this.timeRangeLabel = '';
+      this.yAxisTicks = [];
+      this.yGridLines = [];
+      this.xGridLines = [];
       this.histBars = [];
       this.histMaxCount = 1;
+      this.histLo = 0;
+      this.histHi = 0;
       this.cursorActive = false;
       return;
     }
@@ -634,7 +690,7 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
 
     const xAt = (iso: string) => {
       const tx = new Date(iso).getTime();
-      return this.tempPlot.x0 + ((tx - t0) / span) * (this.tempPlot.x1 - this.tempPlot.x0);
+      return this.plot.x0 + ((tx - t0) / span) * (this.plot.x1 - this.plot.x0);
     };
 
     let minT = Infinity;
@@ -658,7 +714,7 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     this.tempMax = maxT + pad;
     const tr = this.tempMax - this.tempMin || 1;
     const yAt = (c: number) =>
-      this.tempPlot.y1 - ((c - this.tempMin) / tr) * (this.tempPlot.y1 - this.tempPlot.y0);
+      this.plot.y1 - ((c - this.tempMin) / tr) * (this.plot.y1 - this.plot.y0);
 
     const pathForNum = (
       getter: (p: DataloggerReadingRow) => number | null | undefined,
@@ -709,7 +765,12 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     this.powerMin = minP - padP;
     this.powerMax = maxP + padP;
     const pr = this.powerMax - this.powerMin || 1;
-    const yPow = (v: number) => this.tempPlot.y1 - ((v - this.powerMin) / pr) * (this.tempPlot.y1 - this.tempPlot.y0);
+    const panelPlot = {
+      y0: this.panelTimeAxis.plotY0,
+      y1: this.panelTimeAxis.plotY1,
+    };
+    const yPow = (v: number) =>
+      panelPlot.y1 - ((v - this.powerMin) / pr) * (panelPlot.y1 - panelPlot.y0);
     this.powerPaths = POWER_FIELDS.map((k, i) =>
       this.showPowers[i] ? pathForNum((p) => p[k] as number | null, yPow) : ''
     );
@@ -735,18 +796,21 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     this.pressMax = maxPr + padPr;
     const prSpan = this.pressMax - this.pressMin || 1;
     const yPress = (v: number) =>
-      this.tempPlot.y1 - ((v - this.pressMin) / prSpan) * (this.tempPlot.y1 - this.tempPlot.y0);
+      panelPlot.y1 - ((v - this.pressMin) / prSpan) * (panelPlot.y1 - panelPlot.y0);
     this.pressPaths = PRESS_FIELDS.map((k, i) =>
       this.showPress[i] ? pathForNum((p) => p[k] as number | null, yPress) : ''
     );
 
     this.tempPath = this.tempPaths[0] ?? '';
 
-    this.timeLabels = [
-      { x: this.tempPlot.x0, text: this.fmtShort(pts[0].created_at) },
-      { x: (this.tempPlot.x0 + this.tempPlot.x1) / 2, text: this.fmtShort(new Date((t0 + t1) / 2).toISOString()) },
-      { x: this.tempPlot.x1, text: this.fmtShort(pts[pts.length - 1].created_at) },
-    ];
+    const timeAxis = buildChartTimeAxis(this.plot, t0, t1, span, xAt);
+    this.timeLabels = timeAxis.timeLabels;
+    this.xGridLines = timeAxis.xGridLines;
+    this.timeRangeLabel = chartFormatTimeRangeLabel(t0, t1);
+
+    const yAxis = buildTempYAxisTicks(this.plot, this.tempMin, this.tempMax, yAt);
+    this.yAxisTicks = yAxis.ticks;
+    this.yGridLines = yAxis.gridLines;
 
     this.buildHistogram(pts);
     if (this.cursorActive) this.updateCursorForX(this.cursorX);
@@ -768,6 +832,8 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
   private buildHistogram(pts: DataloggerReadingRow[]): void {
     this.histBars = [];
     this.histMaxCount = 1;
+    this.histLo = 0;
+    this.histHi = 0;
     if (!this.showHistogram || pts.length < 2) return;
 
     const vals: number[] = [];
@@ -785,6 +851,8 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       lo -= 0.5;
       hi += 0.5;
     }
+    this.histLo = lo;
+    this.histHi = hi;
     const bins = 24;
     const w = 100 / bins;
     const counts = new Array(bins).fill(0);
@@ -798,6 +866,31 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       const ratio = counts[i] / this.histMaxCount;
       this.histBars.push({ x: i * w, h: ratio, w: w * 0.92 });
     }
+  }
+
+  histBarY(ratio: number): number {
+    return 44 - this.barDisplayHeight(ratio);
+  }
+
+  histTempLabel(v: number): string {
+    const span = this.histHi - this.histLo;
+    return `${v.toFixed(span < 2 ? 1 : 0)}°`;
+  }
+
+  barDisplayHeight(ratio: number): number {
+    return Math.max(0.6, ratio * 34);
+  }
+
+  cursorTooltipHeight(): number {
+    return 5.8;
+  }
+
+  cursorTimeTextY(): number {
+    return this.plot.y0 + 9.5;
+  }
+
+  areaCloseSuffix(): string {
+    return ` L${this.plot.x1.toFixed(2)},${this.plot.y1.toFixed(2)} L${this.plot.x0.toFixed(2)},${this.plot.y1.toFixed(2)} Z`;
   }
 
   toggleTemp(i: number): void {
@@ -821,10 +914,6 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
 
   rectW(r: { x0: number; x1: number }): number {
     return Math.max(0.08, r.x1 - r.x0);
-  }
-
-  barDisplayHeight(ratio: number): number {
-    return Math.max(0.6, ratio * 36);
   }
 
   startTempPan(ev: MouseEvent): void {
@@ -909,9 +998,9 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       this.cursorActive = false;
       return;
     }
-    const cx = Math.max(this.tempPlot.x0, Math.min(this.tempPlot.x1, x));
+    const cx = Math.max(this.plot.x0, Math.min(this.plot.x1, x));
     this.cursorX = cx;
-    const ratio = (cx - this.tempPlot.x0) / Math.max(0.0001, this.tempPlot.x1 - this.tempPlot.x0);
+    const ratio = (cx - this.plot.x0) / Math.max(0.0001, this.plot.x1 - this.plot.x0);
     const targetMs = this.zoomStartMs + ratio * this.zoomSpanMs;
 
     let best = this.zoomedPoints[0];
@@ -927,8 +1016,8 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
 
     const tr = this.tempMax - this.tempMin || 1;
     const yAt = (v: number) =>
-      this.tempPlot.y1 - ((v - this.tempMin) / tr) * (this.tempPlot.y1 - this.tempPlot.y0);
-    this.cursorY = best.temp1_c != null && Number.isFinite(best.temp1_c) ? yAt(best.temp1_c) : this.tempPlot.y1;
+      this.plot.y1 - ((v - this.tempMin) / tr) * (this.plot.y1 - this.plot.y0);
+    this.cursorY = best.temp1_c != null && Number.isFinite(best.temp1_c) ? yAt(best.temp1_c) : this.plot.y1;
     this.cursorLabelTemp =
       best.temp1_c != null && Number.isFinite(best.temp1_c) ? `${best.temp1_c.toFixed(2)} °C (T1)` : '—';
     this.cursorLabelTime = new Date(best.created_at).toLocaleString('es-AR', {

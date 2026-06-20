@@ -81,9 +81,6 @@
       <button type="button" class="btn btn--ghost btn--block" [disabled]="pdfExporting || !readings.length" (click)="downloadChartPdf()">
         {{ pdfExporting ? 'Generando PDF…' : 'Descargar PDF' }}
       </button>
-      <button type="button" class="btn btn--ghost btn--block pr5-tall-btn" (click)="toggleChartTallLayout()">
-        {{ chartTallLayout ? 'Gráficos: tamaño normal' : 'Gráficos más altos' }}
-      </button>
       <dl class="pr5-side__meta" *ngIf="readings.length">
         <div class="pr5-side__meta-row">
           <dt>Escala °C</dt>
@@ -98,7 +95,6 @@
 
     <section
       class="pr5-main card"
-      [class.pr5-main--charts-tall]="chartTallLayout"
       [class.pr5-main--focus-chart]="!extrasPanelOpen"
     >
       <div class="pr5-main__head">
@@ -140,9 +136,9 @@
           <button
             type="button"
             class="btn btn--ghost pr5-tall-btn pr5-tall-btn--inline"
-            (click)="toggleChartTallLayout()"
+            (click)="toggleMainChartTall()"
           >
-            {{ chartTallLayout ? 'Normal' : 'Más alto' }}
+            {{ sectionHeights.mainTall ? 'Normal' : 'Más alto' }}
           </button>
           <button type="button" class="btn btn--ghost pr5-fs-btn" [disabled]="!displayPoints.length" (click)="toggleChartFullscreen()">
             {{ chartFullscreen ? 'Salir pantalla completa' : 'Pantalla completa' }}
@@ -167,6 +163,7 @@
         <div
           #chartStage
           class="pr5-svg-wrap pr5-svg-wrap--main"
+          [class.pr5-svg-wrap--tall]="sectionHeights.mainTall"
           [class.pr5-svg-wrap--style-line]="chartStylePreset === 'line'"
           [class.pr5-svg-wrap--style-minimal]="chartStylePreset === 'minimal'"
           [class.pr5-svg-wrap--style-technical]="chartStylePreset === 'technical'"
@@ -377,33 +374,60 @@
 
       <div class="pr5-states" *ngIf="extrasPanelOpen && showHistogram && readings.length">
         <div class="pr5-states__head">
-          <h3 class="pr5-states__title">Histograma de temperaturas</h3>
-          <p class="pr5-states__hint">Distribución en el rango elegido</p>
+          <div class="pr5-states__head-text">
+            <h3 class="pr5-states__title">Histograma de temperaturas</h3>
+            <p class="pr5-states__hint">Distribución en el rango · {{ timeRangeLabel }}</p>
+          </div>
+          <button type="button" class="btn btn--ghost pr5-section-tall-btn" (click)="toggleHistChartTall()">
+            {{ sectionHeights.histTall ? 'Normal' : 'Más alto' }}
+          </button>
         </div>
-        <div class="pr5-svg-wrap pr5-svg-wrap--hist">
-          <svg class="pr5-svg cb-svg--hist" [attr.viewBox]="'0 0 100 ' + histViewBoxHeight" preserveAspectRatio="none">
-            <rect x="0" y="0" width="100" [attr.height]="histViewBoxHeight" class="pr5-plot-bg" rx="1" />
-            <text class="pr5-axis-title pr5-axis-title--y" x="3.5" y="10" text-anchor="start">Cant.</text>
-            <line class="pr5-grid-line" x1="8" y1="44" x2="98" y2="44" vector-effect="non-scaling-stroke" />
-            <rect
-              *ngFor="let b of histBars"
-              class="cb-hist-bar"
-              [attr.x]="b.x + 0.1"
-              [attr.y]="histBarY(b.h)"
-              [attr.width]="b.w"
-              [attr.height]="barDisplayHeight(b.h)"
-            />
-            <text class="pr5-x-tick" x="8" y="50" text-anchor="start">{{ histTempLabel(histLo) }}</text>
-            <text class="pr5-x-tick" x="98" y="50" text-anchor="end">{{ histTempLabel(histHi) }}</text>
-            <text class="pr5-axis-title pr5-axis-title--x" x="50" y="51.5" text-anchor="middle">Temperatura (°C)</text>
-          </svg>
+        <div
+          class="pr5-svg-wrap pr5-svg-wrap--hist"
+          [class.pr5-svg-wrap--tall]="sectionHeights.histTall"
+        >
+          <div class="pr5-panel-chart pr5-panel-chart--hist">
+            <span class="pr5-panel-chart__y-label">Cant.</span>
+            <svg
+              class="pr5-svg cb-svg--hist pr5-panel-chart__plot"
+              [attr.viewBox]="'0 0 100 ' + histViewBoxHeight"
+              preserveAspectRatio="none"
+            >
+              <rect x="0" y="0" width="100" [attr.height]="histViewBoxHeight" class="pr5-plot-bg" rx="1" />
+              <line class="pr5-grid-line" x1="8" y1="44" x2="98" y2="44" vector-effect="non-scaling-stroke" />
+              <rect
+                *ngFor="let b of histBars"
+                class="cb-hist-bar"
+                [attr.x]="b.x + 0.1"
+                [attr.y]="histBarY(b.h)"
+                [attr.width]="b.w"
+                [attr.height]="barDisplayHeight(b.h)"
+              />
+            </svg>
+            <div class="pr5-panel-hist-foot">
+              <div class="pr5-panel-hist-foot__ticks">
+                <span class="pr5-panel-hist-foot__tick pr5-panel-hist-foot__tick--start" [style.left.%]="8">{{
+                  histTempLabel(histLo)
+                }}</span>
+                <span class="pr5-panel-hist-foot__tick pr5-panel-hist-foot__tick--end" [style.left.%]="98">{{
+                  histTempLabel(histHi)
+                }}</span>
+              </div>
+              <div class="pr5-panel-hist-foot__title">Temperatura (°C)</div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="pr5-states" *ngIf="extrasPanelOpen && readings.length">
+      <div class="pr5-states" *ngIf="extrasPanelOpen && readings.length" [class.pr5-states--tall]="sectionHeights.activityTall">
         <div class="pr5-states__head">
-          <h3 class="pr5-states__title">Actividad (relés / puerta)</h3>
-          <p class="pr5-states__hint">Verde = encendido / puerta abierta · Gris = apagado / cerrada</p>
+          <div class="pr5-states__head-text">
+            <h3 class="pr5-states__title">Actividad (relés / puerta)</h3>
+            <p class="pr5-states__hint">Verde = encendido / puerta abierta · Gris = apagado / cerrada</p>
+          </div>
+          <button type="button" class="btn btn--ghost pr5-section-tall-btn" (click)="toggleActivityChartTall()">
+            {{ sectionHeights.activityTall ? 'Normal' : 'Más alto' }}
+          </button>
         </div>
         <div class="pr5-states__grid">
           <div class="pr5-states__labels">
@@ -412,38 +436,49 @@
             <span *ngIf="showDefrost">Deshielo</span>
             <span *ngIf="showDoor">Puerta</span>
           </div>
-          <svg class="pr5-states__svg" viewBox="0 0 100 96" preserveAspectRatio="none">
-            <ng-container *ngFor="let lb of timeLabels">
-              <line
-                class="pr5-step-grid"
-                [attr.x1]="lb.x"
-                [attr.x2]="lb.x"
-                y1="6"
-                y2="82"
-                vector-effect="non-scaling-stroke"
-              />
-            </ng-container>
-            <ng-container *ngFor="let r of activityRects">
-              <rect
-                *ngIf="activityLaneVisible(r.lane)"
-                class="pr5-state-rect"
-                [class.pr5-state-rect--on]="r.on"
-                [attr.x]="r.x0"
-                [attr.y]="8 + r.lane * 20"
-                [attr.width]="stateRectW(r)"
-                height="14"
-              />
-            </ng-container>
-            <text
-              *ngFor="let lb of timeLabels"
-              class="pr5-x-tick"
-              [attr.x]="lb.x"
-              y="92"
-              [attr.text-anchor]="lb.anchor ?? 'middle'"
+          <div class="pr5-panel-chart">
+            <svg
+              class="pr5-states__svg pr5-panel-chart__plot"
+              [attr.viewBox]="'0 0 100 ' + activityTimeAxis.viewBoxHeight"
+              preserveAspectRatio="none"
             >
-              {{ lb.text }}
-            </text>
-          </svg>
+              <ng-container *ngFor="let lb of timeLabels">
+                <line
+                  class="pr5-step-grid"
+                  [attr.x1]="lb.x"
+                  [attr.x2]="lb.x"
+                  [attr.y1]="activityTimeAxis.plotY0"
+                  [attr.y2]="activityTimeAxis.plotY1"
+                  vector-effect="non-scaling-stroke"
+                />
+              </ng-container>
+              <ng-container *ngFor="let r of activityRects">
+                <rect
+                  *ngIf="activityLaneVisible(r.lane)"
+                  class="pr5-state-rect"
+                  [class.pr5-state-rect--on]="r.on"
+                  [attr.x]="r.x0"
+                  [attr.y]="8 + r.lane * 20"
+                  [attr.width]="stateRectW(r)"
+                  height="14"
+                />
+              </ng-container>
+            </svg>
+            <div class="pr5-panel-time-foot">
+              <div class="pr5-panel-time-foot__ticks">
+                <span
+                  *ngFor="let lb of timeLabels"
+                  class="pr5-panel-time-foot__tick"
+                  [class.pr5-panel-time-foot__tick--start]="lb.anchor === 'start'"
+                  [class.pr5-panel-time-foot__tick--end]="lb.anchor === 'end'"
+                  [style.left.%]="lb.x"
+                >
+                  {{ lb.text }}
+                </span>
+              </div>
+              <div class="pr5-panel-time-foot__title">Tiempo (local)</div>
+            </div>
+          </div>
         </div>
       </div>
     </section>

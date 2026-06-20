@@ -39,13 +39,17 @@ import {
   buildChartTimeAxis,
   buildTempYAxisTicks,
   chartAxisMaxTimeLabels,
+  CHART_ACTIVITY_TIME_AXIS,
+  chartFormatTimeRangeLabel,
   type ChartPlotBounds,
   type ChartTimeLabel,
   type ChartYAxisTick,
 } from '../core/chart-axis.utils';
 import {
   chartPagePanelsDefaults,
+  chartSectionHeightsDefaults,
   loadChartPagePanels,
+  loadChartSectionHeights,
   persistChartPagePanels,
 } from '../core/chart-page-layout';
 import {
@@ -106,7 +110,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     { value: 'technical', label: 'Técnico (rejilla)' },
     { value: 'trend', label: 'Tendencia (color por subida/bajada)' },
   ];
-  chartTallLayout = false;
+  sectionHeights = chartSectionHeightsDefaults();
 
   private readonly layoutStorageKey = 'ar_combistato_chart_panels_v1';
   sidePanelOpen = chartPagePanelsDefaults().sideOpen;
@@ -130,6 +134,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   yGridLines: string[] = [];
   xGridLines: string[] = [];
   timeLabels: ChartTimeLabel[] = [];
+  timeRangeLabel = '';
+  readonly activityTimeAxis = CHART_ACTIVITY_TIME_AXIS;
 
   /** Franjas actividad: [ { lane, x0, x1, on } ] en coords 0–100 */
   activityRects: { lane: number; x0: number; x1: number; on: boolean }[] = [];
@@ -139,7 +145,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   histMaxCount = 1;
   histLo = 0;
   histHi = 0;
-  readonly histViewBoxHeight = 52;
+  readonly histViewBoxHeight = 44;
 
   chartFullscreen = false;
   chartZoomLo = 0;
@@ -501,8 +507,19 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     return this.chartStylePreset === 'area' || this.chartStylePreset === 'technical';
   }
 
-  toggleChartTallLayout(): void {
-    this.chartTallLayout = !this.chartTallLayout;
+  toggleMainChartTall(): void {
+    this.sectionHeights.mainTall = !this.sectionHeights.mainTall;
+    this.persistChartPanels();
+  }
+
+  toggleHistChartTall(): void {
+    this.sectionHeights.histTall = !this.sectionHeights.histTall;
+    this.persistChartPanels();
+  }
+
+  toggleActivityChartTall(): void {
+    this.sectionHeights.activityTall = !this.sectionHeights.activityTall;
+    this.persistChartPanels();
   }
 
   chartSvgPreserveAspect(): string {
@@ -529,12 +546,14 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     const p = loadChartPagePanels(this.layoutStorageKey);
     this.sidePanelOpen = p.sideOpen;
     this.extrasPanelOpen = p.extrasOpen;
+    this.sectionHeights = loadChartSectionHeights(this.layoutStorageKey);
   }
 
   private persistChartPanels(): void {
     persistChartPagePanels(this.layoutStorageKey, {
       sideOpen: this.sidePanelOpen,
       extrasOpen: this.extrasPanelOpen,
+      heights: { ...this.sectionHeights },
     });
   }
 
@@ -612,6 +631,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       this.yGridLines = [];
       this.xGridLines = [];
       this.timeLabels = [];
+      this.timeRangeLabel = '';
       this.activityRects = [];
       this.histBars = [];
       this.histMaxCount = 1;
@@ -700,6 +720,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     const timeAxis = buildChartTimeAxis(this.plot, t0, t1, span, xAt);
     this.timeLabels = timeAxis.timeLabels;
     this.xGridLines = timeAxis.xGridLines;
+    this.timeRangeLabel = chartFormatTimeRangeLabel(t0, t1);
 
     const lanes: { key: keyof CombistatoReadingRow; show: boolean; lane: number }[] = [
       { key: 'comp_on', show: this.showComp, lane: 0 },
