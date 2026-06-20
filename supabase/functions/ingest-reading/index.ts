@@ -4,13 +4,7 @@
 // supabase functions deploy ingest-reading --no-verify-jwt
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { sendPushToOwnerAndAdmins } from '../_shared/send-web-push.ts';
-import { formatEsArDateTime } from '../_shared/format-datetime.ts';
-
-const TEMP_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
-const MIN_TEMP_PUSH_COOLDOWN_MS = 60 * 1000;
-/** Entre avisos mientras la temperatura sigue fuera de umbral (tras el 1er aviso del episodio). */
-const REPEAT_TEMP_BREACH_MS = 60 * 1000;
+import { processThresholdAlarms } from '../_shared/process-threshold-alarms.ts';
 
 interface IngestPayload {
   moduleId: string;
@@ -192,7 +186,7 @@ Deno.serve(async (req) => {
     if (devErr || !device) {
       const { data: combi, error: combiErr } = await supabase
         .from('combistatos')
-        .select('id, device_token_hash, updated_at, pending_command')
+        .select('id, device_token_hash, updated_at, pending_command, owner_user_id, name')
         .eq('module_id', moduleId)
         .maybeSingle();
 
@@ -249,6 +243,45 @@ Deno.serve(async (req) => {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
+
+        let combiPushDiag: { sent: number; skipped?: string; lastError?: string } | undefined;
+        const { data: cth, error: cthErr } = await supabase
+          .from('combistato_thresholds')
+          .select('*')
+          .eq('combistato_id', combi.id)
+          .maybeSingle();
+        if (cthErr) {
+          console.warn('[ingest-reading] combistato_thresholds:', cthErr.message);
+        }
+        const cNum = (v: unknown): number =>
+          typeof v === 'number' && Number.isFinite(v) ? v : 0;
+        const cO1 = cNum(cth?.temp1_offset_c);
+        const cO2 = cNum(cth?.temp2_offset_c);
+        const cT1 = (payload.temp1_c as number) + cO1;
+        const cT2 =
+          t2 == null ? null : (t2 as number) + cO2;
+        const combiName = typeof combi.name === 'string' ? combi.name : 'PRO300';
+        const combiOwner =
+          typeof combi.owner_user_id === 'string' ? combi.owner_user_id : '';
+        combiPushDiag = await processThresholdAlarms({
+          supabase,
+          thresholdsTable: 'combistato_thresholds',
+          thresholdsIdColumn: 'combistato_id',
+          entityId: combi.id,
+          ownerUserId: combiOwner,
+          entityName: combiName,
+          sensor1Label: 'Sonda 1',
+          sensor2Label: 'Sonda 2',
+          t1: cT1,
+          t2: cT2,
+          th: cth,
+          alarmEventsTable: 'combistato_alarm_events',
+          alarmEventsIdColumn: 'combistato_id',
+          pushTag: `alarm-combistato-${combi.id}`,
+          pushNavigate: `/alertas?combistatoId=${encodeURIComponent(combi.id)}`,
+          pushDataIdKey: 'combistatoId',
+        });
+
         // Devolvemos `params_updated_at` (de combistatos) para que el firmware
         // pueda detectar cambios sin esperar el pull periódico de 2 min y
         // disparar un fetch-pro300-params inmediato si difiere del suyo.
@@ -268,18 +301,18 @@ Deno.serve(async (req) => {
           const expires = expiresRaw ? Date.parse(expiresRaw) : NaN;
           pullParamsNow = !Number.isFinite(expires) || expires > Date.now();
         }
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            kind: 'combistato',
-            params_updated_at: paramsUpdatedAt,
-            pull_params_now: pullParamsNow,
-          }),
-          {
-            status: 200,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
+        const combiOut: Record<string, unknown> = {
+          ok: true,
+          kind: 'combistato',
+          params_updated_at: paramsUpdatedAt,
+          pull_params_now: pullParamsNow,
+        };
+        if (combiPushDiag) combiOut.push = combiPushDiag;
+        if (cthErr) combiOut.thresholdsWarning = cthErr.message;
+        return new Response(JSON.stringify(combiOut), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       const { data: pr5, error: pr5Err } = await supabase
@@ -580,187 +613,36 @@ Deno.serve(async (req) => {
     /** Diagnóstico push (útil si no llegan notificaciones); no afecta al dispositivo. */
     let pushDiag: { sent: number; skipped?: string; lastError?: string } | undefined;
 
-    if (th?.notifications_enabled && device.owner_user_id) {
-      const sensor1Label =
-        typeof device.sensor_1_label === 'string' && device.sensor_1_label.trim()
-          ? device.sensor_1_label.trim()
-          : 'Sensor 1';
-      const sensor2Label =
-        typeof device.sensor_2_label === 'string' && device.sensor_2_label.trim()
-          ? device.sensor_2_label.trim()
-          : 'Sensor 2';
+    const sensor1Label =
+      typeof device.sensor_1_label === 'string' && device.sensor_1_label.trim()
+        ? device.sensor_1_label.trim()
+        : 'Sensor 1';
+    const sensor2Label =
+      typeof device.sensor_2_label === 'string' && device.sensor_2_label.trim()
+        ? device.sensor_2_label.trim()
+        : 'Sensor 2';
+    const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
+    const ownerId = typeof device.owner_user_id === 'string' ? device.owner_user_id : '';
 
-      const t1 = temp1Corrected;
-      const tempMsgs: string[] = [];
-      if (th.temp1_min_c != null && t1 < th.temp1_min_c) {
-        tempMsgs.push(
-          `${sensor1Label}: ${t1.toFixed(1)} °C, por debajo del mínimo configurado (${th.temp1_min_c} °C).`
-        );
-      }
-      if (th.temp1_max_c != null && t1 > th.temp1_max_c) {
-        tempMsgs.push(
-          `${sensor1Label}: ${t1.toFixed(1)} °C, por encima del máximo configurado (${th.temp1_max_c} °C).`
-        );
-      }
-      if (temp2Corrected != null) {
-        const t2 = temp2Corrected;
-        if (th.temp2_min_c != null && t2 < th.temp2_min_c) {
-          tempMsgs.push(
-            `${sensor2Label}: ${t2.toFixed(1)} °C, por debajo del mínimo configurado (${th.temp2_min_c} °C).`
-          );
-        }
-        if (th.temp2_max_c != null && t2 > th.temp2_max_c) {
-          tempMsgs.push(
-            `${sensor2Label}: ${t2.toFixed(1)} °C, por encima del máximo configurado (${th.temp2_max_c} °C).`
-          );
-        }
-      }
-
-      /** Umbral de corriente: valor ya corregido por offset (misma lógica que al insertar). */
-      const currentA: number | null = iCorr;
-      let currentMsg = '';
-      let currentBreach = false;
-      const maxA = (th as Record<string, unknown>)['current_max_a'];
-      if (
-        currentA != null &&
-        maxA != null &&
-        typeof maxA === 'number' &&
-        Number.isFinite(maxA) &&
-        currentA > maxA
-      ) {
-        currentBreach = true;
-        currentMsg = `Corriente: ${currentA.toFixed(2)} A supera el máximo configurado (${maxA.toFixed(2)} A).`;
-      }
-
-      const tempBreach = tempMsgs.length > 0;
-      const configuredCooldown =
-        typeof th.temp_push_cooldown_ms === 'number' && Number.isFinite(th.temp_push_cooldown_ms)
-          ? Math.max(MIN_TEMP_PUSH_COOLDOWN_MS, Math.round(th.temp_push_cooldown_ms))
-          : TEMP_PUSH_COOLDOWN_MS;
-      const now = Date.now();
-
-      /** Temperatura volvió a rango: se resetea el episodio; el próximo fallo vuelve a exigir el retardo completo. */
-      if (!tempBreach) {
-        const tr = th as Record<string, unknown>;
-        const ep = tr['temp_breach_episode_started_at'];
-        if (typeof ep === 'string' || th.last_push_temp_breach_at) {
-          await supabase
-            .from('device_thresholds')
-            .update({
-              temp_breach_episode_started_at: null,
-              last_push_temp_breach_at: null,
-            })
-            .eq('device_id', device.id);
-        }
-      }
-
-      let shouldSendTemp = false;
-      if (tempBreach) {
-        const tr = th as Record<string, unknown>;
-        const episodeRaw = tr['temp_breach_episode_started_at'];
-        let episodeStartMs =
-          typeof episodeRaw === 'string' ? new Date(episodeRaw).getTime() : null;
-
-        if (episodeStartMs == null) {
-          const t0 = new Date().toISOString();
-          await supabase
-            .from('device_thresholds')
-            .update({ temp_breach_episode_started_at: t0 })
-            .eq('device_id', device.id);
-          episodeStartMs = now;
-        }
-
-        const lastTempMs = th.last_push_temp_breach_at
-          ? new Date(th.last_push_temp_breach_at).getTime()
-          : null;
-
-        if (lastTempMs == null) {
-          shouldSendTemp = now - episodeStartMs >= configuredCooldown;
-        } else {
-          shouldSendTemp = now - lastTempMs >= REPEAT_TEMP_BREACH_MS;
-        }
-      }
-
-      const lastCurrentRaw = (th as Record<string, unknown>)['last_push_current_breach_at'];
-      const lastCurrentMs =
-        typeof lastCurrentRaw === 'string' ? new Date(lastCurrentRaw).getTime() : null;
-      const currentCooldownOk = lastCurrentMs == null || now - lastCurrentMs > configuredCooldown;
-
-      const shouldSendCurr = currentBreach && currentCooldownOk;
-      const deviceName = typeof device.name === 'string' ? device.name : 'Dispositivo';
-      const when = formatEsArDateTime(new Date());
-
-      if (shouldSendTemp || shouldSendCurr) {
-        const lines: string[] = [];
-        if (shouldSendTemp) lines.push(...tempMsgs);
-        if (shouldSendCurr) lines.push(currentMsg);
-        const bodyText = `${lines.join('\n\n')}\n\nDetectado: ${when}`;
-        let title: string;
-        if (shouldSendTemp && shouldSendCurr) title = `${deviceName} · alertas`;
-        else if (shouldSendTemp) title = `${deviceName} · temperatura`;
-        else title = `${deviceName} · corriente`;
-
-        const pushResult = await sendPushToOwnerAndAdmins(supabase, device.owner_user_id, {
-          title,
-          body: bodyText,
-          data: {
-            type: shouldSendCurr && !shouldSendTemp ? 'current_breach' : 'temp_breach',
-            deviceId: device.id,
-          },
-          tag: `alarm-${device.id}`,
-          navigate: `/alertas?deviceId=${encodeURIComponent(device.id)}`,
-          requireInteraction: true,
-        });
-
-        const nowIso = new Date().toISOString();
-        if (pushResult.sent > 0) {
-          const patch: Record<string, string> = {};
-          if (shouldSendTemp) patch.last_push_temp_breach_at = nowIso;
-          if (shouldSendCurr) patch.last_push_current_breach_at = nowIso;
-          await supabase.from('device_thresholds').update(patch).eq('device_id', device.id);
-        }
-
-        /** Historial: solo el 1er aviso del episodio; las repeticiones cada 1 min son solo push. */
-        const firstTempPushOfEpisode = shouldSendTemp && !th.last_push_temp_breach_at;
-        if (firstTempPushOfEpisode) {
-          const combinedMsg = tempMsgs.join('\n');
-          const { error: e1 } = await supabase.from('device_alarm_events').insert({
-            device_id: device.id,
-            owner_user_id: device.owner_user_id,
-            triggered_at: nowIso,
-            kind: 'temp_breach',
-            message: combinedMsg,
-            detail: null,
-            temp1_c: t1,
-            temp2_c: temp2Corrected,
-          });
-          if (e1) console.warn('[ingest-reading] device_alarm_events temp:', e1.message);
-        }
-        if (shouldSendCurr) {
-          const { error: e2 } = await supabase.from('device_alarm_events').insert({
-            device_id: device.id,
-            owner_user_id: device.owner_user_id,
-            triggered_at: nowIso,
-            kind: 'current_breach',
-            message: currentMsg,
-            detail: null,
-            temp1_c: null,
-            temp2_c: null,
-            current_a: currentA ?? null,
-          });
-          if (e2) console.warn('[ingest-reading] device_alarm_events current:', e2.message);
-        }
-
-        pushDiag = {
-          sent: pushResult.sent,
-          skipped: pushResult.skipped,
-          lastError: pushResult.lastError,
-        };
-        if (pushResult.sent === 0) {
-          console.warn('[ingest-reading] alarma sin push entregado:', pushResult);
-        }
-      }
-    }
+    pushDiag = await processThresholdAlarms({
+      supabase,
+      thresholdsTable: 'device_thresholds',
+      thresholdsIdColumn: 'device_id',
+      entityId: device.id,
+      ownerUserId: ownerId,
+      entityName: deviceName,
+      sensor1Label,
+      sensor2Label,
+      t1: temp1Corrected,
+      t2: temp2Corrected,
+      currentA: iCorr,
+      th,
+      alarmEventsTable: 'device_alarm_events',
+      alarmEventsIdColumn: 'device_id',
+      pushTag: `alarm-${device.id}`,
+      pushNavigate: `/alertas?deviceId=${encodeURIComponent(device.id)}`,
+      pushDataIdKey: 'deviceId',
+    });
 
     const out: Record<string, unknown> = { ok: true, kind: 'device' };
     if (pushDiag) out.push = pushDiag;

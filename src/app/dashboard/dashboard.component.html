@@ -2137,6 +2137,164 @@
                 [canEdit]="true"
               ></app-combistato-settings>
             </article>
+
+            <article class="card" *ngIf="selectedCombistatoId && environment.deviceCloudSync">
+              <h2 class="card__title card__title--sm">Notificaciones PRO300 (sondas 1 y 2)</h2>
+              <div class="notify-panel" *ngIf="selectedCombistato as cb">
+                <p class="notify-panel__device">{{ cb.name }}</p>
+                <label class="notify-panel__toggle">
+                  <input
+                    type="checkbox"
+                    [(ngModel)]="combiAlertsEnabledForm"
+                    (ngModelChange)="onCombistatoNotificationFormChange()"
+                  />
+                  <span>Activar notificaciones</span>
+                </label>
+                <p class="card__hint card__hint--tight" *ngIf="combiAlertsEnabledForm">
+                  Mínimo / máximo por sonda. Vacío = sin límite en ese borde. El push se evalúa en cada lectura del equipo.
+                </p>
+                <div class="notify-panel__grid" [class.notify-panel__grid--disabled]="!combiAlertsEnabledForm">
+                  <label class="notify-panel__field">
+                    <span>Sonda 1 — mín. (°C)</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="combiTempLowForm"
+                      (ngModelChange)="onCombistatoNotificationFormChange()"
+                      [disabled]="!combiAlertsEnabledForm"
+                      placeholder="Sin mínimo"
+                      autocomplete="off"
+                      name="combi-temp-low"
+                    />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Sonda 1 — máx. (°C)</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="combiTempHighForm"
+                      (ngModelChange)="onCombistatoNotificationFormChange()"
+                      [disabled]="!combiAlertsEnabledForm"
+                      placeholder="Sin máximo"
+                      autocomplete="off"
+                      name="combi-temp-high"
+                    />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Sonda 2 — mín. (°C)</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="combiTemp2LowForm"
+                      (ngModelChange)="onCombistatoNotificationFormChange()"
+                      [disabled]="!combiAlertsEnabledForm"
+                      placeholder="Sin mínimo"
+                      autocomplete="off"
+                      name="combi-temp2-low"
+                    />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Sonda 2 — máx. (°C)</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="combiTemp2HighForm"
+                      (ngModelChange)="onCombistatoNotificationFormChange()"
+                      [disabled]="!combiAlertsEnabledForm"
+                      placeholder="Sin máximo"
+                      autocomplete="off"
+                      name="combi-temp2-high"
+                    />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Retardo: temperatura (min)</span>
+                    <input
+                      type="text"
+                      inputmode="numeric"
+                      [(ngModel)]="combiTempPushDelayMinForm"
+                      (ngModelChange)="onCombistatoNotificationFormChange()"
+                      [disabled]="!combiAlertsEnabledForm"
+                      placeholder="15"
+                      name="combi-temp-delay"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <label class="notify-panel__field">
+                    <span>Retardo: desconectado (min)</span>
+                    <input
+                      type="text"
+                      inputmode="numeric"
+                      [(ngModel)]="combiOfflinePushDelayMinForm"
+                      (ngModelChange)="onCombistatoNotificationFormChange()"
+                      [disabled]="!combiAlertsEnabledForm"
+                      placeholder="15"
+                      name="combi-offline-delay"
+                      autocomplete="off"
+                    />
+                  </label>
+                </div>
+                <p class="notify-panel__hint" *ngIf="combiAlertsEnabledForm">
+                  Para probar rápido: poné un máximo muy bajo (ej. −50 °C) y retardo 1 min. Requiere SQL
+                  <code>062</code>–<code>064</code> en Supabase y redeploy de <code>ingest-reading</code>.
+                </p>
+                <p
+                  class="sensor-labels-feedback"
+                  *ngIf="combiNotificationSettingsFeedback && !combiNotificationSettingsSaving"
+                  [class.sensor-labels-feedback--warn]="combiNotificationSettingsFeedbackIsError"
+                >
+                  {{ combiNotificationSettingsFeedback }}
+                </p>
+                <button
+                  type="button"
+                  class="btn btn--primary notify-panel__save"
+                  [disabled]="combiNotificationSettingsSaving"
+                  (click)="saveCombistatoNotificationSettings()"
+                >
+                  {{ combiNotificationSettingsSaving ? 'Guardando…' : 'Guardar umbrales PRO300' }}
+                </button>
+              </div>
+            </article>
+
+            <article class="card" *ngIf="selectedCombistatoId && environment.deviceCloudSync">
+              <h2 class="card__title card__title--sm">Avisos con la app cerrada</h2>
+              <div class="notify-panel">
+                <p
+                  class="notify-panel__hint notify-panel__hint--warn"
+                  *ngIf="!webPushPublicKeyConfigured"
+                >
+                  Falta <code>VAPID_PUBLIC_KEY</code> en el build (Vercel). Ver <code>docs/VAPID_SETUP.md</code>.
+                </p>
+                <p class="notify-panel__hint">
+                  Activá en cada celular/PC donde quieras recibir push. Los umbrales se definen arriba.
+                </p>
+                <p class="notify-panel__hint" *ngIf="webPushUiState === 'active'">
+                  Este navegador está suscripto.
+                </p>
+                <div class="notify-panel__actions" *ngIf="webPushUiState === 'none' || webPushUiState === 'active'">
+                  <button
+                    type="button"
+                    class="btn btn--primary notify-panel__save"
+                    *ngIf="webPushUiState === 'none'"
+                    [disabled]="webPushBusy"
+                    (click)="enableWebPush()"
+                  >
+                    {{ webPushBusy ? 'Activando…' : 'Activar en este navegador' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn--ghost notify-panel__save"
+                    *ngIf="webPushUiState === 'active'"
+                    [disabled]="webPushBusy"
+                    (click)="disableWebPush()"
+                  >
+                    Quitar suscripción
+                  </button>
+                </div>
+                <p
+                  class="sensor-labels-feedback"
+                  *ngIf="webPushFeedback"
+                  [class.sensor-labels-feedback--warn]="webPushFeedbackIsError"
+                >
+                  {{ webPushFeedback }}
+                </p>
+              </div>
+            </article>
           </ng-container>
 
           <ng-container *ngIf="settingsConfigKind === 'pr500'">

@@ -156,6 +156,110 @@ Deno.serve(async (req) => {
     }
   }
 
+  const { data: combiLastRows, error: combiRpcErr } = await supabase.rpc(
+    'internal_last_reading_per_combistato'
+  );
+  if (combiRpcErr) {
+    console.warn('[check-offline-push] internal_last_reading_per_combistato:', combiRpcErr.message);
+  } else {
+    const lastByCombi = new Map<string, number>();
+    for (const row of combiLastRows ?? []) {
+      const id = row.combistato_id as string;
+      const ts = row.last_at ? new Date(row.last_at as string).getTime() : 0;
+      if (id && ts) lastByCombi.set(id, ts);
+    }
+
+    const { data: combis, error: combiDevErr } = await supabase
+      .from('combistatos')
+      .select(
+        'id, owner_user_id, name, combistato_thresholds(notifications_enabled, last_push_offline_at, temp_push_cooldown_ms, offline_push_cooldown_ms)'
+      );
+
+    if (combiDevErr) {
+      console.warn('[check-offline-push] combistatos:', combiDevErr.message);
+    } else {
+      for (const c of combis ?? []) {
+        const rawTh = c.combistato_thresholds as
+          | {
+              notifications_enabled?: boolean;
+              last_push_offline_at?: string | null;
+              temp_push_cooldown_ms?: number | null;
+              offline_push_cooldown_ms?: number | null;
+            }
+          | {
+              notifications_enabled?: boolean;
+              last_push_offline_at?: string | null;
+              temp_push_cooldown_ms?: number | null;
+              offline_push_cooldown_ms?: number | null;
+            }[]
+          | null;
+        const th = Array.isArray(rawTh) ? rawTh[0] : rawTh;
+        if (!th?.notifications_enabled || !c.owner_user_id) continue;
+
+        const offlineRaw = th.offline_push_cooldown_ms;
+        const tempRaw = th.temp_push_cooldown_ms;
+        const chosenMs =
+          typeof offlineRaw === 'number' && Number.isFinite(offlineRaw) && offlineRaw > 0
+            ? offlineRaw
+            : typeof tempRaw === 'number' && Number.isFinite(tempRaw) && tempRaw > 0
+              ? tempRaw
+              : null;
+        const offlinePushCooldownMs =
+          chosenMs != null
+            ? Math.max(MIN_PUSH_COOLDOWN_MS, Math.round(chosenMs))
+            : DEFAULT_PUSH_COOLDOWN_MS;
+
+        const lastAt = lastByCombi.get(c.id);
+        if (lastAt == null) continue;
+        if (now - lastAt <= OFFLINE_AFTER_MS) continue;
+
+        const lastPushMs = th.last_push_offline_at
+          ? new Date(th.last_push_offline_at).getTime()
+          : null;
+        if (lastPushMs != null && now - lastPushMs <= offlinePushCooldownMs) continue;
+
+        const name = typeof c.name === 'string' ? c.name : 'PRO300';
+        const lastReadingAt = new Date(lastAt);
+        const avisoAt = new Date(now);
+        const r = await sendPushToOwnerAndAdmins(supabase, c.owner_user_id as string, {
+          title: `${name}: dispositivo desconectado`,
+          body:
+            `Sin lecturas nuevas. Última lectura: ${formatEsArDateTime(lastReadingAt)}. ` +
+            `Aviso: ${formatEsArDateTime(avisoAt)}.`,
+          data: { type: 'offline', combistatoId: c.id },
+          tag: `offline-combistato-${c.id}`,
+          navigate: `/alertas?combistatoId=${encodeURIComponent(c.id as string)}`,
+          requireInteraction: true,
+        });
+        offlinePushes += r.sent;
+        if (r.sent > 0) {
+          await supabase
+            .from('combistato_thresholds')
+            .update({ last_push_offline_at: new Date().toISOString() })
+            .eq('combistato_id', c.id);
+          const bodyText =
+            `Sin lecturas nuevas. Última lectura: ${formatEsArDateTime(lastReadingAt)}. ` +
+            `Aviso: ${formatEsArDateTime(avisoAt)}.`;
+          const { error: alarmInsErr } = await supabase.from('combistato_alarm_events').insert({
+            combistato_id: c.id,
+            owner_user_id: c.owner_user_id as string,
+            triggered_at: new Date().toISOString(),
+            kind: 'offline',
+            message: `${name}: dispositivo desconectado`,
+            detail: bodyText,
+            temp1_c: null,
+            temp2_c: null,
+          });
+          if (alarmInsErr) {
+            console.warn('[check-offline-push] combistato_alarm_events:', alarmInsErr.message);
+          }
+        } else {
+          console.warn('[check-offline-push] combistato offline push no entregado:', c.id, r);
+        }
+      }
+    }
+  }
+
   return new Response(JSON.stringify({ ok: true, offlinePushes }), {
     status: 200,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
