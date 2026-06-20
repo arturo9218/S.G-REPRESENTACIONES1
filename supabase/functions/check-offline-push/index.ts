@@ -4,6 +4,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { sendPushToOwnerAndAdmins } from '../_shared/send-web-push.ts';
+import { combistatoOfflineCooldownMs } from '../_shared/combistato-param-alarms.ts';
 import { formatEsArDateTime } from '../_shared/format-datetime.ts';
 
 const corsHeaders = {
@@ -171,51 +172,22 @@ Deno.serve(async (req) => {
 
     const { data: combis, error: combiDevErr } = await supabase
       .from('combistatos')
-      .select(
-        'id, owner_user_id, name, combistato_thresholds(notifications_enabled, last_push_offline_at, temp_push_cooldown_ms, offline_push_cooldown_ms)'
-      );
+      .select('id, owner_user_id, name, params, last_push_offline_at');
 
     if (combiDevErr) {
       console.warn('[check-offline-push] combistatos:', combiDevErr.message);
     } else {
       for (const c of combis ?? []) {
-        const rawTh = c.combistato_thresholds as
-          | {
-              notifications_enabled?: boolean;
-              last_push_offline_at?: string | null;
-              temp_push_cooldown_ms?: number | null;
-              offline_push_cooldown_ms?: number | null;
-            }
-          | {
-              notifications_enabled?: boolean;
-              last_push_offline_at?: string | null;
-              temp_push_cooldown_ms?: number | null;
-              offline_push_cooldown_ms?: number | null;
-            }[]
-          | null;
-        const th = Array.isArray(rawTh) ? rawTh[0] : rawTh;
-        if (!th?.notifications_enabled || !c.owner_user_id) continue;
+        if (!c.owner_user_id) continue;
 
-        const offlineRaw = th.offline_push_cooldown_ms;
-        const tempRaw = th.temp_push_cooldown_ms;
-        const chosenMs =
-          typeof offlineRaw === 'number' && Number.isFinite(offlineRaw) && offlineRaw > 0
-            ? offlineRaw
-            : typeof tempRaw === 'number' && Number.isFinite(tempRaw) && tempRaw > 0
-              ? tempRaw
-              : null;
-        const offlinePushCooldownMs =
-          chosenMs != null
-            ? Math.max(MIN_PUSH_COOLDOWN_MS, Math.round(chosenMs))
-            : DEFAULT_PUSH_COOLDOWN_MS;
+        const offlinePushCooldownMs = combistatoOfflineCooldownMs(c.params);
 
         const lastAt = lastByCombi.get(c.id);
         if (lastAt == null) continue;
         if (now - lastAt <= OFFLINE_AFTER_MS) continue;
 
-        const lastPushMs = th.last_push_offline_at
-          ? new Date(th.last_push_offline_at).getTime()
-          : null;
+        const lastPushRaw = c.last_push_offline_at as string | null | undefined;
+        const lastPushMs = lastPushRaw ? new Date(lastPushRaw).getTime() : null;
         if (lastPushMs != null && now - lastPushMs <= offlinePushCooldownMs) continue;
 
         const name = typeof c.name === 'string' ? c.name : 'PRO300';
@@ -234,9 +206,9 @@ Deno.serve(async (req) => {
         offlinePushes += r.sent;
         if (r.sent > 0) {
           await supabase
-            .from('combistato_thresholds')
+            .from('combistatos')
             .update({ last_push_offline_at: new Date().toISOString() })
-            .eq('combistato_id', c.id);
+            .eq('id', c.id);
           const bodyText =
             `Sin lecturas nuevas. Última lectura: ${formatEsArDateTime(lastReadingAt)}. ` +
             `Aviso: ${formatEsArDateTime(avisoAt)}.`;

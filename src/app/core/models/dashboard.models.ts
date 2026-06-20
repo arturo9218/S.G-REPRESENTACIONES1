@@ -109,16 +109,14 @@ export interface DashboardCombistato {
   lastCompForcedRemainingS?: number | null;
   /** Segundos restantes del forzado manual del ventilador (0/null si está en automático). */
   lastFanForcedRemainingS?: number | null;
-  /** Si está en false, no se generan alertas push para este PRO300 */
-  alertsEnabled?: boolean;
-  /** Umbral bajo sonda 1 (<=), null = sin umbral */
-  tempLowC?: number | null;
-  /** Umbral alto sonda 1 (>=), null = sin umbral */
-  tempHighC?: number | null;
-  temp2LowC?: number | null;
-  temp2HighC?: number | null;
-  tempPushCooldownMs?: number | null;
-  offlinePushCooldownMs?: number | null;
+  /** AR24 (F13): alarma temperatura alta — también usado para push. */
+  alarmHighC?: number | null;
+  /** AR25 (F14): alarma temperatura baja — también usado para push. */
+  alarmLowC?: number | null;
+  /** AR26 (F15): retardo alarma (min) — también usado para push/offline. */
+  alarmDelayMin?: number | null;
+  /** AR28 (F47): histéresis de alarma (K). */
+  alarmHysteresisC?: number | null;
 }
 
 /** PRO400 — controlador 1 sonda (`devices` con `equipment_kind = pro400`); misma idea de conexión que PRO300. */

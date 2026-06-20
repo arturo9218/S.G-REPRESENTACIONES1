@@ -25,16 +25,6 @@ export type AddCombistatoResult =
     }
   | { ok: false; error: string };
 
-export interface CombistatoNotificationConfigInput {
-  alertsEnabled: boolean;
-  tempLowC: number | null;
-  tempHighC: number | null;
-  temp2LowC: number | null;
-  temp2HighC: number | null;
-  tempPushCooldownMs: number | null;
-  offlinePushCooldownMs: number | null;
-}
-
 @Injectable({
   providedIn: 'root',
 })
@@ -500,14 +490,12 @@ export class CombistatoStoreService {
 
     const tokens = this.readTokenMap();
     const lastById = await this.fetchLatestCombistatoReadings(rows.map((r) => r.id));
-    const thresholdsById = await this.fetchCombistatoThresholds(rows.map((r) => r.id));
     const mapped: DashboardCombistato[] = rows.map((r) => {
       const lastSeenRaw = r.last_seen_at;
       const lastSeenStr =
         lastSeenRaw && typeof lastSeenRaw === 'string' && lastSeenRaw.trim() ? lastSeenRaw.trim() : null;
       const snap = lastById.get(r.id);
       const merged = mergeCombistatoParams(r.params ?? null);
-      const th = thresholdsById.get(r.id);
       return {
         id: r.id,
         name: r.name,
@@ -531,13 +519,10 @@ export class CombistatoStoreService {
         defrostTargetC: Number.isFinite(merged.F08) ? merged.F08 : null,
         lastCompForcedRemainingS: snap?.compForcedRemaining ?? null,
         lastFanForcedRemainingS: snap?.fanForcedRemaining ?? null,
-        alertsEnabled: th?.enabled ?? true,
-        tempLowC: th?.low ?? null,
-        tempHighC: th?.high ?? null,
-        temp2LowC: th?.low2 ?? null,
-        temp2HighC: th?.high2 ?? null,
-        tempPushCooldownMs: th?.cooldownMs ?? 15 * 60 * 1000,
-        offlinePushCooldownMs: th?.offlineCooldownMs ?? 15 * 60 * 1000,
+        alarmHighC: Number.isFinite(merged.F13) ? merged.F13 : null,
+        alarmLowC: Number.isFinite(merged.F14) ? merged.F14 : null,
+        alarmDelayMin: Number.isFinite(merged.F15) ? merged.F15 : null,
+        alarmHysteresisC: Number.isFinite(merged.F47) ? merged.F47 : null,
       };
     });
     for (const c of mapped) {
@@ -603,15 +588,6 @@ export class CombistatoStoreService {
     }
     const id = data.id as string;
     this.saveToken(id, deviceToken);
-    await this.auth.client.from('combistato_thresholds').upsert(
-      {
-        combistato_id: id,
-        notifications_enabled: true,
-        temp_push_cooldown_ms: 15 * 60 * 1000,
-        offline_push_cooldown_ms: 15 * 60 * 1000,
-      },
-      { onConflict: 'combistato_id' }
-    );
     await this.hydrateFromCloud();
     return {
       ok: true,
@@ -667,119 +643,6 @@ export class CombistatoStoreService {
     this.removeToken(id);
     await this.hydrateFromCloud();
     return { ok: true };
-  }
-
-  private async fetchCombistatoThresholds(ids: string[]): Promise<
-    Map<
-      string,
-      {
-        enabled: boolean;
-        low: number | null;
-        high: number | null;
-        low2: number | null;
-        high2: number | null;
-        cooldownMs: number | null;
-        offlineCooldownMs: number | null;
-      }
-    >
-  > {
-    const out = new Map<
-      string,
-      {
-        enabled: boolean;
-        low: number | null;
-        high: number | null;
-        low2: number | null;
-        high2: number | null;
-        cooldownMs: number | null;
-        offlineCooldownMs: number | null;
-      }
-    >();
-    if (!ids.length || !this.cloudEnabled()) return out;
-    const { data, error } = await this.auth.client
-      .from('combistato_thresholds')
-      .select(
-        'combistato_id, notifications_enabled, temp1_min_c, temp1_max_c, temp2_min_c, temp2_max_c, temp_push_cooldown_ms, offline_push_cooldown_ms'
-      )
-      .in('combistato_id', ids);
-    if (error) {
-      if (!error.message?.includes('Could not find the table') && error.code !== '42P01') {
-        console.warn('Supabase combistato_thresholds:', error.message);
-      }
-      return out;
-    }
-    for (const th of (data ?? []) as Record<string, unknown>[]) {
-      const cid = th['combistato_id'];
-      if (typeof cid !== 'string') continue;
-      const numOrNull = (k: string) =>
-        typeof th[k] === 'number' && !Number.isNaN(th[k] as number) ? (th[k] as number) : null;
-      out.set(cid, {
-        enabled: th['notifications_enabled'] !== false,
-        low: numOrNull('temp1_min_c'),
-        high: numOrNull('temp1_max_c'),
-        low2: numOrNull('temp2_min_c'),
-        high2: numOrNull('temp2_max_c'),
-        cooldownMs:
-          typeof th['temp_push_cooldown_ms'] === 'number' &&
-          !Number.isNaN(th['temp_push_cooldown_ms'] as number)
-            ? Math.max(60 * 1000, Math.round(th['temp_push_cooldown_ms'] as number))
-            : null,
-        offlineCooldownMs:
-          typeof th['offline_push_cooldown_ms'] === 'number' &&
-          !Number.isNaN(th['offline_push_cooldown_ms'] as number)
-            ? Math.max(60 * 1000, Math.round(th['offline_push_cooldown_ms'] as number))
-            : null,
-      });
-    }
-    return out;
-  }
-
-  async updateCombistatoNotificationConfig(
-    id: string,
-    input: CombistatoNotificationConfigInput
-  ): Promise<{ cloudError?: string }> {
-    if (!this.cloudEnabled() || !isUuid(id)) {
-      return { cloudError: 'Solo disponible con PRO300 en la nube.' };
-    }
-    const nowIso = new Date().toISOString();
-    const { error } = await this.auth.client.from('combistato_thresholds').upsert(
-      {
-        combistato_id: id,
-        notifications_enabled: input.alertsEnabled,
-        temp1_min_c: input.tempLowC,
-        temp1_max_c: input.tempHighC,
-        temp2_min_c: input.temp2LowC,
-        temp2_max_c: input.temp2HighC,
-        temp_push_cooldown_ms: input.tempPushCooldownMs,
-        offline_push_cooldown_ms: input.offlinePushCooldownMs,
-        updated_at: nowIso,
-      },
-      { onConflict: 'combistato_id' }
-    );
-    if (error) {
-      const hint =
-        error.message?.includes('Could not find the table') || error.code === '42P01'
-          ? ' Ejecutá en Supabase el SQL 062_combistato_thresholds.sql.'
-          : '';
-      return { cloudError: `${error.message}${hint}` };
-    }
-    this.subject.next(
-      this.snapshot.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              alertsEnabled: input.alertsEnabled,
-              tempLowC: input.tempLowC,
-              tempHighC: input.tempHighC,
-              temp2LowC: input.temp2LowC,
-              temp2HighC: input.temp2HighC,
-              tempPushCooldownMs: input.tempPushCooldownMs,
-              offlinePushCooldownMs: input.offlinePushCooldownMs,
-            }
-          : c
-      )
-    );
-    return {};
   }
 
   async fetchCombistatoParams(

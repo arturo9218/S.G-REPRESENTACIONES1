@@ -5,6 +5,11 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { processThresholdAlarms } from '../_shared/process-threshold-alarms.ts';
+import {
+  combistatoOfflineCooldownMs,
+  combistatoParamsToThresholdRow,
+  parseCombistatoAlarmParams,
+} from '../_shared/combistato-param-alarms.ts';
 
 interface IngestPayload {
   moduleId: string;
@@ -186,7 +191,9 @@ Deno.serve(async (req) => {
     if (devErr || !device) {
       const { data: combi, error: combiErr } = await supabase
         .from('combistatos')
-        .select('id, device_token_hash, updated_at, pending_command, owner_user_id, name')
+        .select(
+          'id, device_token_hash, updated_at, pending_command, owner_user_id, name, params, last_push_temp_breach_at, temp_breach_episode_started_at'
+        )
         .eq('module_id', moduleId)
         .maybeSingle();
 
@@ -245,41 +252,36 @@ Deno.serve(async (req) => {
         }
 
         let combiPushDiag: { sent: number; skipped?: string; lastError?: string } | undefined;
-        const { data: cth, error: cthErr } = await supabase
-          .from('combistato_thresholds')
-          .select('*')
-          .eq('combistato_id', combi.id)
-          .maybeSingle();
-        if (cthErr) {
-          console.warn('[ingest-reading] combistato_thresholds:', cthErr.message);
-        }
-        const cNum = (v: unknown): number =>
-          typeof v === 'number' && Number.isFinite(v) ? v : 0;
-        const cO1 = cNum(cth?.temp1_offset_c);
-        const cO2 = cNum(cth?.temp2_offset_c);
-        const cT1 = (payload.temp1_c as number) + cO1;
-        const cT2 =
-          t2 == null ? null : (t2 as number) + cO2;
         const combiName = typeof combi.name === 'string' ? combi.name : 'PRO300';
         const combiOwner =
           typeof combi.owner_user_id === 'string' ? combi.owner_user_id : '';
+        const alarmP = parseCombistatoAlarmParams(combi.params);
+        const t1 = payload.temp1_c as number;
+        const thRow = combistatoParamsToThresholdRow(combi.params, {
+          last_push_temp_breach_at: combi.last_push_temp_breach_at as string | null,
+          temp_breach_episode_started_at: combi.temp_breach_episode_started_at as string | null,
+        });
+        const hys = alarmP.hysteresisC;
         combiPushDiag = await processThresholdAlarms({
           supabase,
-          thresholdsTable: 'combistato_thresholds',
-          thresholdsIdColumn: 'combistato_id',
+          thresholdsTable: 'combistatos',
+          thresholdsIdColumn: 'id',
           entityId: combi.id,
           ownerUserId: combiOwner,
           entityName: combiName,
-          sensor1Label: 'Sonda 1',
+          sensor1Label: 'Sonda 1 (AR24/AR25)',
           sensor2Label: 'Sonda 2',
-          t1: cT1,
-          t2: cT2,
-          th: cth,
+          t1,
+          t2: t2 == null ? null : (t2 as number),
+          th: thRow,
           alarmEventsTable: 'combistato_alarm_events',
           alarmEventsIdColumn: 'combistato_id',
           pushTag: `alarm-combistato-${combi.id}`,
           pushNavigate: `/alertas?combistatoId=${encodeURIComponent(combi.id)}`,
           pushDataIdKey: 'combistatoId',
+          compareHigh: 'gte',
+          compareLow: 'lte',
+          isTempInRange: (tc) => tc < alarmP.highC - hys && tc > alarmP.lowC + hys,
         });
 
         // Devolvemos `params_updated_at` (de combistatos) para que el firmware
@@ -308,7 +310,6 @@ Deno.serve(async (req) => {
           pull_params_now: pullParamsNow,
         };
         if (combiPushDiag) combiOut.push = combiPushDiag;
-        if (cthErr) combiOut.thresholdsWarning = cthErr.message;
         return new Response(JSON.stringify(combiOut), {
           status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },

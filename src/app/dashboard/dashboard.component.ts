@@ -115,19 +115,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
   tempPushDelayMinForm = '15';
   /** Retardo entre avisos de “desconectado” (min), independiente del de temperatura */
   offlinePushDelayMinForm = '15';
-  /** PRO300: umbrales de notificación (Configuración → PRO300) */
-  combiAlertsEnabledForm = true;
-  combiTempLowForm = '';
-  combiTempHighForm = '';
-  combiTemp2LowForm = '';
-  combiTemp2HighForm = '';
-  combiTempPushDelayMinForm = '15';
-  combiOfflinePushDelayMinForm = '15';
-  combiNotificationSettingsDirty = false;
-  combiNotificationSettingsSaving = false;
-  combiNotificationSettingsFeedback = '';
-  combiNotificationSettingsFeedbackIsError = false;
-  private syncingCombistatoNotificationForm = false;
   /** Suma en °C al valor que envía el dispositivo (corrección por sensor); se aplica en la nube al guardar lecturas. */
   temp1OffsetForm = '0';
   temp2OffsetForm = '0';
@@ -718,7 +705,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (this.selectedCombistatoId && !list.some((c) => c.id === this.selectedCombistatoId)) {
         this.selectedCombistatoId = null;
       }
-      this.syncCombistatoNotificationFormWithSelected();
     });
     this.subPr500 = this.pr500Store.pr500s$.subscribe((list) => {
       this.pr500s = list;
@@ -1449,33 +1435,27 @@ export class DashboardComponent implements OnInit, OnDestroy {
       }
     }
     for (const c of this.combistatos) {
-      const alertsOn = c.alertsEnabled !== false;
       const lastAt = c.lastSeenAt ? new Date(c.lastSeenAt).getTime() : undefined;
       const disconnected = !c.online || lastAt == null || nowMs - lastAt > offlineAfterMs;
       if (disconnected) {
-        if (alertsOn) {
-          const detail =
-            lastAt != null
-              ? `Última lectura: ${this.formatFullDateTime(lastAt)} · Ahora: ${this.formatFullDateTime(nowMs)}`
-              : `Sin lecturas registradas · Ahora: ${this.formatFullDateTime(nowMs)}`;
-          out.push({
-            id: `${c.id}-offline`,
-            deviceName: c.name,
-            temperatureC: c.lastTemp1C ?? null,
-            message: 'PRO300 desconectado',
-            detail,
-            kind: 'offline',
-            severity: 'critical',
-          });
-        }
+        const detail =
+          lastAt != null
+            ? `Última lectura: ${this.formatFullDateTime(lastAt)} · Ahora: ${this.formatFullDateTime(nowMs)}`
+            : `Sin lecturas registradas · Ahora: ${this.formatFullDateTime(nowMs)}`;
+        out.push({
+          id: `${c.id}-offline`,
+          deviceName: c.name,
+          temperatureC: c.lastTemp1C ?? null,
+          message: 'PRO300 desconectado',
+          detail,
+          kind: 'offline',
+          severity: 'critical',
+        });
         continue;
       }
-      if (c.alertsEnabled === false) continue;
 
-      const low = c.tempLowC ?? null;
-      const high = c.tempHighC ?? null;
-      const low2 = c.temp2LowC ?? null;
-      const high2 = c.temp2HighC ?? null;
+      const high = c.alarmHighC ?? null;
+      const low = c.alarmLowC ?? null;
       const readingLabel =
         lastAt != null
           ? `Medición: ${this.formatFullDateTime(lastAt)}`
@@ -1488,7 +1468,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
             id: `${c.id}-t1-high`,
             deviceName: c.name,
             temperatureC: t1,
-            message: 'Sonda 1: por encima del umbral',
+            message: 'Alarma térmica alta (AR24)',
             detail: `${t1.toFixed(1)} °C (máx. ${high} °C) · ${readingLabel}`,
             kind: 'temp_high',
             severity: 'critical',
@@ -1498,33 +1478,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
             id: `${c.id}-t1-low`,
             deviceName: c.name,
             temperatureC: t1,
-            message: 'Sonda 1: por debajo del umbral',
+            message: 'Alarma térmica baja (AR25)',
             detail: `${t1.toFixed(1)} °C (mín. ${low} °C) · ${readingLabel}`,
-            kind: 'temp_low',
-            severity: 'warning',
-          });
-        }
-      }
-
-      const t2 = c.lastTemp2C;
-      if (t2 != null) {
-        if (high2 != null && t2 >= high2) {
-          out.push({
-            id: `${c.id}-t2-high`,
-            deviceName: c.name,
-            temperatureC: t2,
-            message: 'Sonda 2: por encima del umbral',
-            detail: `${t2.toFixed(1)} °C (máx. ${high2} °C) · ${readingLabel}`,
-            kind: 'temp_high',
-            severity: 'critical',
-          });
-        } else if (low2 != null && t2 <= low2) {
-          out.push({
-            id: `${c.id}-t2-low`,
-            deviceName: c.name,
-            temperatureC: t2,
-            message: 'Sonda 2: por debajo del umbral',
-            detail: `${t2.toFixed(1)} °C (mín. ${low2} °C) · ${readingLabel}`,
             kind: 'temp_low',
             severity: 'warning',
           });
@@ -2859,113 +2814,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }, 6000);
   }
 
-  onCombistatoNotificationFormChange(): void {
-    if (this.syncingCombistatoNotificationForm) return;
-    this.combiNotificationSettingsDirty = true;
-  }
-
-  private syncCombistatoNotificationFormWithSelected(): void {
-    const c = this.selectedCombistatoId
-      ? this.combistatos.find((x) => x.id === this.selectedCombistatoId)
-      : null;
-    if (!c || this.combiNotificationSettingsDirty) return;
-    this.syncingCombistatoNotificationForm = true;
-    try {
-      this.combiAlertsEnabledForm = c.alertsEnabled !== false;
-      this.combiTempLowForm =
-        c.tempLowC == null || Number.isNaN(c.tempLowC) ? '' : String(c.tempLowC);
-      this.combiTempHighForm =
-        c.tempHighC == null || Number.isNaN(c.tempHighC) ? '' : String(c.tempHighC);
-      this.combiTemp2LowForm =
-        c.temp2LowC == null || Number.isNaN(c.temp2LowC as number) ? '' : String(c.temp2LowC);
-      this.combiTemp2HighForm =
-        c.temp2HighC == null || Number.isNaN(c.temp2HighC as number) ? '' : String(c.temp2HighC);
-      this.combiTempPushDelayMinForm = String(
-        this.cooldownMsToMinutes(c.tempPushCooldownMs ?? 15 * 60 * 1000)
-      );
-      this.combiOfflinePushDelayMinForm = String(
-        this.cooldownMsToMinutes(c.offlinePushCooldownMs ?? 15 * 60 * 1000)
-      );
-    } finally {
-      this.syncingCombistatoNotificationForm = false;
-    }
-  }
-
-  async saveCombistatoNotificationSettings(): Promise<void> {
-    const c = this.selectedCombistatoId
-      ? this.combistatos.find((x) => x.id === this.selectedCombistatoId)
-      : null;
-    if (!c) return;
-    this.combiNotificationSettingsFeedback = '';
-    this.combiNotificationSettingsFeedbackIsError = false;
-
-    if (this.combiAlertsEnabledForm && typeof window !== 'undefined' && 'Notification' in window) {
-      if (Notification.permission === 'default') {
-        void Notification.requestPermission();
-      }
-    }
-
-    let low: number | null;
-    let high: number | null;
-    let low2: number | null;
-    let high2: number | null;
-    let delayMs: number;
-    let offlineDelayMs: number;
-    try {
-      low = this.parseTempValue(this.combiTempLowForm);
-      high = this.parseTempValue(this.combiTempHighForm);
-      low2 = this.parseTempValue(this.combiTemp2LowForm);
-      high2 = this.parseTempValue(this.combiTemp2HighForm);
-      delayMs = this.parseDelayMinutesToMs(this.combiTempPushDelayMinForm);
-      offlineDelayMs = this.parseDelayMinutesToMs(this.combiOfflinePushDelayMinForm);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      this.combiNotificationSettingsFeedbackIsError = true;
-      this.combiNotificationSettingsFeedback = `Revisá los valores (min/máx/retardo): ${msg}`;
-      return;
-    }
-    if (low != null && high != null && low > high) {
-      this.combiNotificationSettingsFeedbackIsError = true;
-      this.combiNotificationSettingsFeedback = 'Sonda 1: el mínimo no puede ser mayor al máximo.';
-      return;
-    }
-    if (low2 != null && high2 != null && low2 > high2) {
-      this.combiNotificationSettingsFeedbackIsError = true;
-      this.combiNotificationSettingsFeedback = 'Sonda 2: el mínimo no puede ser mayor al máximo.';
-      return;
-    }
-
-    this.combiNotificationSettingsSaving = true;
-    try {
-      const result = await this.combistatoStore.updateCombistatoNotificationConfig(c.id, {
-        alertsEnabled: this.combiAlertsEnabledForm,
-        tempLowC: this.combiAlertsEnabledForm ? low : null,
-        tempHighC: this.combiAlertsEnabledForm ? high : null,
-        temp2LowC: this.combiAlertsEnabledForm ? low2 : null,
-        temp2HighC: this.combiAlertsEnabledForm ? high2 : null,
-        tempPushCooldownMs: delayMs,
-        offlinePushCooldownMs: offlineDelayMs,
-      });
-      if (result.cloudError) {
-        this.combiNotificationSettingsFeedbackIsError = true;
-        this.combiNotificationSettingsFeedback = `No se pudo guardar en la nube: ${result.cloudError}`;
-      } else {
-        this.combiNotificationSettingsFeedback =
-          'Umbrales PRO300 guardados. Activá también «Avisos con la app cerrada» abajo si aún no lo hiciste.';
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      this.combiNotificationSettingsFeedbackIsError = true;
-      this.combiNotificationSettingsFeedback = `No se pudo guardar: ${msg}`;
-    } finally {
-      this.combiNotificationSettingsSaving = false;
-    }
-    this.combiNotificationSettingsDirty = false;
-    window.setTimeout(() => {
-      this.combiNotificationSettingsFeedback = '';
-    }, 8000);
-  }
-
   async refreshWebPushUi(): Promise<void> {
     if (!environment.deviceCloudSync) {
       this.webPushUiState = 'unsupported';
@@ -3017,7 +2865,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.selectPro400(null);
       this.selectDatalogger(null);
     }
-    this.syncCombistatoNotificationFormWithSelected();
   }
 
   selectPro400(id: string | null): void {
@@ -4865,21 +4712,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     const combi = this.combistatos.find((x) => x.id === deviceId);
     if (combi) {
-      if (kind === 'offline') {
-        const offMs = combi.offlinePushCooldownMs;
-        if (typeof offMs === 'number' && Number.isFinite(offMs) && offMs > 0) {
-          return Math.max(minMs, offMs);
-        }
-        const tms = combi.tempPushCooldownMs;
-        if (typeof tms === 'number' && Number.isFinite(tms) && tms > 0) {
-          return Math.max(minMs, tms);
-        }
-        return defaultMs;
-      }
-      const tms = combi.tempPushCooldownMs;
-      if (typeof tms === 'number' && Number.isFinite(tms) && tms > 0) {
-        return Math.max(minMs, tms);
-      }
+      const delayMin = combi.alarmDelayMin;
+      const delayMs =
+        typeof delayMin === 'number' && Number.isFinite(delayMin) && delayMin > 0
+          ? Math.max(minMs, Math.round(delayMin * 60 * 1000))
+          : defaultMs;
+      return delayMs;
     }
     return defaultMs;
   }

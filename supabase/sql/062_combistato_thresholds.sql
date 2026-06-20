@@ -1,3 +1,4 @@
+-- OBSOLETO: reemplazado por 065_combistato_push_state.sql (push usa AR24–AR29 en combistatos.params).
 -- PRO300 (combistatos): umbrales de temperatura y cooldowns para push / pitido.
 -- Ejecutar después de 033_combistatos.sql y 018_temp_breach_episode.sql (mismas columnas que device_thresholds).
 

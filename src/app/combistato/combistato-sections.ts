@@ -202,7 +202,7 @@ export const COMBISTATO_SECTIONS: CombistatoSectionMeta[] = [
   {
     id: 'alarms',
     title: 'Alarmas térmicas',
-    intro: 'AR24–AR29: límites de temperatura y retardos.',
+    intro: 'AR24–AR29: límites de temperatura y retardos. AR24/AR25/AR26 también disparan notificaciones push al celular (misma lógica que el equipo).',
     fields: [
       {
         key: 'F13',

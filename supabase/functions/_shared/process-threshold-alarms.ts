@@ -21,8 +21,8 @@ export interface ThresholdRow {
 
 export interface ThresholdAlarmContext {
   supabase: SupabaseClient;
-  thresholdsTable: 'device_thresholds' | 'combistato_thresholds';
-  thresholdsIdColumn: 'device_id' | 'combistato_id';
+  thresholdsTable: 'device_thresholds' | 'combistatos';
+  thresholdsIdColumn: 'device_id' | 'combistato_id' | 'id';
   entityId: string;
   ownerUserId: string;
   entityName: string;
@@ -38,6 +38,11 @@ export interface ThresholdAlarmContext {
   pushTag: string;
   pushNavigate: string;
   pushDataIdKey: 'deviceId' | 'combistatoId';
+  /** PRO300: igual que firmware (>= AR24, <= AR25). */
+  compareHigh?: 'gt' | 'gte';
+  compareLow?: 'lt' | 'lte';
+  /** Si se define, reemplaza la lógica de “volvió a rango” (p. ej. histéresis AR28). */
+  isTempInRange?: (t1: number, t2: number | null) => boolean;
 }
 
 export type ThresholdAlarmPushDiag = {
@@ -56,15 +61,23 @@ export async function processThresholdAlarms(
   if (!th?.notifications_enabled || !ctx.ownerUserId) return undefined;
 
   const tempMsgs: string[] = [];
-  if (th.temp1_min_c != null && ctx.t1 < th.temp1_min_c) {
-    tempMsgs.push(
-      `${ctx.sensor1Label}: ${ctx.t1.toFixed(1)} °C, por debajo del mínimo configurado (${th.temp1_min_c} °C).`
-    );
+  const hiCmp = ctx.compareHigh ?? 'gt';
+  const loCmp = ctx.compareLow ?? 'lt';
+  if (th.temp1_min_c != null) {
+    const lowBreach = loCmp === 'lte' ? ctx.t1 <= th.temp1_min_c : ctx.t1 < th.temp1_min_c;
+    if (lowBreach) {
+      tempMsgs.push(
+        `${ctx.sensor1Label}: ${ctx.t1.toFixed(1)} °C, por debajo del mínimo configurado (${th.temp1_min_c} °C).`
+      );
+    }
   }
-  if (th.temp1_max_c != null && ctx.t1 > th.temp1_max_c) {
-    tempMsgs.push(
-      `${ctx.sensor1Label}: ${ctx.t1.toFixed(1)} °C, por encima del máximo configurado (${th.temp1_max_c} °C).`
-    );
+  if (th.temp1_max_c != null) {
+    const highBreach = hiCmp === 'gte' ? ctx.t1 >= th.temp1_max_c : ctx.t1 > th.temp1_max_c;
+    if (highBreach) {
+      tempMsgs.push(
+        `${ctx.sensor1Label}: ${ctx.t1.toFixed(1)} °C, por encima del máximo configurado (${th.temp1_max_c} °C).`
+      );
+    }
   }
   if (ctx.t2 != null) {
     if (th.temp2_min_c != null && ctx.t2 < th.temp2_min_c) {
@@ -95,13 +108,17 @@ export async function processThresholdAlarms(
   }
 
   const tempBreach = tempMsgs.length > 0;
+  const inRange =
+    ctx.isTempInRange != null
+      ? ctx.isTempInRange(ctx.t1, ctx.t2)
+      : !tempBreach;
   const configuredCooldown =
     typeof th.temp_push_cooldown_ms === 'number' && Number.isFinite(th.temp_push_cooldown_ms)
       ? Math.max(MIN_TEMP_PUSH_COOLDOWN_MS, Math.round(th.temp_push_cooldown_ms))
       : TEMP_PUSH_COOLDOWN_MS;
   const now = Date.now();
 
-  if (!tempBreach) {
+  if (inRange) {
     const tr = th as Record<string, unknown>;
     const ep = tr['temp_breach_episode_started_at'];
     if (typeof ep === 'string' || th.last_push_temp_breach_at) {
