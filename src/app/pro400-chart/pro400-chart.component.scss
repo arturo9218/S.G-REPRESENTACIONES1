@@ -6,10 +6,6 @@
   flex: 0 0 auto;
 }
 
-.pr5-main--charts-tall .pr5-svg-wrap:not(.pr5-svg-wrap--hist):not(.pr5-svg-wrap--states) {
-  min-height: max(380px, calc(100svh - 10rem));
-}
-
 .p4-svg--temp {
   min-height: 100%;
 }

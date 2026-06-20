@@ -19,8 +19,16 @@
 
   <p class="pr5-err" *ngIf="error">{{ error }}</p>
 
-  <div class="pr5-layout" *ngIf="pr500Id">
-    <aside class="pr5-side card">
+  <div
+    class="pr5-layout pr5-layout--chart-focus"
+    *ngIf="pr500Id"
+    [class.pr5-layout--side-open]="sidePanelOpen"
+  >
+    <div class="pr5-side-backdrop" *ngIf="sidePanelOpen" (click)="closeSidePanel()" aria-hidden="true"></div>
+    <aside *ngIf="sidePanelOpen" class="pr5-side card pr5-side--drawer">
+      <button type="button" class="btn btn--ghost pr5-side__close" (click)="closeSidePanel()" aria-label="Cerrar filtros">
+        ×
+      </button>
       <h2 class="pr5-side__title">Rango de fechas</h2>
       <p class="pr5-side__lead">
         Elegí el intervalo y aplicá para redibujar la curva. En el celular, <strong>tocá el gráfico</strong> (toque corto) para
@@ -99,10 +107,31 @@
       </dl>
     </aside>
 
-    <section class="pr5-main card" [class.pr5-main--charts-tall]="chartTallLayout">
+    <section
+      class="pr5-main card"
+      [class.pr5-main--charts-tall]="chartTallLayout"
+      [class.pr5-main--focus-chart]="!extrasPanelOpen"
+    >
       <div class="pr5-main__head">
         <h2 class="pr5-main__title">Presión de proceso</h2>
         <div class="pr5-main__actions">
+          <button
+            type="button"
+            class="btn btn--ghost pr5-panel-toggle"
+            [class.pr5-panel-toggle--active]="sidePanelOpen"
+            (click)="toggleSidePanel()"
+          >
+            {{ sidePanelOpen ? 'Ocultar filtros' : 'Filtros y rango' }}
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost pr5-panel-toggle"
+            [class.pr5-panel-toggle--active]="extrasPanelOpen"
+            (click)="toggleExtrasPanel()"
+            *ngIf="displayPoints.length"
+          >
+            {{ extrasPanelOpen ? 'Ocultar extras' : 'Motores / estadísticas' }}
+          </button>
           <p class="pr5-main__unit">Eje Y: {{ pressureYUnit }}</p>
           <span class="pr5-main__zoom-hint" *ngIf="displayPoints.length"
             >PC: rueda · doble clic = ver todo · Móvil: toque = valor · Zoom: pellizco / arrastre · Estilo: panel izquierdo</span
@@ -169,7 +198,7 @@
       <div class="pr5-chart" *ngIf="displayPoints.length">
         <div
           #chartStage
-          class="pr5-svg-wrap"
+          class="pr5-svg-wrap pr5-svg-wrap--main"
           [class.pr5-svg-wrap--style-line]="chartStylePreset === 'line'"
           [class.pr5-svg-wrap--style-minimal]="chartStylePreset === 'minimal'"
           [class.pr5-svg-wrap--style-technical]="chartStylePreset === 'technical'"
@@ -184,7 +213,11 @@
           (touchend)="onChartTouchEnd($event)"
           (touchcancel)="onChartTouchCancel()"
         >
-          <svg class="pr5-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <svg
+            class="pr5-svg"
+            [attr.viewBox]="'0 0 100 ' + chartViewBoxHeight"
+            [attr.preserveAspectRatio]="chartSvgPreserveAspect()"
+          >
             <defs>
               <linearGradient id="pr5AreaGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="rgba(56, 189, 248, 0.22)" />
@@ -275,7 +308,7 @@
             <text
               *ngFor="let t of yAxisTicks"
               class="pr5-y-tick"
-              [attr.x]="plot.x0 - 1.15"
+              [attr.x]="plot.x0 - 0.75"
               [attr.y]="t.y + 0.9"
               text-anchor="end"
             >
@@ -410,7 +443,12 @@
             </g>
 
             <!-- Eje X: tiempo -->
-            <text class="pr5-axis-title pr5-axis-title--x" [attr.x]="(plot.x0 + plot.x1) / 2" [attr.y]="97.2" text-anchor="middle">
+            <text
+              class="pr5-axis-title pr5-axis-title--x"
+              [attr.x]="(plot.x0 + plot.x1) / 2"
+              [attr.y]="plot.y1 + 8.2"
+              text-anchor="middle"
+            >
               Tiempo (local)
             </text>
             <line
@@ -427,7 +465,7 @@
               class="pr5-x-tick"
               [attr.x]="lb.x"
               [attr.y]="lb.y"
-              text-anchor="middle"
+              [attr.text-anchor]="lb.anchor ?? 'middle'"
             >
               {{ lb.text }}
             </text>
@@ -454,6 +492,7 @@
       </div>
       </div>
 
+      <ng-container *ngIf="extrasPanelOpen">
       <div class="pr5-states" *ngIf="displayPoints.length && (showComp1 || showComp2 || showComp3 || showAlarm)">
         <div class="pr5-states__head">
           <h3 class="pr5-states__title">Motores y alarma en el tiempo</h3>
@@ -469,7 +508,7 @@
             <span *ngIf="showComp3">C3</span>
             <span *ngIf="showAlarm">Alarma</span>
           </div>
-          <svg class="pr5-states__svg" viewBox="0 0 100 88" preserveAspectRatio="none">
+          <svg class="pr5-states__svg" viewBox="0 0 100 96" preserveAspectRatio="none">
             <defs>
               <clipPath id="pr5MotorLaneClip">
                 <rect x="0" y="4" width="100" height="80" rx="0.2" />
@@ -541,7 +580,7 @@
                 </ng-container>
               </ng-container>
             </g>
-            <text *ngFor="let lb of timeLabels" class="pr5-x-tick" [attr.x]="lb.x" y="86" text-anchor="middle">{{ lb.text }}</text>
+            <text *ngFor="let lb of timeLabels" class="pr5-x-tick" [attr.x]="lb.x" y="92" [attr.text-anchor]="lb.anchor ?? 'middle'">{{ lb.text }}</text>
           </svg>
         </div>
       </div>
@@ -646,6 +685,7 @@
           <p class="pr5-motor-stats__need-two">Para estimar tiempo ON hacen falta al menos dos lecturas en el rango.</p>
         </ng-template>
       </div>
+      </ng-container>
 
       <p class="pr5-footnote" *ngIf="displayPoints.length">{{ lastRowSummary() }}</p>
       <p class="pr5-empty" *ngIf="!displayPoints.length && !loading">No hay lecturas en este rango.</p>

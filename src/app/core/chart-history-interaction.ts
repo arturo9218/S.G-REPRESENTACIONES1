@@ -9,6 +9,7 @@ import {
   CHART_ZOOM_BUTTON_FACTOR,
   type ChartZoomRange,
 } from './chart-zoom';
+import { chartPlotNormFromClientX } from './chart-svg-coords';
 
 export type ChartZoomHost = {
   chartZoomLo: number;
@@ -56,12 +57,13 @@ export function chartZoomHostWheel(
   h: ChartZoomHost,
   ev: WheelEvent,
   chartStage: HTMLElement | null | undefined,
-  hasPoints: boolean
+  hasPoints: boolean,
+  plotX0 = 0,
+  plotX1 = 100
 ): void {
   if (!chartStage || !hasPoints) return;
-  const r = chartStage.getBoundingClientRect();
-  if (r.width <= 1) return;
-  const xNorm = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+  const xNorm = chartPlotNormFromClientX(ev.clientX, plotX0, plotX1, chartStage);
+  if (xNorm == null) return;
   const z = chartZoomHostRange(h);
   if (chartZoomWheel(z, ev.deltaY, xNorm)) {
     chartZoomHostApply(h, z);

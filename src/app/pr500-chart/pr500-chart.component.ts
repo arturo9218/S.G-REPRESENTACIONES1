@@ -19,6 +19,23 @@ import {
   chartZoomHostWheel,
 } from '../core/chart-history-interaction';
 import {
+  buildChartTimeAxis,
+  chartAxisMaxTimeLabels,
+  type ChartTimeLabel,
+} from '../core/chart-axis.utils';
+import {
+  CHART_SVG_PRESERVE_ASPECT,
+  CHART_PR500_PLOT,
+  CHART_TEMP_VIEWBOX_HEIGHT,
+  chartPlotNormFromClientX,
+  chartViewBoxXFromClientX,
+} from '../core/chart-svg-coords';
+import {
+  chartPagePanelsDefaults,
+  loadChartPagePanels,
+  persistChartPagePanels,
+} from '../core/chart-page-layout';
+import {
   downloadDeviceChartPdf,
   pdfCellDate,
   pdfCellNum,
@@ -140,10 +157,11 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   /** Escala Y según `params.F15` del controlador (telemetría siempre en bar). */
   pressureDisplayPsi = false;
   pressureYUnit: 'bar' | 'psi' = 'bar';
-  /** Área útil del SVG (viewBox 0–100). `x1` se estrecha si hay eje de temperatura. */
-  plot = { x0: 19, x1: 99, y0: 7, y1: 83 };
+  /** Área útil del SVG (viewBox 0–100 × 58). `x1` se estrecha si hay eje de temperatura. */
+  plot = { ...CHART_PR500_PLOT };
+  readonly chartViewBoxHeight = CHART_TEMP_VIEWBOX_HEIGHT;
   /** Marcas del eje X: posición, texto y segmento de marca bajo el gráfico. */
-  timeLabels: { x: number; y: number; text: string; tickY0: number; tickY1: number }[] = [];
+  timeLabels: ChartTimeLabel[] = [];
   yAxisTicks: { y: number; label: string; markX0: number; markX1: number }[] = [];
   yGridLines: string[] = [];
   /** Rejilla vertical en marcas de tiempo (trazos suaves). */
@@ -160,6 +178,11 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   /** Gráficos de presión + motores más altos (localStorage). */
   private readonly chartTallStorageKey = 'ar_pr500_chart_tall_v1';
   chartTallLayout = false;
+
+  private readonly layoutStorageKey = 'ar_pr500_chart_panels_v1';
+  sidePanelOpen = chartPagePanelsDefaults().sideOpen;
+  extrasPanelOpen = false;
+
   showPressure = true;
   /** Curvas desde `temp_suction_c` / `superheat_c` si existen en el rango. */
   showTempSuction = true;
@@ -206,6 +229,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   chartZoomHi = 1;
 
   private sub?: Subscription;
+  private axisLabelBucket = chartAxisMaxTimeLabels();
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -216,6 +240,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadChartStylePreset();
     this.loadChartTallLayout();
+    this.loadChartPanels();
     this.sub = this.route.queryParamMap.subscribe((q) => {
       const id = q.get('pr500Id');
       this.pr500Id = id && id.length > 10 ? id : null;
@@ -254,6 +279,16 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     this.chartFullscreen = isCurrentFullscreen(el ?? null);
   }
 
+  @HostListener('window:resize')
+  @HostListener('window:orientationchange')
+  onChartViewportChange(): void {
+    const bucket = chartAxisMaxTimeLabels();
+    if (bucket !== this.axisLabelBucket && this.readings.length) {
+      this.axisLabelBucket = bucket;
+      this.rebuildChartGeometry();
+    }
+  }
+
   toggleChartFullscreen(): void {
     const el = this.chartStage?.nativeElement;
     if (!el) return;
@@ -262,6 +297,39 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     } else {
       void requestFullscreenBestEffort(el);
     }
+  }
+
+  chartSvgPreserveAspect(): string {
+    return CHART_SVG_PRESERVE_ASPECT;
+  }
+
+  toggleSidePanel(): void {
+    this.sidePanelOpen = !this.sidePanelOpen;
+    this.persistChartPanels();
+  }
+
+  closeSidePanel(): void {
+    if (!this.sidePanelOpen) return;
+    this.sidePanelOpen = false;
+    this.persistChartPanels();
+  }
+
+  toggleExtrasPanel(): void {
+    this.extrasPanelOpen = !this.extrasPanelOpen;
+    this.persistChartPanels();
+  }
+
+  private loadChartPanels(): void {
+    const p = loadChartPagePanels(this.layoutStorageKey);
+    this.sidePanelOpen = p.sideOpen;
+    this.extrasPanelOpen = p.extrasOpen;
+  }
+
+  private persistChartPanels(): void {
+    persistChartPagePanels(this.layoutStorageKey, {
+      sideOpen: this.sidePanelOpen,
+      extrasOpen: this.extrasPanelOpen,
+    });
   }
 
   backToApp(): void {
@@ -389,11 +457,10 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
 
   /** Misma lógica que mousemove: posición en viewBox 0–100 y cursor activo. */
   applyCursorFromClientX(clientX: number): void {
-    const el = this.chartStage?.nativeElement;
-    if (!el || !this.zoomedPoints.length) return;
-    const r = el.getBoundingClientRect();
-    if (r.width <= 1) return;
-    const x = ((clientX - r.left) / r.width) * 100;
+    const stage = this.chartStage?.nativeElement;
+    if (!stage || !this.zoomedPoints.length) return;
+    const x = chartViewBoxXFromClientX(clientX, stage);
+    if (x == null) return;
     this.cursorActive = true;
     this.updateCursorForX(x);
   }
@@ -522,7 +589,14 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
   }
 
   onChartWheel(ev: WheelEvent): void {
-    chartZoomHostWheel(this, ev, this.chartStage?.nativeElement, this.zoomedPoints.length > 0);
+    chartZoomHostWheel(
+      this,
+      ev,
+      this.chartStage?.nativeElement,
+      this.zoomedPoints.length > 0,
+      this.plot.x0,
+      this.plot.x1
+    );
   }
 
   async downloadChartPdf(): Promise<void> {
@@ -890,7 +964,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       this.superheatPath = '';
       this.hasTempAxis = false;
       this.tempAxisTicks = [];
-      this.plot.x1 = 99;
+      this.plot.x1 = 99.5;
       this.timeLabels = [];
       this.yAxisTicks = [];
       this.yGridLines = [];
@@ -947,7 +1021,7 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       }
     }
     this.hasTempAxis = Number.isFinite(minT) && Number.isFinite(maxT);
-    this.plot.x1 = this.hasTempAxis ? 86.5 : 99;
+    this.plot.x1 = this.hasTempAxis ? 86.5 : 99.5;
     const { x0, x1, y0, y1 } = this.plot;
     const plotW = x1 - x0;
     const plotH = y1 - y0;
@@ -1097,40 +1171,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     this.yAxisTicks = ticks;
     this.yGridLines = grids;
 
-    const stepMs = Pr500ChartComponent.pickTimeStepMs(span, 6);
-    let curT = Math.floor(t0 / stepMs) * stepMs;
-    while (curT < t0 - 0.5) curT += stepMs;
-    const epochList: number[] = [];
-    while (curT <= t1 + stepMs * 0.01) {
-      if (curT >= t0 && curT <= t1) epochList.push(curT);
-      curT += stepMs;
-      if (epochList.length > 18) break;
-    }
-    const mergedEpochs = this.mergeTimeEndpoints(epochList, t0, t1, span);
-    const tLabs: { x: number; y: number; text: string; tickY0: number; tickY1: number }[] = [];
-    const xGrids: string[] = [];
-    let prevX = -Infinity;
-    /** Espacio mínimo en unidades del viewBox entre centros de etiquetas (evita solapamiento al estirar el SVG). */
-    const minLabelDx = Math.max(11, plotW / 6.5);
-    for (const tm of mergedEpochs) {
-      const x = xAt(new Date(tm).toISOString());
-      if (x < x0 - 0.02 || x > x1 + 0.02) continue;
-      if (x - prevX < minLabelDx) continue;
-      prevX = x;
-      const labelY = y1 + 5.8;
-      tLabs.push({
-        x,
-        y: labelY,
-        text: this.formatTimeAxisLabel(tm, span),
-        tickY0: y1,
-        tickY1: y1 + 2.6,
-      });
-      if (tLabs.length <= 12) {
-        xGrids.push(`M${x.toFixed(2)},${y0.toFixed(2)}L${x.toFixed(2)},${y1.toFixed(2)}`);
-      }
-    }
-    this.timeLabels = tLabs;
-    this.xGridLines = xGrids;
+    const timeAxis = buildChartTimeAxis({ x0, x1, y0, y1 }, t0, t1, span, xAt);
+    this.timeLabels = timeAxis.timeLabels;
+    this.xGridLines = timeAxis.xGridLines;
     this.activityRects = this.buildActivityRects(pts, xAt);
     const laneY = (lane: number) => {
       const base = 8 + lane * 20;
@@ -1200,7 +1243,6 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
     if (ev.touches.length >= 2) {
       const el = this.chartStage?.nativeElement;
       if (!el) return;
-      const r = el.getBoundingClientRect();
       const t0 = ev.touches[0];
       const t1 = ev.touches[1];
       this.touchMode = 'pinch';
@@ -1208,7 +1250,9 @@ export class Pr500ChartComponent implements OnInit, OnDestroy {
       this.touchStartSpan = this.chartZoomHi - this.chartZoomLo;
       this.touchStartZoomLo = this.chartZoomLo;
       this.touchStartZoomHi = this.chartZoomHi;
-      this.touchStartCenterNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / Math.max(1, r.width)));
+      const centerX = (t0.clientX + t1.clientX) * 0.5;
+      this.touchStartCenterNorm =
+        chartPlotNormFromClientX(centerX, this.plot.x0, this.plot.x1, el) ?? 0.5;
       ev.preventDefault();
       return;
     }

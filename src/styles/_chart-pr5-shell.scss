@@ -90,10 +90,112 @@ $motor-none: #64748b;
   grid-template-rows: 1fr;
   gap: 1rem;
   align-items: stretch;
+  position: relative;
+}
+
+.pr5-layout--chart-focus {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  width: 100%;
+}
+
+.pr5-layout--chart-focus > .pr5-main {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+}
+
+.pr5-side-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(2, 6, 23, 0.62);
+  backdrop-filter: blur(2px);
+  animation: pr5-backdrop-in 0.18s ease;
+}
+
+@keyframes pr5-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.pr5-side--drawer {
+  position: fixed;
+  z-index: 40;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  height: 100dvh;
+  width: min(300px, 92vw);
+  max-width: 100%;
+  margin: 0;
+  border-radius: 0 14px 14px 0;
+  transform: translateX(0);
+  transition: transform 0.22s ease;
+  overflow-y: auto;
+  box-shadow: 12px 0 40px rgba(0, 0, 0, 0.45);
+}
+
+.pr5-side__close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  z-index: 1;
+  min-width: 2rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  border-radius: 8px;
+}
+
+.pr5-panel-toggle {
+  padding: 0.32rem 0.6rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pr5-panel-toggle--active {
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.pr5-main--focus-chart {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pr5-main--focus-chart .pr5-chart {
+  flex: 0 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Serie temporal principal: ancho 100%, altura proporcional acotada (~560px). */
+.pr5-svg-wrap--main {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 100 / 58;
+  min-height: 0;
+  max-height: none;
+  height: min(560px, calc(100cqw * 58 / 100));
+  margin-inline: 0;
+}
+
+.pr5-main--charts-tall .pr5-svg-wrap--main {
+  aspect-ratio: 100 / 68;
+  height: min(640px, calc(100cqw * 68 / 100));
 }
 
 @media (max-width: 900px) {
-  .pr5-layout {
+  .pr5-layout:not(.pr5-layout--chart-focus) {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
   }
@@ -294,7 +396,7 @@ $motor-none: #64748b;
   border-radius: 14px;
 }
 
-.pr5-main--charts-tall .pr5-svg-wrap {
+.pr5-main--charts-tall .pr5-svg-wrap:not(.pr5-svg-wrap--main) {
   min-height: max(380px, calc(100svh - 10rem));
 }
 
@@ -474,15 +576,18 @@ $motor-none: #64748b;
   display: flex;
   flex-direction: column;
   margin-top: 0.1rem;
+  container-type: inline-size;
 }
 
-/* Ocupa el alto disponible del panel; sin aspect-ratio fijo (evita bandas vacías con viewBox cuadrado + meet). */
-.pr5-svg-wrap {
+/* Ocupa el alto disponible del panel (histograma / estados; no la serie principal). */
+.pr5-svg-wrap:not(.pr5-svg-wrap--main) {
   position: relative;
   flex: 1 1 auto;
   display: flex;
+  align-items: stretch;
+  justify-content: stretch;
   width: 100%;
-  min-height: max(280px, calc(100svh - 15.5rem));
+  min-height: 280px;
   touch-action: none;
   border-radius: 12px;
   overflow: hidden;
@@ -491,13 +596,55 @@ $motor-none: #64748b;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
+.pr5-svg-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  touch-action: none;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 189, 248, 0.12);
+  background: #070d18;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.pr5-svg-wrap .pr5-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+}
+
 .pr5-svg-wrap:fullscreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: 100%;
   height: 100%;
   width: 100%;
   max-height: none;
+  padding: 0.75rem;
+  box-sizing: border-box;
   border-radius: 0;
   border-width: 0;
+  overflow: hidden;
+  background: #070d18;
+
+  .pr5-svg {
+    display: block;
+    width: min(calc(100vw - 1.5rem), calc((100vh - 1.5rem) * 100 / 58));
+    height: min(calc(100vh - 1.5rem), calc((100vw - 1.5rem) * 58 / 100));
+    max-width: 100%;
+    max-height: 100%;
+    flex: 0 0 auto;
+  }
+}
+
+.pr5-main--charts-tall .pr5-svg-wrap--main:fullscreen .pr5-svg {
+  width: min(calc(100vw - 1.5rem), calc((100vh - 1.5rem) * 100 / 68));
+  height: min(calc(100vh - 1.5rem), calc((100vw - 1.5rem) * 68 / 100));
 }
 
 .pr5-svg-wrap--style-minimal .pr5-grid-line {
@@ -655,8 +802,9 @@ $motor-none: #64748b;
 
 .pr5-x-tick {
   fill: #94a3b8;
-  font-size: 2.15px;
+  font-size: 2.35px;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .pr5-line {
@@ -751,6 +899,88 @@ $motor-none: #64748b;
   max-width: 52rem;
 }
 
+@media (min-width: 901px) {
+  .page--dark.pr5-page {
+    padding: 1rem 1.5rem 1.25rem;
+  }
+
+  .pr5-layout.pr5-layout--chart-focus {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+  }
+
+  .pr5-layout:not(.pr5-layout--chart-focus) {
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+    gap: 1.15rem;
+    align-items: start;
+  }
+
+  .pr5-side {
+    position: sticky;
+    top: 0.75rem;
+    max-height: calc(100vh - 1.5rem);
+    max-height: calc(100dvh - 1.5rem);
+    overflow-y: auto;
+  }
+
+  .pr5-side--drawer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    max-height: none;
+  }
+
+  .pr5-layout--chart-focus .pr5-main--focus-chart .pr5-svg-wrap--main {
+    width: 100%;
+    min-height: 0;
+    margin-inline: 0;
+  }
+
+  .pr5-layout--chart-focus .pr5-main__actions {
+    max-width: none;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .pr5-main {
+    min-height: min(720px, calc(100vh - 7rem));
+    min-height: min(720px, calc(100dvh - 7rem));
+  }
+
+  .pr5-main__head {
+    align-items: flex-start;
+  }
+
+  .pr5-main__actions {
+    max-width: 62%;
+    justify-content: flex-end;
+  }
+
+  .pr5-main__zoom-hint {
+    flex: 1 1 12rem;
+    text-align: right;
+    line-height: 1.35;
+    max-width: 22rem;
+  }
+
+  .pr5-svg-wrap:not(.pr5-svg-wrap--main):not(.pr5-svg-wrap--hist) {
+    min-height: 320px;
+    max-height: min(520px, 58vh);
+    max-height: min(520px, 58dvh);
+  }
+
+  .pr5-main--charts-tall .pr5-svg-wrap:not(.pr5-svg-wrap--main):not(.pr5-svg-wrap--hist) {
+    min-height: 440px;
+    max-height: min(680px, 72vh);
+    max-height: min(680px, 72dvh);
+  }
+
+  .pr5-states__svg {
+    min-height: 130px;
+    max-height: none;
+  }
+}
+
 @media (max-width: 640px) {
   .page--dark.pr5-page {
     padding: 0.55rem 0.65rem 0.75rem;
@@ -822,27 +1052,24 @@ $motor-none: #64748b;
     font-size: 0.68rem;
   }
 
-  .pr5-svg-wrap {
+  .pr5-svg-wrap:not(.pr5-svg-wrap--main) {
     min-height: max(240px, 52svh);
     border-radius: 10px;
   }
 
-  .pr5-main--charts-tall .pr5-svg-wrap:not(.pr5-svg-wrap--hist) {
+  .pr5-main--charts-tall .pr5-svg-wrap:not(.pr5-svg-wrap--main):not(.pr5-svg-wrap--hist) {
     min-height: max(320px, 68svh);
   }
 
   .pr5-states__grid {
     grid-template-columns: 3.6rem minmax(0, 1fr);
     gap: 0.4rem;
+    padding-bottom: 0.35rem;
   }
 
   .pr5-states__labels {
     font-size: 0.64rem;
-    min-height: 72px;
-  }
-
-  .pr5-states__svg {
-    min-height: 96px;
+    min-height: 80px;
   }
 
   .pr5-zoom-btn {
@@ -854,5 +1081,56 @@ $motor-none: #64748b;
   .pr5-tall-btn--inline {
     font-size: 0.72rem;
     padding: 0.32rem 0.5rem;
+  }
+
+  /* Gráfico principal: ancho completo, proporción estable (mismo criterio que PC). */
+  .pr5-svg-wrap--main {
+    width: 100%;
+    max-width: 100%;
+    margin-inline: 0;
+    aspect-ratio: 100 / 58;
+    height: auto;
+    max-height: min(52vh, calc((100vw - 1.3rem) * 58 / 100));
+  }
+
+  .pr5-main--charts-tall .pr5-svg-wrap--main {
+    aspect-ratio: 100 / 68;
+    max-height: min(58vh, calc((100vw - 1.3rem) * 68 / 100));
+  }
+
+  .pr5-svg-wrap--main .pr5-x-tick {
+    font-size: 2.9px;
+  }
+
+  .pr5-svg-wrap--main .pr5-y-tick {
+    font-size: 2.9px;
+  }
+
+  .pr5-svg-wrap--main .pr5-axis-title {
+    font-size: 2.45px;
+  }
+
+  .pr5-svg-wrap--hist {
+    min-height: 140px;
+    overflow: visible;
+  }
+
+  .pr5-states__svg {
+    min-height: 108px;
+    aspect-ratio: 100 / 96;
+    overflow: visible;
+
+    .pr5-x-tick {
+      font-size: 3.1px;
+    }
+  }
+
+  .pr5-states__head {
+    margin-bottom: 0.35rem;
+  }
+
+  .pr5-states__hint {
+    font-size: 0.68rem;
+    line-height: 1.4;
   }
 }

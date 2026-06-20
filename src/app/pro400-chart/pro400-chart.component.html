@@ -18,8 +18,16 @@
 
   <p class="pr5-err" *ngIf="error">{{ error }}</p>
 
-  <div class="pr5-layout" *ngIf="pro400Id">
-    <aside class="pr5-side card">
+  <div
+    class="pr5-layout pr5-layout--chart-focus"
+    *ngIf="pro400Id"
+    [class.pr5-layout--side-open]="sidePanelOpen"
+  >
+    <div class="pr5-side-backdrop" *ngIf="sidePanelOpen" (click)="closeSidePanel()" aria-hidden="true"></div>
+    <aside *ngIf="sidePanelOpen" class="pr5-side card pr5-side--drawer">
+      <button type="button" class="btn btn--ghost pr5-side__close" (click)="closeSidePanel()" aria-label="Cerrar filtros">
+        ×
+      </button>
       <h2 class="pr5-side__title">Rango de fechas</h2>
       <p class="pr5-side__lead">
         Elegí el intervalo y aplicá para redibujar. En el celular, <strong>tocá el gráfico</strong> para fijar el valor;
@@ -86,10 +94,31 @@
       </dl>
     </aside>
 
-    <section class="pr5-main card" [class.pr5-main--charts-tall]="chartTallLayout">
+    <section
+      class="pr5-main card"
+      [class.pr5-main--charts-tall]="chartTallLayout"
+      [class.pr5-main--focus-chart]="!extrasPanelOpen"
+    >
       <div class="pr5-main__head">
         <h2 class="pr5-main__title">Temperatura en el tiempo</h2>
         <div class="pr5-main__actions">
+          <button
+            type="button"
+            class="btn btn--ghost pr5-panel-toggle"
+            [class.pr5-panel-toggle--active]="sidePanelOpen"
+            (click)="toggleSidePanel()"
+          >
+            {{ sidePanelOpen ? 'Ocultar filtros' : 'Filtros y rango' }}
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost pr5-panel-toggle"
+            [class.pr5-panel-toggle--active]="extrasPanelOpen"
+            (click)="toggleExtrasPanel()"
+            *ngIf="readings.length"
+          >
+            {{ extrasPanelOpen ? 'Ocultar extras' : 'Histograma / estados' }}
+          </button>
           <p class="pr5-main__unit">Eje Y: °C</p>
           <span class="pr5-main__zoom-hint" *ngIf="displayPoints.length"
             >PC: rueda · doble clic = ver todo · Móvil: toque = valor · Zoom: pellizco / arrastre</span
@@ -126,7 +155,7 @@
       <div class="pr5-chart" *ngIf="readings.length">
         <div
           #chartStage
-          class="pr5-svg-wrap"
+          class="pr5-svg-wrap pr5-svg-wrap--main"
           [class.pr5-svg-wrap--style-line]="chartStylePreset === 'line'"
           [class.pr5-svg-wrap--style-minimal]="chartStylePreset === 'minimal'"
           [class.pr5-svg-wrap--style-technical]="chartStylePreset === 'technical'"
@@ -141,7 +170,7 @@
           (touchend)="onTempTouchEnd()"
           (touchcancel)="onTempTouchEnd()"
         >
-          <svg class="pr5-svg p4-svg--temp" viewBox="0 0 100 58" preserveAspectRatio="none">
+          <svg class="pr5-svg p4-svg--temp" viewBox="0 0 100 58" [attr.preserveAspectRatio]="chartSvgPreserveAspect()">
             <defs>
               <linearGradient id="p4Fill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="rgba(74, 222, 128, 0.28)" />
@@ -225,7 +254,7 @@
       </div>
       </div>
 
-      <div class="pr5-states" *ngIf="showHistogram && readings.length">
+      <div class="pr5-states" *ngIf="extrasPanelOpen && showHistogram && readings.length">
         <div class="pr5-states__head">
           <h3 class="pr5-states__title">Histograma de temperatura</h3>
           <p class="pr5-states__hint">Distribución en el rango elegido</p>
@@ -245,7 +274,7 @@
         </div>
       </div>
 
-      <div class="pr5-states" *ngIf="readings.length">
+      <div class="pr5-states" *ngIf="extrasPanelOpen && readings.length">
         <div class="pr5-states__head">
           <h3 class="pr5-states__title">Actividad (relés / puerta)</h3>
           <p class="pr5-states__hint">Verde = encendido / puerta abierta · Gris = apagado / cerrada</p>

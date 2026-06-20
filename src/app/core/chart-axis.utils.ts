@@ -18,6 +18,8 @@ export interface ChartTimeLabel {
   text: string;
   tickY0: number;
   tickY1: number;
+  /** Alineación SVG para evitar recorte en bordes del viewBox. */
+  anchor?: 'start' | 'middle' | 'end';
 }
 
 const MS = 1000;
@@ -68,21 +70,48 @@ export function chartPickTimeStepMs(spanMs: number, maxTicks: number): number {
   return Math.ceil(minStep / DAY) * DAY;
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/** Móvil estrecho: menos etiquetas de tiempo para evitar solapamiento. */
+export function chartAxisIsMobile(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth <= 640;
+}
+
+export function chartAxisMaxTimeLabels(): number {
+  if (typeof window === 'undefined') return 5;
+  if (window.innerWidth <= 400) return 3;
+  if (window.innerWidth <= 640) return 4;
+  return 5;
+}
+
+/** Etiqueta compacta para eje X (evita solapamiento en zoom corto). */
 export function chartFormatTimeAxisLabel(tMs: number, spanMs: number): string {
   const d = new Date(tMs);
-  if (spanMs <= 10 * 60 * MS) {
-    return d.toLocaleString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const h = pad2(d.getHours());
+  const m = pad2(d.getMinutes());
+  const mobile = chartAxisIsMobile();
+
+  if (mobile && spanMs <= 48 * 3600 * MS) {
+    return `${h}:${m}`;
   }
-  if (spanMs <= 6 * 3600 * MS) {
-    return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (spanMs <= 3 * 3600 * MS) {
+    return `${h}:${m}`;
   }
   if (spanMs <= 72 * 3600 * MS) {
-    return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return `${d.getDate()}/${d.getMonth() + 1} ${h}:${m}`;
   }
   if (spanMs <= 21 * DAY) {
-    return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${h}:${m}`;
   }
-  return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${String(d.getFullYear()).slice(-2)}`;
+}
+
+/** Ancho mínimo entre centros de etiqueta (unidades viewBox). */
+function chartTimeLabelMinDx(plotW: number, labelText: string, maxLabels = 5): number {
+  const estLabelW = Math.max(6, labelText.length * 1.35);
+  return Math.max(estLabelW * 1.05, plotW / maxLabels);
 }
 
 export function chartMergeTimeEndpoints(epochs: number[], t0: number, t1: number, spanMs: number): number[] {
@@ -107,8 +136,8 @@ export function buildTempYAxisTicks(
   const firstTick = Math.ceil(vMin / step) * step;
   const ticks: ChartYAxisTick[] = [];
   const grids: string[] = [];
-  const markX0 = x0 - 1.35;
-  const markX1 = x0;
+  const markX0 = x0 - 0.65;
+  const markX1 = x0 - 0.08;
 
   for (let v = firstTick; v <= vMax + step * 0.001; v += step) {
     if (v < vMin - step * 0.001) continue;
@@ -139,39 +168,57 @@ export function buildChartTimeAxis(
   t0: number,
   t1: number,
   span: number,
-  xAt: (iso: string) => number
+  xAt: (iso: string) => number,
+  maxLabels = chartAxisMaxTimeLabels()
 ): { timeLabels: ChartTimeLabel[]; xGridLines: string[] } {
   const { x0, x1, y0, y1 } = plot;
   const plotW = x1 - x0;
-  const stepMs = chartPickTimeStepMs(span, 6);
+  const stepMs = chartPickTimeStepMs(span, maxLabels);
   let curT = Math.floor(t0 / stepMs) * stepMs;
   while (curT < t0 - 0.5) curT += stepMs;
   const epochList: number[] = [];
   while (curT <= t1 + stepMs * 0.01) {
     if (curT >= t0 && curT <= t1) epochList.push(curT);
     curT += stepMs;
-    if (epochList.length > 18) break;
+    if (epochList.length > 24) break;
   }
-  const mergedEpochs = chartMergeTimeEndpoints(epochList, t0, t1, span);
+  /** En rangos cortos no forzar t0/t1 extra (generaba horas duplicadas y amontonadas). */
+  const mergedEpochs =
+    span > 12 * 3600 * MS ? chartMergeTimeEndpoints(epochList, t0, t1, span) : epochList;
   const timeLabels: ChartTimeLabel[] = [];
   const xGridLines: string[] = [];
   let prevX = -Infinity;
-  const minLabelDx = Math.max(11, plotW / 6.5);
+  const edgePad = 2.5;
+  let minLabelDx = plotW / maxLabels;
 
   for (const tm of mergedEpochs) {
     const x = xAt(new Date(tm).toISOString());
     if (x < x0 - 0.02 || x > x1 + 0.02) continue;
+    if (x < x0 + edgePad || x > x1 - edgePad) continue;
+    const text = chartFormatTimeAxisLabel(tm, span);
+    minLabelDx = Math.max(minLabelDx, chartTimeLabelMinDx(plotW, text, maxLabels));
     if (x - prevX < minLabelDx) continue;
     prevX = x;
     timeLabels.push({
       x,
       y: y1 + 5.8,
-      text: chartFormatTimeAxisLabel(tm, span),
+      text,
       tickY0: y1,
       tickY1: y1 + 2.6,
     });
     if (timeLabels.length <= 12) {
       xGridLines.push(`M${x.toFixed(2)},${y0.toFixed(2)}L${x.toFixed(2)},${y1.toFixed(2)}`);
+    }
+    if (timeLabels.length >= maxLabels) break;
+  }
+
+  if (timeLabels.length > 0) {
+    timeLabels[0].anchor = 'start';
+    if (timeLabels.length > 1) {
+      timeLabels[timeLabels.length - 1].anchor = 'end';
+    }
+    for (let i = 1; i < timeLabels.length - 1; i++) {
+      timeLabels[i].anchor = 'middle';
     }
   }
 

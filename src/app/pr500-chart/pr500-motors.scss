@@ -39,6 +39,7 @@
   grid-template-columns: 4.8rem minmax(0, 1fr);
   gap: 0.6rem;
   align-items: stretch;
+  padding-bottom: 0.35rem;
 }
 
 .pr5-states__labels {
@@ -52,11 +53,18 @@
 
 .pr5-states__svg {
   width: 100%;
-  min-height: 110px;
+  min-height: 130px;
+  height: auto;
+  aspect-ratio: 100 / 96;
   display: block;
+  overflow: visible;
   border-radius: 10px;
   background: rgba(2, 6, 23, 0.52);
   border: 1px solid rgba(148, 163, 184, 0.16);
+
+  .pr5-x-tick {
+    font-size: 2.6px;
+  }
 }
 
 .pr5-state-rect {

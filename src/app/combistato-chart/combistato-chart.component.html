@@ -18,8 +18,16 @@
 
   <p class="pr5-err" *ngIf="error">{{ error }}</p>
 
-  <div class="pr5-layout" *ngIf="combistatoId">
-    <aside class="pr5-side card">
+  <div
+    class="pr5-layout pr5-layout--chart-focus"
+    *ngIf="combistatoId"
+    [class.pr5-layout--side-open]="sidePanelOpen"
+  >
+    <div class="pr5-side-backdrop" *ngIf="sidePanelOpen" (click)="closeSidePanel()" aria-hidden="true"></div>
+    <aside *ngIf="sidePanelOpen" class="pr5-side card pr5-side--drawer">
+      <button type="button" class="btn btn--ghost pr5-side__close" (click)="closeSidePanel()" aria-label="Cerrar filtros">
+        ×
+      </button>
       <h2 class="pr5-side__title">Rango de fechas</h2>
       <p class="pr5-side__lead">
         Elegí el intervalo y aplicá para redibujar. En el celular, <strong>tocá el gráfico</strong> para fijar el valor;
@@ -88,10 +96,31 @@
       </dl>
     </aside>
 
-    <section class="pr5-main card" [class.pr5-main--charts-tall]="chartTallLayout">
+    <section
+      class="pr5-main card"
+      [class.pr5-main--charts-tall]="chartTallLayout"
+      [class.pr5-main--focus-chart]="!extrasPanelOpen"
+    >
       <div class="pr5-main__head">
         <h2 class="pr5-main__title">Temperaturas en el tiempo</h2>
         <div class="pr5-main__actions">
+          <button
+            type="button"
+            class="btn btn--ghost pr5-panel-toggle"
+            [class.pr5-panel-toggle--active]="sidePanelOpen"
+            (click)="toggleSidePanel()"
+          >
+            {{ sidePanelOpen ? 'Ocultar filtros' : 'Filtros y rango' }}
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost pr5-panel-toggle"
+            [class.pr5-panel-toggle--active]="extrasPanelOpen"
+            (click)="toggleExtrasPanel()"
+            *ngIf="readings.length"
+          >
+            {{ extrasPanelOpen ? 'Ocultar extras' : 'Histograma / estados' }}
+          </button>
           <p class="pr5-main__unit">Eje Y: °C</p>
           <span class="pr5-main__zoom-hint" *ngIf="displayPoints.length"
             >PC: rueda · doble clic = ver todo · Móvil: toque = valor · Zoom: pellizco / arrastre</span
@@ -137,7 +166,7 @@
       <div class="pr5-chart" *ngIf="readings.length">
         <div
           #chartStage
-          class="pr5-svg-wrap"
+          class="pr5-svg-wrap pr5-svg-wrap--main"
           [class.pr5-svg-wrap--style-line]="chartStylePreset === 'line'"
           [class.pr5-svg-wrap--style-minimal]="chartStylePreset === 'minimal'"
           [class.pr5-svg-wrap--style-technical]="chartStylePreset === 'technical'"
@@ -152,7 +181,11 @@
           (touchend)="onTempTouchEnd($event)"
           (touchcancel)="onTempTouchCancel()"
         >
-          <svg class="pr5-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <svg
+            class="pr5-svg"
+            [attr.viewBox]="'0 0 100 ' + chartViewBoxHeight"
+            [attr.preserveAspectRatio]="chartSvgPreserveAspect()"
+          >
             <defs>
               <clipPath id="cbPlotClip">
                 <rect [attr.x]="plot.x0" [attr.y]="plot.y0" [attr.width]="plot.x1 - plot.x0" [attr.height]="plot.y1 - plot.y0" />
@@ -166,12 +199,17 @@
                 <stop offset="100%" stop-color="rgba(15, 23, 42, 0)" />
               </linearGradient>
             </defs>
-            <rect class="pr5-plot-bg" x="0" y="0" width="100" height="100" />
+            <rect class="pr5-plot-bg" x="0" y="0" width="100" [attr.height]="chartViewBoxHeight" />
 
-            <text class="pr5-axis-title pr5-axis-title--y" [attr.x]="plot.x0 - 1.2" [attr.y]="plot.y0 - 1.2" text-anchor="end">
+            <text class="pr5-axis-title pr5-axis-title--y" [attr.x]="plot.x0 - 0.65" [attr.y]="plot.y0 - 1" text-anchor="end">
               °C
             </text>
-            <text class="pr5-axis-title pr5-axis-title--x" [attr.x]="(plot.x0 + plot.x1) / 2" y="97.2" text-anchor="middle">
+            <text
+              class="pr5-axis-title pr5-axis-title--x"
+              [attr.x]="(plot.x0 + plot.x1) / 2"
+              [attr.y]="plot.y1 + 8.2"
+              text-anchor="middle"
+            >
               Tiempo (local)
             </text>
 
@@ -204,7 +242,7 @@
             <text
               *ngFor="let t of yAxisTicks"
               class="pr5-y-tick"
-              [attr.x]="plot.x0 - 1.15"
+              [attr.x]="plot.x0 - 0.75"
               [attr.y]="t.y + 0.9"
               text-anchor="end"
             >
@@ -323,7 +361,13 @@
               [attr.y2]="lb.tickY1"
               vector-effect="non-scaling-stroke"
             />
-            <text *ngFor="let lb of timeLabels" class="pr5-x-tick" [attr.x]="lb.x" [attr.y]="lb.y" text-anchor="middle">
+            <text
+              *ngFor="let lb of timeLabels"
+              class="pr5-x-tick"
+              [attr.x]="lb.x"
+              [attr.y]="lb.y"
+              [attr.text-anchor]="lb.anchor ?? 'middle'"
+            >
               {{ lb.text }}
             </text>
           </svg>
@@ -331,27 +375,32 @@
       </div>
       </div>
 
-      <div class="pr5-states" *ngIf="showHistogram && readings.length">
+      <div class="pr5-states" *ngIf="extrasPanelOpen && showHistogram && readings.length">
         <div class="pr5-states__head">
           <h3 class="pr5-states__title">Histograma de temperaturas</h3>
           <p class="pr5-states__hint">Distribución en el rango elegido</p>
         </div>
         <div class="pr5-svg-wrap pr5-svg-wrap--hist">
-          <svg class="pr5-svg cb-svg--hist" viewBox="0 0 100 42" preserveAspectRatio="none">
-            <rect x="0" y="0" width="100" height="42" class="pr5-plot-bg" rx="1" />
+          <svg class="pr5-svg cb-svg--hist" [attr.viewBox]="'0 0 100 ' + histViewBoxHeight" preserveAspectRatio="none">
+            <rect x="0" y="0" width="100" [attr.height]="histViewBoxHeight" class="pr5-plot-bg" rx="1" />
+            <text class="pr5-axis-title pr5-axis-title--y" x="3.5" y="10" text-anchor="start">Cant.</text>
+            <line class="pr5-grid-line" x1="8" y1="44" x2="98" y2="44" vector-effect="non-scaling-stroke" />
             <rect
               *ngFor="let b of histBars"
               class="cb-hist-bar"
               [attr.x]="b.x + 0.1"
-              [attr.y]="40 - barDisplayHeight(b.h)"
+              [attr.y]="histBarY(b.h)"
               [attr.width]="b.w"
               [attr.height]="barDisplayHeight(b.h)"
             />
+            <text class="pr5-x-tick" x="8" y="50" text-anchor="start">{{ histTempLabel(histLo) }}</text>
+            <text class="pr5-x-tick" x="98" y="50" text-anchor="end">{{ histTempLabel(histHi) }}</text>
+            <text class="pr5-axis-title pr5-axis-title--x" x="50" y="51.5" text-anchor="middle">Temperatura (°C)</text>
           </svg>
         </div>
       </div>
 
-      <div class="pr5-states" *ngIf="readings.length">
+      <div class="pr5-states" *ngIf="extrasPanelOpen && readings.length">
         <div class="pr5-states__head">
           <h3 class="pr5-states__title">Actividad (relés / puerta)</h3>
           <p class="pr5-states__hint">Verde = encendido / puerta abierta · Gris = apagado / cerrada</p>
@@ -363,7 +412,7 @@
             <span *ngIf="showDefrost">Deshielo</span>
             <span *ngIf="showDoor">Puerta</span>
           </div>
-          <svg class="pr5-states__svg" viewBox="0 0 100 88" preserveAspectRatio="none">
+          <svg class="pr5-states__svg" viewBox="0 0 100 96" preserveAspectRatio="none">
             <ng-container *ngFor="let lb of timeLabels">
               <line
                 class="pr5-step-grid"
@@ -385,7 +434,13 @@
                 height="14"
               />
             </ng-container>
-            <text *ngFor="let lb of timeLabels" class="pr5-x-tick" [attr.x]="lb.x" y="86" text-anchor="middle">
+            <text
+              *ngFor="let lb of timeLabels"
+              class="pr5-x-tick"
+              [attr.x]="lb.x"
+              y="92"
+              [attr.text-anchor]="lb.anchor ?? 'middle'"
+            >
               {{ lb.text }}
             </text>
           </svg>

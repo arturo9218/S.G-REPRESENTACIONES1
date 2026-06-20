@@ -29,12 +29,25 @@ import {
   chartZoomHostWheel,
 } from '../core/chart-history-interaction';
 import {
+  CHART_SVG_PRESERVE_ASPECT,
+  CHART_TEMP_PLOT,
+  CHART_TEMP_VIEWBOX_HEIGHT,
+  chartPlotNormFromClientX,
+  chartViewBoxXFromClientX,
+} from '../core/chart-svg-coords';
+import {
   buildChartTimeAxis,
   buildTempYAxisTicks,
+  chartAxisMaxTimeLabels,
   type ChartPlotBounds,
   type ChartTimeLabel,
   type ChartYAxisTick,
 } from '../core/chart-axis.utils';
+import {
+  chartPagePanelsDefaults,
+  loadChartPagePanels,
+  persistChartPagePanels,
+} from '../core/chart-page-layout';
 import {
   downloadDeviceChartPdf,
   pdfCellDate,
@@ -95,11 +108,16 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   ];
   chartTallLayout = false;
 
+  private readonly layoutStorageKey = 'ar_combistato_chart_panels_v1';
+  sidePanelOpen = chartPagePanelsDefaults().sideOpen;
+  extrasPanelOpen = false;
+
   readings: CombistatoReadingRow[] = [];
   displayPoints: CombistatoReadingRow[] = [];
 
-  /** Misma geometría que PR500 (viewBox 0 0 100 100). */
-  readonly plot: ChartPlotBounds = { x0: 19, x1: 99, y0: 7, y1: 83 };
+  /** Misma geometría que PR500 (viewBox panorámico 0 0 100 × 58). */
+  readonly plot: ChartPlotBounds = { ...CHART_TEMP_PLOT };
+  readonly chartViewBoxHeight = CHART_TEMP_VIEWBOX_HEIGHT;
   tempPath1 = '';
   tempPath2 = '';
   tempAreaPath1 = '';
@@ -119,6 +137,9 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   /** Histograma temp1+temp2 en rango visible */
   histBars: { x: number; h: number; w: number }[] = [];
   histMaxCount = 1;
+  histLo = 0;
+  histHi = 0;
+  readonly histViewBoxHeight = 52;
 
   chartFullscreen = false;
   chartZoomLo = 0;
@@ -158,6 +179,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
 
   private sub?: Subscription;
   private realtimeChannel: RealtimeChannel | null = null;
+  private axisLabelBucket = chartAxisMaxTimeLabels();
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -172,6 +194,7 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       this.initDefaultRange();
       this.loadSeriesPrefs();
       this.loadChartStylePreset();
+      this.loadChartPanels();
       if (this.combistatoId) {
         void this.loadAll();
       } else {
@@ -209,6 +232,16 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     const w = Math.max(1, el.getBoundingClientRect().width);
     const dxNorm = (ev.clientX - this.dragStartClientX) / w;
     chartZoomHostPanFromDrag(this, dxNorm, this.dragStartLo, this.dragStartHi);
+  }
+
+  @HostListener('window:resize')
+  @HostListener('window:orientationchange')
+  onChartViewportChange(): void {
+    const bucket = chartAxisMaxTimeLabels();
+    if (bucket !== this.axisLabelBucket && this.readings.length) {
+      this.axisLabelBucket = bucket;
+      this.rebuildChartGeometry();
+    }
   }
 
   toggleChartFullscreen(): void {
@@ -472,6 +505,39 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     this.chartTallLayout = !this.chartTallLayout;
   }
 
+  chartSvgPreserveAspect(): string {
+    return CHART_SVG_PRESERVE_ASPECT;
+  }
+
+  toggleSidePanel(): void {
+    this.sidePanelOpen = !this.sidePanelOpen;
+    this.persistChartPanels();
+  }
+
+  closeSidePanel(): void {
+    if (!this.sidePanelOpen) return;
+    this.sidePanelOpen = false;
+    this.persistChartPanels();
+  }
+
+  toggleExtrasPanel(): void {
+    this.extrasPanelOpen = !this.extrasPanelOpen;
+    this.persistChartPanels();
+  }
+
+  private loadChartPanels(): void {
+    const p = loadChartPagePanels(this.layoutStorageKey);
+    this.sidePanelOpen = p.sideOpen;
+    this.extrasPanelOpen = p.extrasOpen;
+  }
+
+  private persistChartPanels(): void {
+    persistChartPagePanels(this.layoutStorageKey, {
+      sideOpen: this.sidePanelOpen,
+      extrasOpen: this.extrasPanelOpen,
+    });
+  }
+
   get chartZoomIsActive(): boolean {
     return chartZoomHostIsActive(this);
   }
@@ -490,7 +556,14 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   }
 
   onChartWheel(ev: WheelEvent): void {
-    chartZoomHostWheel(this, ev, this.chartStage?.nativeElement, this.displayPoints.length > 0);
+    chartZoomHostWheel(
+      this,
+      ev,
+      this.chartStage?.nativeElement,
+      this.displayPoints.length > 0,
+      this.plot.x0,
+      this.plot.x1
+    );
   }
 
   async downloadChartPdf(): Promise<void> {
@@ -542,6 +615,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       this.activityRects = [];
       this.histBars = [];
       this.histMaxCount = 1;
+      this.histLo = 0;
+      this.histHi = 0;
       this.cursorActive = false;
       return;
     }
@@ -677,6 +752,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   private buildHistogram(pts: CombistatoReadingRow[]): void {
     this.histBars = [];
     this.histMaxCount = 1;
+    this.histLo = 0;
+    this.histHi = 0;
     if (!this.showHistogram || pts.length < 2) return;
 
     const vals: number[] = [];
@@ -691,6 +768,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       lo -= 0.5;
       hi += 0.5;
     }
+    this.histLo = lo;
+    this.histHi = hi;
     const bins = 24;
     const w = 100 / bins;
     const counts = new Array(bins).fill(0);
@@ -711,7 +790,16 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   }
 
   barDisplayHeight(ratio: number): number {
-    return Math.max(0.6, ratio * 36);
+    return Math.max(0.6, ratio * 34);
+  }
+
+  histBarY(ratio: number): number {
+    return 44 - this.barDisplayHeight(ratio);
+  }
+
+  histTempLabel(v: number): string {
+    const span = this.histHi - this.histLo;
+    return `${v.toFixed(span < 2 ? 1 : 0)}°`;
   }
 
   startTempPan(ev: MouseEvent): void {
@@ -746,11 +834,10 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   }
 
   applyCursorFromClientX(clientX: number): void {
-    const el = this.chartStage?.nativeElement;
-    if (!el || !this.zoomedPoints.length) return;
-    const r = el.getBoundingClientRect();
-    if (r.width <= 1) return;
-    const x = ((clientX - r.left) / r.width) * 100;
+    const stage = this.chartStage?.nativeElement;
+    if (!stage || !this.zoomedPoints.length) return;
+    const x = chartViewBoxXFromClientX(clientX, stage);
+    if (x == null) return;
     this.cursorActive = true;
     this.updateCursorForX(x);
   }
@@ -769,7 +856,9 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       this.touchStartSpan = this.chartZoomHi - this.chartZoomLo;
       this.touchStartZoomLo = this.chartZoomLo;
       this.touchStartZoomHi = this.chartZoomHi;
-      this.touchStartCenterNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / Math.max(1, r.width)));
+      const centerX = (t0.clientX + t1.clientX) * 0.5;
+      this.touchStartCenterNorm =
+        chartPlotNormFromClientX(centerX, this.plot.x0, this.plot.x1, chartEl) ?? 0.5;
       ev.preventDefault();
       return;
     }
@@ -793,7 +882,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
       const t0 = ev.touches[0];
       const t1 = ev.touches[1];
       const dist = Math.max(6, Math.abs(t1.clientX - t0.clientX));
-      const centerNorm = Math.max(0, Math.min(1, ((t0.clientX + t1.clientX) * 0.5 - r.left) / r.width));
+      const centerX = (t0.clientX + t1.clientX) * 0.5;
+      const centerNorm = chartPlotNormFromClientX(centerX, this.plot.x0, this.plot.x1, chartEl) ?? 0.5;
       this.chartZoomLo = this.touchStartZoomLo;
       this.chartZoomHi = this.touchStartZoomHi;
       chartZoomHostPinch(this, this.touchStartDist / dist, centerNorm);

@@ -2,12 +2,9 @@
 @import '../pr500-chart/pr500-motors';
 
 .pr5-svg-wrap--hist {
-  min-height: 140px;
+  min-height: 160px;
   flex: 0 0 auto;
-}
-
-.pr5-main--charts-tall .pr5-svg-wrap:not(.pr5-svg-wrap--hist) {
-  min-height: max(380px, calc(100svh - 10rem));
+  overflow: visible;
 }
 
 .cb-line {

@@ -29,6 +29,12 @@ import {
   chartZoomHostSlice,
   chartZoomHostWheel,
 } from '../core/chart-history-interaction';
+import { CHART_SVG_PRESERVE_ASPECT, chartViewBoxXFromClientX } from '../core/chart-svg-coords';
+import {
+  chartPagePanelsDefaults,
+  loadChartPagePanels,
+  persistChartPagePanels,
+} from '../core/chart-page-layout';
 import {
   downloadDeviceChartPdf,
   pdfCellDate,
@@ -84,6 +90,10 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     { value: 'trend', label: 'Tendencia (color por subida/bajada)' },
   ];
   chartTallLayout = false;
+
+  private readonly layoutStorageKey = 'ar_pro400_chart_panels_v1';
+  sidePanelOpen = chartPagePanelsDefaults().sideOpen;
+  extrasPanelOpen = false;
 
   readings: Pro400ReadingRow[] = [];
   displayPoints: Pro400ReadingRow[] = [];
@@ -160,6 +170,7 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
       this.initDefaultRange();
       this.loadSeriesPrefs();
       this.loadChartStylePreset();
+      this.loadChartPanels();
       if (this.pro400Id) {
         void this.loadAll();
       } else {
@@ -460,6 +471,35 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
     this.chartTallLayout = !this.chartTallLayout;
   }
 
+  toggleSidePanel(): void {
+    this.sidePanelOpen = !this.sidePanelOpen;
+    this.persistChartPanels();
+  }
+
+  closeSidePanel(): void {
+    if (!this.sidePanelOpen) return;
+    this.sidePanelOpen = false;
+    this.persistChartPanels();
+  }
+
+  toggleExtrasPanel(): void {
+    this.extrasPanelOpen = !this.extrasPanelOpen;
+    this.persistChartPanels();
+  }
+
+  private loadChartPanels(): void {
+    const p = loadChartPagePanels(this.layoutStorageKey);
+    this.sidePanelOpen = p.sideOpen;
+    this.extrasPanelOpen = p.extrasOpen;
+  }
+
+  private persistChartPanels(): void {
+    persistChartPagePanels(this.layoutStorageKey, {
+      sideOpen: this.sidePanelOpen,
+      extrasOpen: this.extrasPanelOpen,
+    });
+  }
+
   get chartZoomIsActive(): boolean {
     return chartZoomHostIsActive(this);
   }
@@ -478,7 +518,18 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
   }
 
   onChartWheel(ev: WheelEvent): void {
-    chartZoomHostWheel(this, ev, this.chartStage?.nativeElement, this.displayPoints.length > 0);
+    chartZoomHostWheel(
+      this,
+      ev,
+      this.chartStage?.nativeElement,
+      this.displayPoints.length > 0,
+      this.tempPlot.x0,
+      this.tempPlot.x1
+    );
+  }
+
+  chartSvgPreserveAspect(): string {
+    return CHART_SVG_PRESERVE_ASPECT;
   }
 
   async downloadChartPdf(): Promise<void> {
@@ -741,11 +792,10 @@ export class Pro400ChartComponent implements OnInit, OnDestroy {
   }
 
   onTempMouseMove(ev: MouseEvent): void {
-    const svg = ev.currentTarget as SVGElement | null;
-    if (!svg || !this.zoomedPoints.length) return;
-    const r = svg.getBoundingClientRect();
-    if (r.width <= 1 || r.height <= 1) return;
-    const x = ((ev.clientX - r.left) / r.width) * 100;
+    const stage = this.chartStage?.nativeElement;
+    if (!stage || !this.zoomedPoints.length) return;
+    const x = chartViewBoxXFromClientX(ev.clientX, stage);
+    if (x == null) return;
     this.cursorActive = true;
     this.updateCursorForX(x);
   }
