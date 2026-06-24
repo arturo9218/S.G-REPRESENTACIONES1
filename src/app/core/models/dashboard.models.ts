@@ -117,6 +117,21 @@ export interface DashboardCombistato {
   alarmDelayMin?: number | null;
   /** AR28 (F47): histéresis de alarma (K). */
   alarmHysteresisC?: number | null;
+  /** Rol del usuario actual sobre este PRO300 en nube. */
+  accessRole?: DashboardDeviceAccessRole;
+  /** Permisos granulares si es miembro invitado (no dueño). */
+  memberPermissions?: CombistatoMemberPermissions;
+  cloudSynced?: boolean;
+}
+
+/** Permisos de un invitado a un PRO300 (tabla combistato_members). */
+export interface CombistatoMemberPermissions {
+  canView: boolean;
+  canCharts: boolean;
+  canEditParams: boolean;
+  canFicha: boolean;
+  canCommands: boolean;
+  canPush: boolean;
 }
 
 /** PRO400 — controlador 1 sonda (`devices` con `equipment_kind = pro400`); misma idea de conexión que PRO300. */

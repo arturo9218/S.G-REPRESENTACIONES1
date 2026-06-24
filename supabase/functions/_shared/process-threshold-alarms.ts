@@ -1,5 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { sendPushToOwnerAndAdmins } from './send-web-push.ts';
+import { sendPushToCombistatoRecipients, sendPushToOwnerAndAdmins } from './send-web-push.ts';
 import { formatEsArDateTime } from './format-datetime.ts';
 
 const TEMP_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
@@ -177,7 +177,7 @@ export async function processThresholdAlarms(
   else if (shouldSendTemp) title = `${ctx.entityName} · temperatura`;
   else title = `${ctx.entityName} · corriente`;
 
-  const pushResult = await sendPushToOwnerAndAdmins(ctx.supabase, ctx.ownerUserId, {
+  const pushPayload = {
     title,
     body: bodyText,
     data: {
@@ -187,7 +187,16 @@ export async function processThresholdAlarms(
     tag: ctx.pushTag,
     navigate: ctx.pushNavigate,
     requireInteraction: true,
-  });
+  };
+  const pushResult =
+    ctx.thresholdsTable === 'combistatos'
+      ? await sendPushToCombistatoRecipients(
+          ctx.supabase,
+          ctx.entityId,
+          ctx.ownerUserId,
+          pushPayload
+        )
+      : await sendPushToOwnerAndAdmins(ctx.supabase, ctx.ownerUserId, pushPayload);
 
   const nowIso = new Date().toISOString();
   if (pushResult.sent > 0) {

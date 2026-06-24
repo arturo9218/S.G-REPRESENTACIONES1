@@ -3,7 +3,7 @@
 // Deploy: supabase functions deploy check-offline-push --no-verify-jwt
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { sendPushToOwnerAndAdmins } from '../_shared/send-web-push.ts';
+import { sendPushToCombistatoRecipients, sendPushToOwnerAndAdmins } from '../_shared/send-web-push.ts';
 import { combistatoOfflineCooldownMs } from '../_shared/combistato-param-alarms.ts';
 import { formatEsArDateTime } from '../_shared/format-datetime.ts';
 
@@ -193,16 +193,21 @@ Deno.serve(async (req) => {
         const name = typeof c.name === 'string' ? c.name : 'PRO300';
         const lastReadingAt = new Date(lastAt);
         const avisoAt = new Date(now);
-        const r = await sendPushToOwnerAndAdmins(supabase, c.owner_user_id as string, {
-          title: `${name}: dispositivo desconectado`,
-          body:
-            `Sin lecturas nuevas. Última lectura: ${formatEsArDateTime(lastReadingAt)}. ` +
-            `Aviso: ${formatEsArDateTime(avisoAt)}.`,
-          data: { type: 'offline', combistatoId: c.id },
-          tag: `offline-combistato-${c.id}`,
-          navigate: `/alertas?combistatoId=${encodeURIComponent(c.id as string)}`,
-          requireInteraction: true,
-        });
+        const r = await sendPushToCombistatoRecipients(
+          supabase,
+          c.id as string,
+          c.owner_user_id as string,
+          {
+            title: `${name}: dispositivo desconectado`,
+            body:
+              `Sin lecturas nuevas. Última lectura: ${formatEsArDateTime(lastReadingAt)}. ` +
+              `Aviso: ${formatEsArDateTime(avisoAt)}.`,
+            data: { type: 'offline', combistatoId: c.id },
+            tag: `offline-combistato-${c.id}`,
+            navigate: `/alertas?combistatoId=${encodeURIComponent(c.id as string)}`,
+            requireInteraction: true,
+          }
+        );
         offlinePushes += r.sent;
         if (r.sent > 0) {
           await supabase

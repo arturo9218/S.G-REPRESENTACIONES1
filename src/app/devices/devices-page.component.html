@@ -274,6 +274,7 @@
                             [class.device-card__relay-pill--on]="c.lastCompOn === true"
                             [class.device-card__relay-pill--forced]="(c.lastCompForcedRemainingS ?? 0) > 0"
                             [attr.title]="h.combistatoRelayTooltip('comp', c)"
+                            [disabled]="!h.combistatoStore.canCommandsCombistato(c)"
                             (click)="h.onCombistatoRelayClick('comp', c)"
                           >
                             COMP<span
@@ -288,6 +289,7 @@
                             [class.device-card__relay-pill--on]="c.lastFanOn === true"
                             [class.device-card__relay-pill--forced]="(c.lastFanForcedRemainingS ?? 0) > 0"
                             [attr.title]="h.combistatoRelayTooltip('fan', c)"
+                            [disabled]="!h.combistatoStore.canCommandsCombistato(c)"
                             (click)="h.onCombistatoRelayClick('fan', c)"
                           >
                             VENT<span
@@ -301,6 +303,7 @@
                             class="device-card__relay-pill"
                             [class.device-card__relay-pill--on]="c.lastDefrostOn === true"
                             [attr.title]="h.combistatoRelayTooltip('def', c)"
+                            [disabled]="!h.combistatoStore.canCommandsCombistato(c)"
                             (click)="h.onCombistatoRelayClick('def', c)"
                           >
                             DEF</button
@@ -344,6 +347,9 @@
                   <span class="device-card__meta device-card__meta--owner" *ngIf="h.isAdminView && c.ownerUserId">
                     Cuenta {{ h.formatOwnerUserIdShort(c.ownerUserId) }}
                   </span>
+                  <span class="device-card__meta device-card__meta--shared" *ngIf="h.combistatoStore.isCombistatoSharedMember(c)">
+                    Compartido contigo
+                  </span>
                   <span class="device-card__meta">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                     {{ c.location }}
@@ -359,6 +365,7 @@
                     AR01–AR48
                   </button>
                   <a
+                    *ngIf="h.combistatoStore.canChartsCombistato(c)"
                     class="device-card__btn device-card__btn--link"
                     [routerLink]="['/chart-combistato']"
                     [queryParams]="{ combistatoId: c.id }"
@@ -367,6 +374,7 @@
                     >Gráfico</a
                   >
                   <button
+                    *ngIf="h.combistatoStore.isCombistatoOwner(c)"
                     type="button"
                     class="device-card__btn"
                     [attr.aria-label]="'Editar nombre de ' + c.name"
@@ -375,6 +383,7 @@
                     Editar
                   </button>
                   <button
+                    *ngIf="h.combistatoStore.canDeleteCombistato(c)"
                     type="button"
                     class="device-card__btn device-card__btn--danger"
                     [attr.aria-label]="'Eliminar PRO300 ' + c.name"

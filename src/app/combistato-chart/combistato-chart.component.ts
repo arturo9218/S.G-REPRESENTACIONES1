@@ -10,6 +10,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
+import { CombistatoStoreService } from '../core/combistato-store.service';
 import { ChartStylePreset } from '../core/models/dashboard.models';
 import { buildChartTrendSegments, type ChartTrendSegment } from '../core/chart-trend';
 import {
@@ -190,7 +191,8 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
   constructor(
     private readonly route: ActivatedRoute,
     private readonly router: Router,
-    private readonly auth: AuthService
+    private readonly auth: AuthService,
+    private readonly combistatoStore: CombistatoStoreService
   ) {}
 
   ngOnInit(): void {
@@ -335,6 +337,12 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
         void this.router.navigate(['/login']);
         return;
       }
+      const chartsOk = await this.assertChartsAccess();
+      if (!chartsOk) {
+        this.readings = [];
+        this.displayPoints = [];
+        return;
+      }
       const { data: meta, error: eMeta } = await this.auth.client
         .from('combistatos')
         .select('name')
@@ -388,6 +396,27 @@ export class CombistatoChartComponent implements OnInit, OnDestroy {
     } finally {
       this.loading = false;
     }
+  }
+
+  private async assertChartsAccess(): Promise<boolean> {
+    const id = this.combistatoId;
+    if (!id) return false;
+    const cached = this.combistatoStore.snapshot.find((c) => c.id === id);
+    if (cached) {
+      if (!this.combistatoStore.canChartsCombistato(cached)) {
+        this.error = 'No tenés permiso para ver el gráfico de este PRO300.';
+        return false;
+      }
+      return true;
+    }
+    const { data, error } = await this.auth.client.rpc('user_can_charts_combistato', {
+      p_combistato_id: id,
+    });
+    if (error || !data) {
+      this.error = error?.message ?? 'No tenés permiso para ver el gráfico de este PRO300.';
+      return false;
+    }
+    return true;
   }
 
   private teardownRealtime(): void {

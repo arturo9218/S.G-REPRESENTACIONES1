@@ -8,7 +8,7 @@ import {
   mergeCombistatoParams,
 } from '../combistato/combistato-params.defaults';
 import { AuthService } from './auth.service';
-import { DashboardCombistato } from './models/dashboard.models';
+import { DashboardCombistato, CombistatoMemberPermissions, DashboardDeviceAccessRole } from './models/dashboard.models';
 import { ingestFunctionUrl, isSupabaseConfigured } from './supabase-config';
 
 const TOKEN_MAP_PREFIX = 'ar-monitor-combistato-tokens-v1';
@@ -53,6 +53,77 @@ export class CombistatoStoreService {
 
   get snapshot(): DashboardCombistato[] {
     return this.subject.value;
+  }
+
+  isCombistatoOwner(c: DashboardCombistato | null | undefined): boolean {
+    if (!c) return false;
+    return c.accessRole === 'owner' || c.accessRole === 'admin_view' || c.accessRole === undefined;
+  }
+
+  isCombistatoSharedMember(c: DashboardCombistato | null | undefined): boolean {
+    return !!(c?.cloudSynced && (c.accessRole === 'viewer' || c.accessRole === 'editor'));
+  }
+
+  canViewCombistato(c: DashboardCombistato | null | undefined): boolean {
+    if (!c) return false;
+    if (this.isCombistatoOwner(c)) return true;
+    return c.memberPermissions?.canView !== false;
+  }
+
+  canChartsCombistato(c: DashboardCombistato | null | undefined): boolean {
+    if (!c) return false;
+    if (this.isCombistatoOwner(c)) return true;
+    return !!c.memberPermissions?.canCharts;
+  }
+
+  canEditCombistatoParams(c: DashboardCombistato | null | undefined): boolean {
+    if (!c) return false;
+    if (this.isCombistatoOwner(c)) return true;
+    return !!c.memberPermissions?.canEditParams;
+  }
+
+  canFichaCombistato(c: DashboardCombistato | null | undefined): boolean {
+    if (!c) return false;
+    if (this.isCombistatoOwner(c)) return true;
+    return !!c.memberPermissions?.canFicha;
+  }
+
+  canCommandsCombistato(c: DashboardCombistato | null | undefined): boolean {
+    if (!c) return false;
+    if (this.isCombistatoOwner(c)) return true;
+    return !!c.memberPermissions?.canCommands;
+  }
+
+  canDeleteCombistato(c: DashboardCombistato | null | undefined): boolean {
+    return this.isCombistatoOwner(c) && c?.accessRole !== 'admin_view';
+  }
+
+  canManageCombistatoMembers(c: DashboardCombistato | null | undefined): boolean {
+    return this.isCombistatoOwner(c) && c?.accessRole === 'owner';
+  }
+
+  async leaveSharedCombistatoAsync(id: string): Promise<{ ok: boolean; error?: string }> {
+    if (!this.cloudEnabled() || !isUuid(id)) {
+      return { ok: false, error: 'Identificador inválido o sin nube.' };
+    }
+    const session = await this.auth.getSession();
+    if (!session?.user.id) {
+      return { ok: false, error: 'Iniciá sesión.' };
+    }
+    const c = this.snapshot.find((x) => x.id === id);
+    if (!c || !this.isCombistatoSharedMember(c)) {
+      return { ok: false, error: 'Solo aplica a equipos PRO300 compartidos contigo.' };
+    }
+    const { error } = await this.auth.client
+      .from('combistato_members')
+      .delete()
+      .eq('combistato_id', id)
+      .eq('member_user_id', session.user.id);
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    await this.hydrateFromCloud();
+    return { ok: true };
   }
 
   private cloudEnabled(): boolean {
@@ -458,7 +529,22 @@ export class CombistatoStoreService {
       params?: unknown;
     };
 
-    let rows: Row[] = [];
+    type RowWithAccess = Row & {
+      _access: DashboardDeviceAccessRole;
+      _perms?: CombistatoMemberPermissions;
+    };
+
+    const byId = new Map<string, RowWithAccess>();
+
+    const mapMemberPerms = (r: Record<string, unknown>): CombistatoMemberPermissions => ({
+      canView: r['can_view'] !== false,
+      canCharts: r['can_charts'] === true,
+      canEditParams: r['can_edit_params'] === true,
+      canFicha: r['can_ficha'] === true,
+      canCommands: r['can_commands'] === true,
+      canPush: r['can_push'] === true,
+    });
+
     if (isAdmin) {
       const { data, error } = await this.auth.client
         .from('combistatos')
@@ -469,24 +555,78 @@ export class CombistatoStoreService {
         this.subject.next([]);
         return;
       }
-      rows = (data ?? []) as Row[];
+      for (const r of (data ?? []) as Row[]) {
+        byId.set(r.id, { ...r, _access: 'admin_view' });
+      }
     } else {
-      const { data, error } = await this.auth.client
+      const { data: owned, error: eOwned } = await this.auth.client
         .from('combistatos')
         .select(base)
         .eq('owner_user_id', session.user.id)
         .order('name', { ascending: true });
-      if (error) {
-        if (error.message?.includes('Could not find the table') || error.code === '42P01') {
+      if (eOwned) {
+        if (eOwned.message?.includes('Could not find the table') || eOwned.code === '42P01') {
           this.subject.next([]);
           return;
         }
-        console.warn('Supabase combistatos:', error.message);
+        console.warn('Supabase combistatos (propios):', eOwned.message);
         this.subject.next([]);
         return;
       }
-      rows = (data ?? []) as Row[];
+      for (const r of (owned ?? []) as Row[]) {
+        byId.set(r.id, { ...r, _access: 'owner' });
+      }
+
+      const { data: shared, error: eMem } = await this.auth.client
+        .from('combistato_members')
+        .select(
+          'combistato_id, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push'
+        )
+        .eq('member_user_id', session.user.id);
+      if (eMem) {
+        const msg = eMem.message ?? '';
+        if (!msg.includes('combistato_members') && !msg.includes('schema cache')) {
+          console.warn('Supabase combistato_members:', msg);
+        }
+      } else if ((shared ?? []).length > 0) {
+        const memberRows = shared as {
+          combistato_id: string;
+          can_view?: boolean;
+          can_charts?: boolean;
+          can_edit_params?: boolean;
+          can_ficha?: boolean;
+          can_commands?: boolean;
+          can_push?: boolean;
+        }[];
+        const sharedIds = [...new Set(memberRows.map((r) => r.combistato_id).filter(Boolean))];
+        const { data: combiRows, error: eCombi } = await this.auth.client
+          .from('combistatos')
+          .select(base)
+          .in('id', sharedIds);
+        if (eCombi) {
+          console.warn('Supabase combistatos (compartidos):', eCombi.message);
+        }
+        const combiById = new Map(((combiRows ?? []) as Row[]).map((r) => [r.id, r]));
+        for (const row of memberRows) {
+          const combi = combiById.get(row.combistato_id);
+          if (!combi?.id) continue;
+          const perms = mapMemberPerms(row as Record<string, unknown>);
+          const role: DashboardDeviceAccessRole = perms.canEditParams ? 'editor' : 'viewer';
+          const prev = byId.get(combi.id);
+          if (prev?._access === 'owner') continue;
+          byId.set(combi.id, { ...combi, _access: role, _perms: perms });
+        }
+        if (sharedIds.length > 0 && combiById.size === 0) {
+          console.warn(
+            'combistato_members tiene filas pero combistatos no devolvió datos (revisá RLS o permisos can_view).'
+          );
+        }
+      }
     }
+
+    const rows = [...byId.values()].sort((a, b) =>
+      (a.name ?? '').localeCompare(b.name ?? '', 'es', { sensitivity: 'base' })
+    );
 
     const tokens = this.readTokenMap();
     const lastById = await this.fetchLatestCombistatoReadings(rows.map((r) => r.id));
@@ -496,6 +636,7 @@ export class CombistatoStoreService {
         lastSeenRaw && typeof lastSeenRaw === 'string' && lastSeenRaw.trim() ? lastSeenRaw.trim() : null;
       const snap = lastById.get(r.id);
       const merged = mergeCombistatoParams(r.params ?? null);
+      const isOwnerRow = r._access === 'owner' || r._access === 'admin_view';
       return {
         id: r.id,
         name: r.name,
@@ -506,7 +647,12 @@ export class CombistatoStoreService {
         lastSeenAt: lastSeenStr,
         online: this.combistatoOnlineFromLastSeen(lastSeenStr),
         ownerUserId: r.owner_user_id,
-        deviceToken: tokens[r.id] ?? ((r.device_token_hash ?? '').trim() || undefined),
+        deviceToken: isOwnerRow
+          ? tokens[r.id] ?? ((r.device_token_hash ?? '').trim() || undefined)
+          : undefined,
+        accessRole: r._access,
+        memberPermissions: r._perms,
+        cloudSynced: true,
         lastTemp1C: snap?.temp1 ?? null,
         lastTemp2C: snap?.temp2 ?? null,
         lastCompOn: snap?.comp ?? null,
@@ -617,6 +763,9 @@ export class CombistatoStoreService {
       return { ok: false, error: 'El ID módulo no puede quedar vacío.' };
     }
     const current = this.snapshot.find((c) => c.id === id);
+    if (!this.isCombistatoOwner(current)) {
+      return { ok: false, error: 'Solo el dueño puede cambiar nombre, ubicación o ID módulo.' };
+    }
     if (current?.moduleId !== moduleId && (await this.moduleExistsInCloud(moduleId))) {
       return { ok: false, error: 'Ese ID módulo ya está usado por otro combistato.' };
     }
@@ -635,6 +784,10 @@ export class CombistatoStoreService {
   async removeCombistatoAsync(id: string): Promise<{ ok: boolean; error?: string }> {
     if (!this.cloudEnabled() || !isUuid(id)) {
       return { ok: false, error: 'Identificador inválido o sin nube.' };
+    }
+    const current = this.snapshot.find((c) => c.id === id);
+    if (!this.canDeleteCombistato(current)) {
+      return { ok: false, error: 'Solo el dueño puede eliminar este PRO300.' };
     }
     const { error } = await this.auth.client.from('combistatos').delete().eq('id', id);
     if (error) {
@@ -668,6 +821,10 @@ export class CombistatoStoreService {
   ): Promise<{ error?: string }> {
     if (!this.cloudEnabled() || !isUuid(combistatoId)) {
       return { error: 'Solo disponible con sesión y tabla combistatos en la nube.' };
+    }
+    const current = this.snapshot.find((c) => c.id === combistatoId);
+    if (!this.canEditCombistatoParams(current)) {
+      return { error: 'No tenés permiso para editar parámetros de este PRO300.' };
     }
     const nowIso = new Date().toISOString();
     const { error } = await this.auth.client

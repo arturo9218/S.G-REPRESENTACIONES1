@@ -2136,8 +2136,94 @@
               <app-combistato-settings
                 *ngIf="selectedCombistatoId"
                 [combistatoId]="selectedCombistatoId"
-                [canEdit]="true"
+                [canEdit]="selectedCombistatoCanEditParams"
               ></app-combistato-settings>
+            </article>
+
+            <article
+              class="card"
+              *ngIf="selectedCombistato && environment.deviceCloudSync && selectedCombistatoCanManageMembers"
+            >
+              <h2 class="card__title card__title--sm">Compartir PRO300</h2>
+              <p class="card__hint card__hint--tight">
+                Invitá por email a un usuario ya registrado. Elegí una plantilla o personalizá los permisos.
+                Requiere SQL <code>066_combistato_members.sql</code> en Supabase.
+              </p>
+              <div class="notify-panel">
+                <label class="notify-panel__field notify-panel__field--full">
+                  <span>Email del usuario</span>
+                  <input
+                    type="email"
+                    [(ngModel)]="combistatoShareInviteEmail"
+                    name="combistato-share-invite-email"
+                    autocomplete="email"
+                    placeholder="nombre@ejemplo.com"
+                  />
+                </label>
+                <label class="notify-panel__field notify-panel__field--full">
+                  <span>Plantilla</span>
+                  <select
+                    class="notify-panel__select"
+                    [(ngModel)]="combistatoSharePreset"
+                    name="combistato-share-preset"
+                    (ngModelChange)="onCombistatoSharePresetChange()"
+                  >
+                    <option value="consulta">Solo consulta (ver + gráficos)</option>
+                    <option value="operador">Operador (ver, gráficos, comandos, push)</option>
+                    <option value="tecnico">Técnico (todos los permisos)</option>
+                    <option value="custom">Personalizado</option>
+                  </select>
+                </label>
+                <fieldset
+                  class="notify-panel__field notify-panel__field--full"
+                  *ngIf="combistatoSharePreset === 'custom'"
+                >
+                  <legend>Permisos</legend>
+                  <label><input type="checkbox" [(ngModel)]="combistatoSharePerms.canView" name="cs-view" /> Ver equipo</label>
+                  <label><input type="checkbox" [(ngModel)]="combistatoSharePerms.canCharts" name="cs-charts" /> Gráficos</label>
+                  <label><input type="checkbox" [(ngModel)]="combistatoSharePerms.canEditParams" name="cs-params" /> Parámetros AR</label>
+                  <label><input type="checkbox" [(ngModel)]="combistatoSharePerms.canFicha" name="cs-ficha" /> Ficha técnica</label>
+                  <label><input type="checkbox" [(ngModel)]="combistatoSharePerms.canCommands" name="cs-cmd" /> Comandos / deshielo</label>
+                  <label><input type="checkbox" [(ngModel)]="combistatoSharePerms.canPush" name="cs-push" /> Notificaciones push</label>
+                </fieldset>
+                <p
+                  class="sensor-labels-feedback"
+                  *ngIf="combistatoShareFeedback"
+                  [class.sensor-labels-feedback--warn]="combistatoShareFeedbackIsError"
+                >
+                  {{ combistatoShareFeedback }}
+                </p>
+                <button
+                  type="button"
+                  class="btn btn--primary notify-panel__save"
+                  [disabled]="combistatoShareBusy"
+                  (click)="submitCombistatoShareInvite()"
+                >
+                  {{ combistatoShareBusy ? 'Guardando…' : 'Invitar' }}
+                </button>
+                <p class="card__hint card__hint--tight" *ngIf="combistatoMembersLoading">Cargando invitados…</p>
+                <ul class="device-members-list" *ngIf="combistatoMembersRows.length && !combistatoMembersLoading">
+                  <li *ngFor="let m of combistatoMembersRows">
+                    Usuario {{ formatMemberUserIdShort(m.member_user_id) }} —
+                    {{ formatCombistatoMemberPerms(m) }}
+                  </li>
+                </ul>
+              </div>
+            </article>
+
+            <article class="card" *ngIf="selectedCombistatoIsSharedMember">
+              <h2 class="card__title card__title--sm">PRO300 compartido</h2>
+              <p class="card__hint card__hint--tight">
+                No sos el dueño. Para sacar este equipo de tu lista (sigue existiendo para quien te invitó), usá el botón.
+              </p>
+              <button
+                type="button"
+                class="btn btn--ghost notify-panel__save"
+                [disabled]="combistatoLeaveSharedBusy"
+                (click)="leaveSharedCombistato()"
+              >
+                {{ combistatoLeaveSharedBusy ? 'Quitando…' : 'Dejar de ver este PRO300' }}
+              </button>
             </article>
           </ng-container>
 

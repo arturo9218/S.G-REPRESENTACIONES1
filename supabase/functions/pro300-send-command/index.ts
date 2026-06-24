@@ -16,7 +16,7 @@
 //   supabase functions deploy pro300-send-command
 //   (NO desactivar JWT — exige usuario autenticado)
 //
-// Cualquier usuario logueado puede mandar comandos (lo pidió el dueño).
+// Solo dueño, admin o miembros con `can_commands` (RPC user_can_combistato_commands).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -94,6 +94,22 @@ Deno.serve(async (req) => {
     if (!ALLOWED_KINDS.has(kind)) {
       return new Response(JSON.stringify({ error: `kind inválido: ${kind}` }), {
         status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { data: canCmd, error: canCmdErr } = await userClient.rpc('user_can_combistato_commands', {
+      p_combistato_id: combistatoId,
+    });
+    if (canCmdErr) {
+      return new Response(JSON.stringify({ error: canCmdErr.message }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (!canCmd) {
+      return new Response(JSON.stringify({ error: 'No tenés permiso para enviar comandos a este PRO300' }), {
+        status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

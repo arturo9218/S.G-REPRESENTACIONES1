@@ -32,6 +32,12 @@ export class CombistatoSettingsComponent implements OnChanges {
 
   constructor(public combistatoStore: CombistatoStoreService) {}
 
+  get combistatoFromStore() {
+    const id = this.combistatoId;
+    if (!id) return null;
+    return this.combistatoStore.snapshot.find((c) => c.id === id) ?? null;
+  }
+
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['combistatoId']) {
       void this.reload();

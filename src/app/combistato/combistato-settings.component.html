@@ -46,7 +46,7 @@
     {{ feedback }}
   </p>
 
-  <p class="combistato-chart-link" *ngIf="combistatoId">
+  <p class="combistato-chart-link" *ngIf="combistatoId && combistatoStore.canChartsCombistato(combistatoFromStore)">
     <a
       class="combistato-chart-link__a"
       [routerLink]="['/chart-combistato']"

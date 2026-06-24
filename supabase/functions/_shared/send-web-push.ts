@@ -183,3 +183,31 @@ export async function sendPushToOwnerAndAdmins(
   }
   return sendPushToUsers(supabase, ids, payload);
 }
+
+/**
+ * Dueño + miembros con `can_push` + administradores (RPC `get_combistato_push_user_ids`).
+ */
+export async function sendPushToCombistatoRecipients(
+  supabase: SupabaseClient,
+  combistatoId: string,
+  ownerUserId: string,
+  payload: PushPayload
+): Promise<{ sent: number; skipped?: string; lastError?: string }> {
+  const ids: string[] = [];
+  const { data: rows, error } = await supabase.rpc('get_combistato_push_user_ids', {
+    p_combistato_id: combistatoId,
+    p_owner_user_id: ownerUserId,
+  });
+  if (error) {
+    console.warn('[send-web-push] get_combistato_push_user_ids:', error.message);
+    return sendPushToOwnerAndAdmins(supabase, ownerUserId, payload);
+  }
+  if (rows && Array.isArray(rows)) {
+    for (const row of rows as { user_id?: string }[]) {
+      const uid = row?.user_id;
+      if (typeof uid === 'string' && uid.length > 0) ids.push(uid);
+    }
+  }
+  if (!ids.length && ownerUserId) ids.push(ownerUserId);
+  return sendPushToUsers(supabase, ids, payload);
+}

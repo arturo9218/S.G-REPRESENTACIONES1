@@ -24,6 +24,7 @@ import {
   DashboardAlert,
   DashboardAlertKind,
   DashboardCombistato,
+  CombistatoMemberPermissions,
   DashboardDevice,
   DashboardPro400,
   DashboardPr500,
@@ -157,6 +158,32 @@ export class DashboardComponent implements OnInit, OnDestroy {
   deviceMembersRows: { member_user_id: string; role: string; created_at?: string }[] = [];
   deviceMembersLoading = false;
   leaveSharedBusy = false;
+  /** Invitar usuarios a un PRO300 (dueño). */
+  combistatoShareInviteEmail = '';
+  combistatoSharePreset: 'consulta' | 'operador' | 'tecnico' | 'custom' = 'consulta';
+  combistatoSharePerms: CombistatoMemberPermissions = {
+    canView: true,
+    canCharts: true,
+    canEditParams: false,
+    canFicha: false,
+    canCommands: false,
+    canPush: false,
+  };
+  combistatoShareBusy = false;
+  combistatoShareFeedback = '';
+  combistatoShareFeedbackIsError = false;
+  combistatoMembersRows: {
+    member_user_id: string;
+    can_view: boolean;
+    can_charts: boolean;
+    can_edit_params: boolean;
+    can_ficha: boolean;
+    can_commands: boolean;
+    can_push: boolean;
+    created_at?: string;
+  }[] = [];
+  combistatoMembersLoading = false;
+  combistatoLeaveSharedBusy = false;
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
   private subAdmin: Subscription | null = null;
@@ -1725,6 +1752,21 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return !!(d?.cloudSynced && (d.accessRole === 'viewer' || d.accessRole === 'editor'));
   }
 
+  get selectedCombistatoCanEditParams(): boolean {
+    return this.combistatoStore.canEditCombistatoParams(this.selectedCombistato);
+  }
+
+  get selectedCombistatoCanManageMembers(): boolean {
+    const c = this.selectedCombistato;
+    if (!c?.cloudSynced) return false;
+    if (this.isAdminView) return true;
+    return this.combistatoStore.canManageCombistatoMembers(c);
+  }
+
+  get selectedCombistatoIsSharedMember(): boolean {
+    return this.combistatoStore.isCombistatoSharedMember(this.selectedCombistato);
+  }
+
   get editingDevice(): DashboardDevice | null {
     if (!this.editingDeviceId) return null;
     return this.devices.find((d) => d.id === this.editingDeviceId) ?? null;
@@ -2562,13 +2604,173 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
+  applyCombistatoSharePreset(): void {
+    switch (this.combistatoSharePreset) {
+      case 'consulta':
+        this.combistatoSharePerms = {
+          canView: true,
+          canCharts: true,
+          canEditParams: false,
+          canFicha: false,
+          canCommands: false,
+          canPush: false,
+        };
+        break;
+      case 'operador':
+        this.combistatoSharePerms = {
+          canView: true,
+          canCharts: true,
+          canEditParams: false,
+          canFicha: false,
+          canCommands: true,
+          canPush: true,
+        };
+        break;
+      case 'tecnico':
+        this.combistatoSharePerms = {
+          canView: true,
+          canCharts: true,
+          canEditParams: true,
+          canFicha: true,
+          canCommands: true,
+          canPush: true,
+        };
+        break;
+      default:
+        break;
+    }
+  }
+
+  onCombistatoSharePresetChange(): void {
+    if (this.combistatoSharePreset !== 'custom') {
+      this.applyCombistatoSharePreset();
+    }
+  }
+
+  formatCombistatoMemberPerms(row: {
+    can_view?: boolean;
+    can_charts?: boolean;
+    can_edit_params?: boolean;
+    can_ficha?: boolean;
+    can_commands?: boolean;
+    can_push?: boolean;
+  }): string {
+    const parts: string[] = [];
+    if (row.can_view !== false) parts.push('Ver');
+    if (row.can_charts) parts.push('Gráficos');
+    if (row.can_edit_params) parts.push('Parámetros');
+    if (row.can_ficha) parts.push('Ficha');
+    if (row.can_commands) parts.push('Comandos');
+    if (row.can_push) parts.push('Push');
+    return parts.length ? parts.join(', ') : 'Sin permisos';
+  }
+
+  async refreshCombistatoMembers(): Promise<void> {
+    const id = this.selectedCombistatoId;
+    if (!id || !this.selectedCombistatoCanManageMembers || !this.environment.deviceCloudSync) {
+      this.combistatoMembersRows = [];
+      return;
+    }
+    this.combistatoMembersLoading = true;
+    try {
+      const { data, error } = await this.auth.client
+        .from('combistato_members')
+        .select(
+          'member_user_id, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push, created_at'
+        )
+        .eq('combistato_id', id)
+        .order('created_at', { ascending: true });
+      if (error) {
+        this.combistatoMembersRows = [];
+        return;
+      }
+      this.combistatoMembersRows = (data ?? []) as typeof this.combistatoMembersRows;
+    } finally {
+      this.combistatoMembersLoading = false;
+    }
+  }
+
+  async submitCombistatoShareInvite(): Promise<void> {
+    const id = this.selectedCombistatoId;
+    if (!id || !this.selectedCombistatoCanManageMembers) return;
+    const raw = this.combistatoShareInviteEmail.trim().toLowerCase();
+    if (!raw || !raw.includes('@')) {
+      this.combistatoShareFeedback = 'Ingresá un email válido.';
+      this.combistatoShareFeedbackIsError = true;
+      window.setTimeout(() => {
+        this.combistatoShareFeedback = '';
+      }, 5000);
+      return;
+    }
+    const p = this.combistatoSharePerms;
+    this.combistatoShareBusy = true;
+    this.combistatoShareFeedback = '';
+    this.combistatoShareFeedbackIsError = false;
+    try {
+      const { error } = await this.auth.client.rpc('add_combistato_member_by_email', {
+        p_combistato_id: id,
+        p_email: raw,
+        p_can_view: p.canView,
+        p_can_charts: p.canCharts,
+        p_can_edit_params: p.canEditParams,
+        p_can_ficha: p.canFicha,
+        p_can_commands: p.canCommands,
+        p_can_push: p.canPush,
+      });
+      if (error) {
+        this.combistatoShareFeedbackIsError = true;
+        this.combistatoShareFeedback = error.message;
+      } else {
+        this.combistatoShareFeedback = 'Listo: el usuario ya puede acceder con los permisos elegidos.';
+        this.combistatoShareInviteEmail = '';
+        await this.refreshCombistatoMembers();
+      }
+    } finally {
+      this.combistatoShareBusy = false;
+      window.setTimeout(() => {
+        this.combistatoShareFeedback = '';
+      }, 7000);
+    }
+  }
+
+  async leaveSharedCombistato(): Promise<void> {
+    const id = this.selectedCombistatoId;
+    if (!id || !this.selectedCombistatoIsSharedMember) return;
+    if (!confirm('¿Dejar de ver este PRO300 compartido? Se quitará de tu lista.')) return;
+    this.combistatoLeaveSharedBusy = true;
+    try {
+      const res = await this.combistatoStore.leaveSharedCombistatoAsync(id);
+      if (!res.ok) {
+        alert(res.error ?? 'No se pudo completar.');
+        return;
+      }
+      this.selectCombistato(null);
+      void this.router.navigate(['/configuracion'], {
+        queryParams: { combistatoId: null },
+        replaceUrl: true,
+      });
+    } finally {
+      this.combistatoLeaveSharedBusy = false;
+    }
+  }
+
   private assertEquipmentNotViewer(): boolean {
     const t = this.selectedEquipmentFichaTarget;
-    if (!t || t.kind !== 'device') return false;
-    const d = this.devices.find((x) => x.id === t.id);
-    if (d && this.deviceStore.isCloudViewerOnly(d)) {
-      this.equipmentFeedback = 'Solo lectura: no podés modificar la ficha con este rol.';
-      return true;
+    if (!t) return false;
+    if (t.kind === 'device') {
+      const d = this.devices.find((x) => x.id === t.id);
+      if (d && this.deviceStore.isCloudViewerOnly(d)) {
+        this.equipmentFeedback = 'Solo lectura: no podés modificar la ficha con este rol.';
+        return true;
+      }
+      return false;
+    }
+    if (t.kind === 'combistato') {
+      const c = this.combistatos.find((x) => x.id === t.id);
+      if (c && !this.combistatoStore.canFichaCombistato(c)) {
+        this.equipmentFeedback = 'Solo lectura: no tenés permiso para modificar la ficha de este PRO300.';
+        return true;
+      }
     }
     return false;
   }
@@ -2870,6 +3072,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.selectPro400(null);
       this.selectDatalogger(null);
     }
+    void this.refreshCombistatoMembers();
   }
 
   selectPro400(id: string | null): void {
@@ -3224,6 +3427,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   openEditCombistatoModal(c: DashboardCombistato): void {
+    if (!this.combistatoStore.isCombistatoOwner(c)) {
+      alert('Solo el dueño puede editar nombre, ubicación o ID módulo.');
+      return;
+    }
     this.combistatoModalMode = 'edit';
     this.editingCombistatoId = c.id;
     this.combistatoForm.patchValue({
@@ -3286,6 +3493,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   async confirmDeleteCombistato(c: DashboardCombistato): Promise<void> {
+    if (!this.combistatoStore.canDeleteCombistato(c)) {
+      alert('Solo el dueño puede eliminar este PRO300.');
+      return;
+    }
     if (!confirm(`¿Eliminar PRO300 «${c.name}»? Se borrarán también los parámetros en la nube.`)) return;
     const r = await this.combistatoStore.removeCombistatoAsync(c.id);
     if (!r.ok) {
@@ -3870,6 +4081,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
    */
   async onCombistatoRelayClick(relay: 'comp' | 'fan' | 'def', c: DashboardCombistato): Promise<void> {
     if (!c.id) return;
+    if (!this.combistatoStore.canCommandsCombistato(c)) {
+      this.toast.error(`${c.name}: no tenés permiso para enviar comandos.`);
+      return;
+    }
     let kind: CombistatoCommandKind;
     let value: boolean | undefined;
     let question: string;
