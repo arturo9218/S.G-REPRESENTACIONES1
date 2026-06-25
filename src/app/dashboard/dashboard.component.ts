@@ -2687,7 +2687,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         'member_user_id, member_email, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push, created_at';
       const colsBase =
         'member_user_id, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push, created_at';
-      let { data, error } = await this.auth.client
+      const { data, error } = await this.auth.client
         .from('combistato_members')
         .select(colsWithEmail)
         .eq('combistato_id', id)
@@ -2698,8 +2698,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
           .select(colsBase)
           .eq('combistato_id', id)
           .order('created_at', { ascending: true });
-        data = retry.data;
-        error = retry.error;
+        if (retry.error) {
+          console.warn('combistato_members:', retry.error.message);
+          this.combistatoMembersRows = [];
+          return;
+        }
+        this.combistatoMembersRows = (retry.data ?? []) as typeof this.combistatoMembersRows;
+        return;
       }
       if (error) {
         console.warn('combistato_members:', error.message);
