@@ -174,6 +174,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   combistatoShareFeedbackIsError = false;
   combistatoMembersRows: {
     member_user_id: string;
+    member_email?: string | null;
     can_view: boolean;
     can_charts: boolean;
     can_edit_params: boolean;
@@ -2666,6 +2667,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return parts.length ? parts.join(', ') : 'Sin permisos';
   }
 
+  formatCombistatoMemberLabel(row: { member_email?: string | null; member_user_id: string }): string {
+    const email = row.member_email?.trim();
+    if (email) return email;
+    return this.formatMemberUserIdShort(row.member_user_id);
+  }
+
   async refreshCombistatoMembers(): Promise<void> {
     const id = this.selectedCombistatoId;
     if (!id || !this.selectedCombistatoCanManageMembers || !this.environment.deviceCloudSync) {
@@ -2677,7 +2684,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const { data, error } = await this.auth.client
         .from('combistato_members')
         .select(
-          'member_user_id, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push, created_at'
+          'member_user_id, member_email, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push, created_at'
         )
         .eq('combistato_id', id)
         .order('created_at', { ascending: true });

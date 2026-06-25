@@ -2215,8 +2215,8 @@
                 <ul class="device-members-list" *ngIf="combistatoMembersRows.length && !combistatoMembersLoading">
                   <li *ngFor="let m of combistatoMembersRows" class="device-members-list__item">
                     <span>
-                      Usuario {{ formatMemberUserIdShort(m.member_user_id) }} —
-                      {{ formatCombistatoMemberPerms(m) }}
+                      <strong>{{ formatCombistatoMemberLabel(m) }}</strong>
+                      <span class="device-members-list__perms"> — {{ formatCombistatoMemberPerms(m) }}</span>
                     </span>
                     <button
                       type="button"
