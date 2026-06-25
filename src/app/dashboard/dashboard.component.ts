@@ -548,6 +548,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
           this.settingsConfigKind = 'combistato';
           if (this.selectedCombistatoId !== cid) {
             this.selectCombistato(cid);
+          } else {
+            void this.refreshCombistatoMembers();
           }
         } else if (p4id && p4List.some((p) => p.id === p4id)) {
           this.settingsConfigKind = 'pro400';
@@ -2681,14 +2683,26 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     this.combistatoMembersLoading = true;
     try {
-      const { data, error } = await this.auth.client
+      const colsWithEmail =
+        'member_user_id, member_email, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push, created_at';
+      const colsBase =
+        'member_user_id, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push, created_at';
+      let { data, error } = await this.auth.client
         .from('combistato_members')
-        .select(
-          'member_user_id, member_email, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push, created_at'
-        )
+        .select(colsWithEmail)
         .eq('combistato_id', id)
         .order('created_at', { ascending: true });
+      if (error?.message?.includes('member_email')) {
+        const retry = await this.auth.client
+          .from('combistato_members')
+          .select(colsBase)
+          .eq('combistato_id', id)
+          .order('created_at', { ascending: true });
+        data = retry.data;
+        error = retry.error;
+      }
       if (error) {
+        console.warn('combistato_members:', error.message);
         this.combistatoMembersRows = [];
         return;
       }
@@ -3356,6 +3370,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.skipQueryParamDeviceSync = false;
       });
     this.scrollSettingsParamsIntoView();
+    void this.refreshCombistatoMembers();
   }
 
   openSettingsPr500Params(pr500Id: string): void {

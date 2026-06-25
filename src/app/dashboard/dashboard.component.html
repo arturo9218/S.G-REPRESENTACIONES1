@@ -2120,44 +2120,13 @@
 
           <ng-container *ngIf="settingsConfigKind === 'combistato'">
             <article
-              id="section-settings-combistato"
-              class="card"
-              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
-            >
-              <div class="card__title-row">
-                <h2 class="card__title card__title--sm">PRO300 — parámetros AR01–AR48</h2>
-                <div class="card__title-actions">
-                  <button type="button" class="btn btn--ghost btn--sm" (click)="openAddCombistatoModal()">+ PRO300</button>
-                  <button
-                    *ngIf="selectedCombistato && combistatoStore.canDeleteCombistato(selectedCombistato)"
-                    type="button"
-                    class="btn btn--ghost btn--sm btn--danger"
-                    (click)="confirmDeleteCombistato(selectedCombistato!)"
-                  >
-                    Eliminar
-                  </button>
-                </div>
-              </div>
-              <p class="card__hint card__hint--tight">
-                Los valores se guardan en la nube por PRO300. Para cambiar de equipo, usá <strong>Volver a la lista</strong>.
-                Las alarmas push usan <strong>AR24–AR26</strong> (sección Alarmas térmicas). Activá avisos en el celular desde
-                <strong>Comunidad</strong> o el panel de un dispositivo genérico.
-              </p>
-              <app-combistato-settings
-                *ngIf="selectedCombistatoId"
-                [combistatoId]="selectedCombistatoId"
-                [canEdit]="selectedCombistatoCanEditParams"
-              ></app-combistato-settings>
-            </article>
-
-            <article
+              id="section-settings-combistato-share"
               class="card"
               *ngIf="selectedCombistato && environment.deviceCloudSync && selectedCombistatoCanManageMembers"
             >
               <h2 class="card__title card__title--sm">Compartir PRO300</h2>
               <p class="card__hint card__hint--tight">
-                Invitá por email a un usuario ya registrado. Elegí una plantilla o personalizá los permisos.
-                Requiere SQL <code>066_combistato_members.sql</code> en Supabase.
+                Invitá por email a un usuario ya registrado. Los invitados aparecen acá (arriba de los parámetros AR).
               </p>
               <div class="notify-panel">
                 <label class="notify-panel__field notify-panel__field--full">
@@ -2212,6 +2181,12 @@
                   {{ combistatoShareBusy ? 'Guardando…' : 'Invitar' }}
                 </button>
                 <p class="card__hint card__hint--tight" *ngIf="combistatoMembersLoading">Cargando invitados…</p>
+                <p
+                  class="card__hint card__hint--tight"
+                  *ngIf="!combistatoMembersLoading && !combistatoMembersRows.length"
+                >
+                  Todavía no hay invitados para este PRO300.
+                </p>
                 <ul class="device-members-list" *ngIf="combistatoMembersRows.length && !combistatoMembersLoading">
                   <li *ngFor="let m of combistatoMembersRows" class="device-members-list__item">
                     <span>
@@ -2233,6 +2208,37 @@
                   </li>
                 </ul>
               </div>
+            </article>
+
+            <article
+              id="section-settings-combistato"
+              class="card"
+              *ngIf="environment.deviceCloudSync && deviceStore.isCloudSyncActive()"
+            >
+              <div class="card__title-row">
+                <h2 class="card__title card__title--sm">PRO300 — parámetros AR01–AR48</h2>
+                <div class="card__title-actions">
+                  <button type="button" class="btn btn--ghost btn--sm" (click)="openAddCombistatoModal()">+ PRO300</button>
+                  <button
+                    *ngIf="selectedCombistato && combistatoStore.canDeleteCombistato(selectedCombistato)"
+                    type="button"
+                    class="btn btn--ghost btn--sm btn--danger"
+                    (click)="confirmDeleteCombistato(selectedCombistato!)"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+              <p class="card__hint card__hint--tight">
+                Los valores se guardan en la nube por PRO300. Para cambiar de equipo, usá <strong>Volver a la lista</strong>.
+                Las alarmas push usan <strong>AR24–AR26</strong> (sección Alarmas térmicas). Activá avisos en el celular desde
+                <strong>Comunidad</strong> o el panel de un dispositivo genérico.
+              </p>
+              <app-combistato-settings
+                *ngIf="selectedCombistatoId"
+                [combistatoId]="selectedCombistatoId"
+                [canEdit]="selectedCombistatoCanEditParams"
+              ></app-combistato-settings>
             </article>
 
             <article class="card" *ngIf="selectedCombistatoIsSharedMember">
