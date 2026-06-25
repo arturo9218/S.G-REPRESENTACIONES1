@@ -184,6 +184,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }[] = [];
   combistatoMembersLoading = false;
   combistatoLeaveSharedBusy = false;
+  combistatoRevokingMemberId: string | null = null;
   private subDev: Subscription | null = null;
   private subRead: Subscription | null = null;
   private subAdmin: Subscription | null = null;
@@ -2751,6 +2752,23 @@ export class DashboardComponent implements OnInit, OnDestroy {
       });
     } finally {
       this.combistatoLeaveSharedBusy = false;
+    }
+  }
+
+  async revokeCombistatoMember(memberUserId: string): Promise<void> {
+    const id = this.selectedCombistatoId;
+    if (!id || !this.selectedCombistatoCanManageMembers) return;
+    if (!confirm('¿Dejar de compartir con este usuario? Perderá el acceso al PRO300.')) return;
+    this.combistatoRevokingMemberId = memberUserId;
+    try {
+      const res = await this.combistatoStore.removeCombistatoMemberAsync(id, memberUserId);
+      if (!res.ok) {
+        alert(res.error ?? 'No se pudo quitar el acceso.');
+        return;
+      }
+      await this.refreshCombistatoMembers();
+    } finally {
+      this.combistatoRevokingMemberId = null;
     }
   }
 

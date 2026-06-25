@@ -2126,7 +2126,17 @@
             >
               <div class="card__title-row">
                 <h2 class="card__title card__title--sm">PRO300 — parámetros AR01–AR48</h2>
-                <button type="button" class="btn btn--ghost btn--sm" (click)="openAddCombistatoModal()">+ PRO300</button>
+                <div class="card__title-actions">
+                  <button type="button" class="btn btn--ghost btn--sm" (click)="openAddCombistatoModal()">+ PRO300</button>
+                  <button
+                    *ngIf="selectedCombistato && combistatoStore.canDeleteCombistato(selectedCombistato)"
+                    type="button"
+                    class="btn btn--ghost btn--sm btn--danger"
+                    (click)="confirmDeleteCombistato(selectedCombistato!)"
+                  >
+                    Eliminar
+                  </button>
+                </div>
               </div>
               <p class="card__hint card__hint--tight">
                 Los valores se guardan en la nube por PRO300. Para cambiar de equipo, usá <strong>Volver a la lista</strong>.
@@ -2203,9 +2213,23 @@
                 </button>
                 <p class="card__hint card__hint--tight" *ngIf="combistatoMembersLoading">Cargando invitados…</p>
                 <ul class="device-members-list" *ngIf="combistatoMembersRows.length && !combistatoMembersLoading">
-                  <li *ngFor="let m of combistatoMembersRows">
-                    Usuario {{ formatMemberUserIdShort(m.member_user_id) }} —
-                    {{ formatCombistatoMemberPerms(m) }}
+                  <li *ngFor="let m of combistatoMembersRows" class="device-members-list__item">
+                    <span>
+                      Usuario {{ formatMemberUserIdShort(m.member_user_id) }} —
+                      {{ formatCombistatoMemberPerms(m) }}
+                    </span>
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm"
+                      [disabled]="combistatoRevokingMemberId === m.member_user_id"
+                      (click)="revokeCombistatoMember(m.member_user_id)"
+                    >
+                      {{
+                        combistatoRevokingMemberId === m.member_user_id
+                          ? 'Quitando…'
+                          : 'Dejar de compartir'
+                      }}
+                    </button>
                   </li>
                 </ul>
               </div>

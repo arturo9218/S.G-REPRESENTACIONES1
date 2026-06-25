@@ -383,7 +383,7 @@
                     Editar
                   </button>
                   <button
-                    *ngIf="h.combistatoStore.canDeleteCombistato(c)"
+                    *ngIf="!h.combistatoStore.isCombistatoSharedMember(c)"
                     type="button"
                     class="device-card__btn device-card__btn--danger"
                     [attr.aria-label]="'Eliminar PRO300 ' + c.name"

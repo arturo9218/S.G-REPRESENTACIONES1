@@ -95,11 +95,41 @@ export class CombistatoStoreService {
   }
 
   canDeleteCombistato(c: DashboardCombistato | null | undefined): boolean {
-    return this.isCombistatoOwner(c) && c?.accessRole !== 'admin_view';
+    if (!c || this.isCombistatoSharedMember(c)) return false;
+    if (c.ownerUserId && this.userScopeKey !== 'anon' && c.ownerUserId === this.userScopeKey) {
+      return true;
+    }
+    return c.accessRole === 'owner';
   }
 
   canManageCombistatoMembers(c: DashboardCombistato | null | undefined): boolean {
-    return this.isCombistatoOwner(c) && c?.accessRole === 'owner';
+    if (!c || this.isCombistatoSharedMember(c)) return false;
+    if (c.ownerUserId && this.userScopeKey !== 'anon' && c.ownerUserId === this.userScopeKey) {
+      return true;
+    }
+    return c.accessRole === 'owner';
+  }
+
+  async removeCombistatoMemberAsync(
+    combistatoId: string,
+    memberUserId: string
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!this.cloudEnabled() || !isUuid(combistatoId) || !memberUserId) {
+      return { ok: false, error: 'Datos inválidos o sin nube.' };
+    }
+    const c = this.snapshot.find((x) => x.id === combistatoId);
+    if (!this.canManageCombistatoMembers(c)) {
+      return { ok: false, error: 'Solo el dueño puede quitar invitados.' };
+    }
+    const { error } = await this.auth.client
+      .from('combistato_members')
+      .delete()
+      .eq('combistato_id', combistatoId)
+      .eq('member_user_id', memberUserId);
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
   }
 
   async leaveSharedCombistatoAsync(id: string): Promise<{ ok: boolean; error?: string }> {

@@ -448,8 +448,9 @@ $border: rgba(148, 163, 184, 0.18);
 }
 
 @media (max-width: 900px) {
-  /* En mÃ³vil el alto dinÃ¡mico del navegador rompe menos con scroll de pÃ¡gina + barra fija */
+  /* Reserva espacio para la barra inferior fija (casa, alertas, ayuda, …) */
   .shell {
+    --mobile-nav-inset: calc(4.75rem + env(safe-area-inset-bottom, 0px));
     height: auto;
     min-height: 100dvh;
     min-height: 100svh;
@@ -461,6 +462,8 @@ $border: rgba(148, 163, 184, 0.18);
     overflow: visible;
     min-height: 100dvh;
     min-height: 100svh;
+    padding-bottom: var(--mobile-nav-inset);
+    box-sizing: border-box;
   }
 
   .shell__content {

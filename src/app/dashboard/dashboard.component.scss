@@ -464,12 +464,6 @@ $border: rgba(148, 163, 184, 0.18);
   -webkit-overflow-scrolling: touch;
 }
 
-.shell--dark .shell__content {
-  @media (max-width: 900px) {
-    padding-bottom: 5.5rem;
-  }
-}
-
 .kpi-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -2563,9 +2557,19 @@ $border: rgba(148, 163, 184, 0.18);
 
 .device-members-list {
   margin: 0.75rem 0 0;
-  padding-left: 1.1rem;
+  padding-left: 0;
+  list-style: none;
   font-size: 0.9rem;
   color: var(--text-muted, #64748b);
+}
+
+.device-members-list__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
 }
 
 .device-card__role-pill {
@@ -2814,6 +2818,13 @@ $border: rgba(148, 163, 184, 0.18);
   gap: 0.5rem;
   flex-wrap: wrap;
   margin-bottom: 0.5rem;
+}
+
+.card__title-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
 }
 
 .card__hint--sm {
@@ -3193,7 +3204,7 @@ $border: rgba(148, 163, 184, 0.18);
 }
 
 @media (max-width: 900px) {
-  /* En móvil el alto dinámico del navegador rompe menos con scroll de página + barra fija */
+  /* shell-layout reserva --mobile-nav-inset en .shell__main; acá solo ajustamos márgenes internos */
   .shell {
     height: auto;
     min-height: 100dvh;
@@ -3391,6 +3402,7 @@ $border: rgba(148, 163, 184, 0.18);
 
   .shell__content {
     padding: 0.85rem 0.8rem 1.15rem;
+    /* No reducir padding-bottom: lo reserva .shell__main (--mobile-nav-inset) en shell-layout */
   }
 
   .grid-main__right {
