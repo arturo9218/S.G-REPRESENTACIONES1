@@ -2182,8 +2182,15 @@
                 </button>
                 <p class="card__hint card__hint--tight" *ngIf="combistatoMembersLoading">Cargando invitados…</p>
                 <p
+                  class="sensor-labels-feedback sensor-labels-feedback--warn"
+                  *ngIf="!combistatoMembersLoading && combistatoMembersLoadError"
+                  role="alert"
+                >
+                  {{ combistatoMembersLoadError }}
+                </p>
+                <p
                   class="card__hint card__hint--tight"
-                  *ngIf="!combistatoMembersLoading && !combistatoMembersRows.length"
+                  *ngIf="!combistatoMembersLoading && !combistatoMembersLoadError && !combistatoMembersRows.length"
                 >
                   Todavía no hay invitados para este PRO300.
                 </p>

@@ -184,6 +184,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     created_at?: string;
   }[] = [];
   combistatoMembersLoading = false;
+  /** Error al cargar invitados PRO300 (permisos, SQL pendiente, red). */
+  combistatoMembersLoadError = '';
   combistatoLeaveSharedBusy = false;
   combistatoRevokingMemberId: string | null = null;
   private subDev: Subscription | null = null;
@@ -1113,9 +1115,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return false;
   }
 
-  /** Tarjetas de paneles genéricos pre-PRO400: retiradas de la vista Dispositivos. */
+  /** Telemetría lateral de panel genérico (Dispositivos / Alertas). */
   get showDevicePanelsInView(): boolean {
-    return false;
+    if (!this.selectedDeviceId) return false;
+    if (this.shellRoute !== 'devices' && this.shellRoute !== 'alerts') return false;
+    return true;
+  }
+
+  /** Tarjetas de paneles genéricos en la vista Dispositivos. */
+  get showPanelSectionInView(): boolean {
+    if (!this.isDeviceSoloView) return true;
+    return this.deviceSoloFocus!.kind === 'sensor';
   }
 
   get showCombistatoSectionInView(): boolean {
@@ -2675,13 +2685,26 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return this.formatMemberUserIdShort(row.member_user_id);
   }
 
+  private combistatoMembersLoadErrorMessage(raw: string): string {
+    const msg = raw.toLowerCase();
+    if (msg.includes('member_email') || msg.includes('066_combistato_members')) {
+      return 'Falta SQL en Supabase: ejecutá 066_combistato_members.sql y 068_combistato_members_email.sql, luego recargá.';
+    }
+    if (msg.includes('permission') || msg.includes('policy') || msg.includes('42501')) {
+      return 'Sin permiso para ver invitados. Verificá que seas el dueño del PRO300.';
+    }
+    return raw.trim() || 'No se pudo cargar la lista de invitados.';
+  }
+
   async refreshCombistatoMembers(): Promise<void> {
     const id = this.selectedCombistatoId;
     if (!id || !this.selectedCombistatoCanManageMembers || !this.environment.deviceCloudSync) {
       this.combistatoMembersRows = [];
+      this.combistatoMembersLoadError = '';
       return;
     }
     this.combistatoMembersLoading = true;
+    this.combistatoMembersLoadError = '';
     try {
       const colsWithEmail =
         'member_user_id, member_email, can_view, can_charts, can_edit_params, can_ficha, can_commands, can_push, created_at';
@@ -2701,6 +2724,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         if (retry.error) {
           console.warn('combistato_members:', retry.error.message);
           this.combistatoMembersRows = [];
+          this.combistatoMembersLoadError = this.combistatoMembersLoadErrorMessage(retry.error.message);
           return;
         }
         this.combistatoMembersRows = (retry.data ?? []) as typeof this.combistatoMembersRows;
@@ -2709,6 +2733,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (error) {
         console.warn('combistato_members:', error.message);
         this.combistatoMembersRows = [];
+        this.combistatoMembersLoadError = this.combistatoMembersLoadErrorMessage(error.message);
         return;
       }
       this.combistatoMembersRows = (data ?? []) as typeof this.combistatoMembersRows;
@@ -3300,6 +3325,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.openSettingsCombistatoParams(c.id);
   }
 
+  /** Desde Dispositivos: umbrales, sensores y compartir del panel genérico. */
+  goDeviceSettings(d: DashboardDevice, ev?: Event): void {
+    ev?.stopPropagation();
+    this.openSettingsDeviceParams(d.id);
+  }
+
   /** Desde Inicio / Dispositivos: abre Configuración con ese PRO400 para editar AR01–AR26. */
   goPro400Settings(p: DashboardPro400, ev?: Event): void {
     ev?.stopPropagation();
@@ -3374,7 +3405,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .finally(() => {
         this.skipQueryParamDeviceSync = false;
       });
-    this.scrollSettingsParamsIntoView();
+    this.scrollCombistatoSettingsIntoView();
     void this.refreshCombistatoMembers();
   }
 
@@ -3456,6 +3487,27 @@ export class DashboardComponent implements OnInit, OnDestroy {
         block: 'start',
       });
     }, 120);
+  }
+
+  /** Dueño: Compartir PRO300 arriba; invitado o sin gestión: parámetros AR. */
+  private scrollCombistatoSettingsIntoView(): void {
+    const targetId = this.selectedCombistatoCanManageMembers
+      ? 'section-settings-combistato-share'
+      : 'section-settings-combistato';
+    window.setTimeout(() => {
+      document
+        .getElementById(targetId)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  }
+
+  deviceCardHasDualTemp(d: DashboardDevice): boolean {
+    return (
+      d.temperatureC != null &&
+      Number.isFinite(d.temperatureC) &&
+      d.temperature2C != null &&
+      Number.isFinite(d.temperature2C)
+    );
   }
 
   openAddCombistatoModal(): void {
