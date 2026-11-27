@@ -48,14 +48,20 @@
         </button>
       </div>
       <div class="pr5-side__toggles">
-        <label *ngFor="let on of showTemps; let i = index">
-          <input type="checkbox" [(ngModel)]="showTemps[i]" (ngModelChange)="persistSeriesPrefs()" /> {{ tempName(i) }}
+        <label *ngFor="let on of showTemps; let i = index; trackBy: trackByIndex">
+          <input type="checkbox" [checked]="on" (change)="setTempVisible(i, checkboxOn($event))" />
+          <span class="dlg-swatch dlg-swatch--t{{ i }}"></span>
+          {{ tempName(i) }}
         </label>
-        <label *ngFor="let on of showPowers; let i = index">
-          <input type="checkbox" [(ngModel)]="showPowers[i]" (ngModelChange)="persistSeriesPrefs()" /> {{ currentName(i) }} (W)
+        <label *ngFor="let on of showPowers; let i = index; trackBy: trackByIndex">
+          <input type="checkbox" [checked]="on" (change)="setPowerVisible(i, checkboxOn($event))" />
+          <span class="dlg-swatch dlg-swatch--c{{ i }}"></span>
+          {{ currentName(i) }} (W)
         </label>
-        <label *ngFor="let on of showPress; let i = index">
-          <input type="checkbox" [(ngModel)]="showPress[i]" (ngModelChange)="persistSeriesPrefs()" /> {{ pressName(i) }}
+        <label *ngFor="let on of showPress; let i = index; trackBy: trackByIndex">
+          <input type="checkbox" [checked]="on" (change)="setPressVisible(i, checkboxOn($event))" />
+          <span class="dlg-swatch dlg-swatch--p{{ i }}"></span>
+          {{ pressName(i) }}
         </label>
         <label class="pr5-side__toggles--full">
           <input type="checkbox" [(ngModel)]="showHistogram" (ngModelChange)="persistSeriesPrefs()" /> Histograma T
@@ -155,8 +161,8 @@
       <p class="pr5-empty" *ngIf="!readings.length && !loading">Sin lecturas en este rango.</p>
 
       <div class="pr5-legend" *ngIf="readings.length">
-        <ng-container *ngFor="let on of showTemps; let i = index">
-          <span class="pr5-legend__item pr5-legend__item--succ" *ngIf="on">{{ tempName(i) }}</span>
+        <ng-container *ngFor="let on of showTemps; let i = index; trackBy: trackByIndex">
+          <span class="pr5-legend__item dlg-legend--t{{ i }}" *ngIf="on">{{ tempName(i) }}</span>
         </ng-container>
         <ng-container *ngFor="let on of showPowers; let i = index">
           <span class="pr5-legend__pill" *ngIf="on">{{ currentName(i) }}</span>
@@ -291,9 +297,10 @@
               <circle
                 *ngFor="let d of cursorDots"
                 class="pr5-cursor-dot"
+                [ngClass]="d.cls"
                 [attr.cx]="cursorX"
                 [attr.cy]="d.y"
-                r="0.85"
+                r="0.95"
               />
               <rect
                 class="pr5-cursor-box"
@@ -306,10 +313,11 @@
               <text
                 *ngFor="let line of cursorLines; let i = index"
                 class="pr5-cursor-text pr5-cursor-text--temp"
+                [ngClass]="line.cls"
                 [attr.x]="cursorBoxX() + 0.7"
                 [attr.y]="cursorLineY(i)"
               >
-                {{ line }}
+                {{ line.text }}
               </text>
               <text
                 class="pr5-cursor-text pr5-cursor-text--time"

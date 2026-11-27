@@ -196,8 +196,8 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
   cursorY = 0;
   cursorLabelTime = '';
   cursorLabelTemp = '';
-  cursorLines: string[] = [];
-  cursorDots: { y: number }[] = [];
+  cursorLines: { text: string; cls: string }[] = [];
+  cursorDots: { y: number; cls: string }[] = [];
   private zoomStartMs = 0;
   private zoomSpanMs = 1;
   private zoomedPoints: DataloggerReadingRow[] = [];
@@ -1006,12 +1006,12 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
 
   cursorTooltipHeight(): number {
     const lines = Math.max(this.cursorLines.length, 1);
-    return 2.4 + lines * 1.7 + 1.6;
+    return 2.6 + lines * 2.15 + 1.8;
   }
 
   cursorBoxWidth(): number {
-    const longest = this.cursorLines.reduce((n, line) => Math.max(n, line.length), 12);
-    return Math.min(36, Math.max(20, longest * 1.15));
+    const longest = this.cursorLines.reduce((n, line) => Math.max(n, line.text.length), 12);
+    return Math.min(40, Math.max(22, longest * 1.05));
   }
 
   cursorBoxX(): number {
@@ -1020,11 +1020,43 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
   }
 
   cursorLineY(index: number): number {
-    return this.plot.y0 + 3.6 + index * 1.7;
+    return this.plot.y0 + 4 + index * 2.15;
   }
 
   cursorTimeTextY(): number {
-    return this.plot.y0 + 3.6 + Math.max(this.cursorLines.length, 1) * 1.7 + 0.2;
+    return this.plot.y0 + 4 + Math.max(this.cursorLines.length, 1) * 2.15 + 0.35;
+  }
+
+  trackByIndex(index: number): number {
+    return index;
+  }
+
+  checkboxOn(ev: Event): boolean {
+    return (ev.target as HTMLInputElement).checked;
+  }
+
+  setTempVisible(i: number, on: boolean): void {
+    if (this.showTemps[i] === on) return;
+    const next = this.showTemps.slice();
+    next[i] = on;
+    this.showTemps = next;
+    this.persistSeriesPrefs();
+  }
+
+  setPowerVisible(i: number, on: boolean): void {
+    if (this.showPowers[i] === on) return;
+    const next = this.showPowers.slice();
+    next[i] = on;
+    this.showPowers = next;
+    this.persistSeriesPrefs();
+  }
+
+  setPressVisible(i: number, on: boolean): void {
+    if (this.showPress[i] === on) return;
+    const next = this.showPress.slice();
+    next[i] = on;
+    this.showPress = next;
+    this.persistSeriesPrefs();
   }
 
   areaCloseSuffix(): string {
@@ -1155,31 +1187,31 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     const tr = this.tempMax - this.tempMin || 1;
     const yAt = (v: number) =>
       this.plot.y1 - ((v - this.tempMin) / tr) * (this.plot.y1 - this.plot.y0);
-    const lines: string[] = [];
-    const dots: { y: number }[] = [];
+    const lines: { text: string; cls: string }[] = [];
+    const dots: { y: number; cls: string }[] = [];
     for (let i = 0; i < TEMP_FIELDS.length; i++) {
       if (!this.showTemps[i]) continue;
       const v = best[TEMP_FIELDS[i]] as number | null | undefined;
       if (v == null || !Number.isFinite(v)) continue;
-      lines.push(`${this.tempName(i)}  ${v.toFixed(2)} °C`);
-      dots.push({ y: yAt(v) });
+      lines.push({ text: `${this.tempName(i)}  ${v.toFixed(2)} °C`, cls: `dlg-cursor-line--t${i}` });
+      dots.push({ y: yAt(v), cls: `dlg-cursor-dot--t${i}` });
     }
     for (let i = 0; i < POWER_FIELDS.length; i++) {
       if (!this.showPowers[i]) continue;
       const v = best[POWER_FIELDS[i]] as number | null | undefined;
       if (v == null || !Number.isFinite(v)) continue;
-      lines.push(`${this.currentName(i)}  ${v.toFixed(0)} W`);
+      lines.push({ text: `${this.currentName(i)}  ${v.toFixed(0)} W`, cls: `dlg-cursor-line--c${i}` });
     }
     for (let i = 0; i < PRESS_FIELDS.length; i++) {
       if (!this.showPress[i]) continue;
       const v = best[PRESS_FIELDS[i]] as number | null | undefined;
       if (v == null || !Number.isFinite(v)) continue;
-      lines.push(`${this.pressName(i)}  ${v.toFixed(2)} bar`);
+      lines.push({ text: `${this.pressName(i)}  ${v.toFixed(2)} bar`, cls: `dlg-cursor-line--p${i}` });
     }
-    this.cursorLines = lines.length ? lines : ['Sin dato en este punto'];
+    this.cursorLines = lines.length ? lines : [{ text: 'Sin dato en este punto', cls: '' }];
     this.cursorDots = dots;
     this.cursorY = dots[0]?.y ?? this.plot.y1;
-    this.cursorLabelTemp = this.cursorLines[0];
+    this.cursorLabelTemp = this.cursorLines[0]?.text ?? '';
     this.cursorLabelTime = new Date(best.created_at).toLocaleString('es-AR', {
       day: '2-digit',
       month: '2-digit',

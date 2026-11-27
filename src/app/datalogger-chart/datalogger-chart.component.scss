@@ -6,6 +6,61 @@
   vector-effect: non-scaling-stroke;
 }
 
+.dlg-line--t0 { stroke: #4ade80; }
+.dlg-line--t1 { stroke: #38bdf8; }
+.dlg-line--t2 { stroke: #fbbf24; }
+.dlg-line--t3 { stroke: #f472b6; }
+.dlg-line--t4 { stroke: #a78bfa; }
+.dlg-line--t5 { stroke: #fb923c; }
+.dlg-line--p0 { stroke: #f87171; }
+.dlg-line--p1 { stroke: #fb7185; }
+.dlg-line--p2 { stroke: #e879f9; }
+.dlg-line--pr0 { stroke: #2dd4bf; }
+.dlg-line--pr1 { stroke: #67e8f9; }
+
+.dlg-swatch {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+.dlg-swatch--t0 { background: #4ade80; }
+.dlg-swatch--t1 { background: #38bdf8; }
+.dlg-swatch--t2 { background: #fbbf24; }
+.dlg-swatch--t3 { background: #f472b6; }
+.dlg-swatch--t4 { background: #a78bfa; }
+.dlg-swatch--t5 { background: #fb923c; }
+.dlg-swatch--c0 { background: #f87171; }
+.dlg-swatch--c1 { background: #fb7185; }
+.dlg-swatch--c2 { background: #e879f9; }
+.dlg-swatch--p0 { background: #2dd4bf; }
+.dlg-swatch--p1 { background: #67e8f9; }
+
+.dlg-legend--t0 { color: #4ade80; }
+.dlg-legend--t1 { color: #38bdf8; }
+.dlg-legend--t2 { color: #fbbf24; }
+.dlg-legend--t3 { color: #f472b6; }
+.dlg-legend--t4 { color: #a78bfa; }
+.dlg-legend--t5 { color: #fb923c; }
+
+.dlg-cursor-dot--t0 { fill: #4ade80; stroke: #052e16; }
+.dlg-cursor-dot--t1 { fill: #38bdf8; stroke: #082f49; }
+.dlg-cursor-dot--t2 { fill: #fbbf24; stroke: #451a03; }
+.dlg-cursor-dot--t3 { fill: #f472b6; stroke: #500724; }
+.dlg-cursor-dot--t4 { fill: #a78bfa; stroke: #2e1065; }
+.dlg-cursor-dot--t5 { fill: #fb923c; stroke: #431407; }
+.dlg-cursor-line--t0 { fill: #4ade80; }
+.dlg-cursor-line--t1 { fill: #7dd3fc; }
+.dlg-cursor-line--t2 { fill: #fde68a; }
+.dlg-cursor-line--t3 { fill: #fbcfe8; }
+.dlg-cursor-line--t4 { fill: #ddd6fe; }
+.dlg-cursor-line--t5 { fill: #fed7aa; }
+.dlg-cursor-line--c0,
+.dlg-cursor-line--c1,
+.dlg-cursor-line--c2 { fill: #fecaca; }
+.dlg-cursor-line--p0,
+.dlg-cursor-line--p1 { fill: #99f6e4; }
+
 .dlg-now {
   stroke: rgba(248, 250, 252, 0.72);
   stroke-width: 0.35;
