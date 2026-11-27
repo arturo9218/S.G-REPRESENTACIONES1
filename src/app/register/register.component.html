@@ -101,6 +101,18 @@
           </span>
         </label>
 
+        <fieldset class="login-form__field">
+          <span class="login-form__label">Tipo de cuenta</span>
+          <label class="login-form__radio">
+            <input type="radio" formControlName="accountRole" value="cliente" />
+            Cliente (monitoreo de mis equipos)
+          </label>
+          <label class="login-form__radio">
+            <input type="radio" formControlName="accountRole" value="tecnico" />
+            Técnico (instalación y servicio en campo)
+          </label>
+        </fieldset>
+
         <button type="submit" class="login-form__submit" [disabled]="submitting">
           {{ submitting ? 'Creando cuenta…' : 'Registrarse' }}
         </button>

@@ -401,6 +401,14 @@
           >
             {{ csvExporting ? 'Generando CSV…' : 'Descargar CSV' }}
           </button>
+          <button
+            type="button"
+            class="btn btn--ghost chart-ai-btn"
+            [disabled]="aiInsightLoading || !selectedDeviceId || !hasChartData"
+            (click)="requestAiChartInsight()"
+          >
+            {{ aiInsightLoading ? 'Analizando…' : 'Resumen IA' }}
+          </button>
           <button type="button" class="btn btn--ghost chart-full-btn" (click)="toggleChartFullscreen(chartPanel)">
             Pantalla completa
           </button>
@@ -420,6 +428,12 @@
       <p class="chart-empty" *ngIf="!remoteChartLoading && !remoteChartError && !filterActiveButNoPoints && !hasChartData">
         Sin datos para este dispositivo todavía. Seleccioná otro o esperá nuevas lecturas del equipo.
       </p>
+
+      <article class="chart-ai-panel" *ngIf="aiInsightText || aiInsightError">
+        <h3 class="chart-ai-panel__title">Resumen IA</h3>
+        <p class="chart-ai-panel__error" *ngIf="aiInsightError" role="alert">{{ aiInsightError }}</p>
+        <p class="chart-ai-panel__text" *ngIf="aiInsightText">{{ aiInsightText }}</p>
+      </article>
 
       <div
         class="chart"

@@ -119,6 +119,10 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
 
   csvExporting = false;
 
+  aiInsightLoading = false;
+  aiInsightText = '';
+  aiInsightError = '';
+
   /**
    * Zoom horizontal sobre la serie cargada: 0–1 = fracción del rango temporal [primera, última lectura].
    * La escala Y usa solo los puntos visibles para mayor “precisión tipo regla”.
@@ -2680,6 +2684,89 @@ export class ChartAnalysisComponent implements OnInit, OnDestroy, AfterViewInit 
       out.push(sorted[idx]);
     }
     return out;
+  }
+
+  get chartRangeLabelForAi(): string {
+    if (this.filterDay.trim()) return `Día ${this.filterDay.trim()}`;
+    if (this.filterFrom.trim() || this.filterTo.trim()) {
+      return `${this.filterFrom.trim() || '…'} → ${this.filterTo.trim() || '…'}`;
+    }
+    return 'Rango visible del gráfico';
+  }
+
+  async requestAiChartInsight(): Promise<void> {
+    const dev = this.selectedDevice;
+    const id = this.selectedDeviceId;
+    if (!id || !dev || !this.selectedIsCloudDevice) {
+      this.aiInsightError = 'Seleccioná un panel en la nube con datos.';
+      return;
+    }
+    const series = this.chartPointsForDraw();
+    if (!series.length) {
+      this.aiInsightError = 'No hay lecturas en el rango para analizar.';
+      return;
+    }
+    this.aiInsightLoading = true;
+    this.aiInsightError = '';
+    this.aiInsightText = '';
+    try {
+      const { data, error } = await this.auth.client.functions.invoke('ai-chart-insight', {
+        body: {
+          deviceId: id,
+          deviceName: dev.name,
+          rangeLabel: this.chartRangeLabelForAi,
+          statsBlock: this.buildChartStatsBlock(series, dev),
+        },
+      });
+      if (error) {
+        this.aiInsightError = error.message;
+        return;
+      }
+      const body = data as { insight?: string; error?: string };
+      if (body?.error) {
+        this.aiInsightError = body.error;
+        return;
+      }
+      this.aiInsightText = body?.insight?.trim() || 'Sin respuesta de la IA.';
+    } catch (e) {
+      this.aiInsightError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.aiInsightLoading = false;
+    }
+  }
+
+  private buildChartStatsBlock(series: TemperatureReading[], dev: DashboardDevice): string {
+    const nums = (vals: (number | null | undefined)[]) =>
+      vals.filter((v): v is number => v != null && Number.isFinite(v));
+    const t1 = nums(series.map((r) => r.temperatureC));
+    const t2 = nums(series.map((r) => r.temp2C));
+    const ia = nums(
+      series.map((r) =>
+        effectiveCurrentAWithNominal(
+          { currentA: r.currentA ?? null, powerW: r.powerW ?? null },
+          dev.nominalVoltageV
+        )
+      )
+    );
+    const stat = (label: string, arr: number[]) => {
+      if (!arr.length) return `${label}: sin datos`;
+      const min = Math.min(...arr);
+      const max = Math.max(...arr);
+      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+      return `${label}: min ${min.toFixed(2)}, max ${max.toFixed(2)}, prom ${avg.toFixed(2)} (${arr.length} pts)`;
+    };
+    const lines = [
+      `Equipo: ${dev.name}`,
+      `Puntos: ${series.length}`,
+      `Desde: ${series[0]?.at ?? '—'} hasta: ${series[series.length - 1]?.at ?? '—'}`,
+      stat(dev.sensor1Label?.trim() || 'Sensor 1 °C', t1),
+      stat(dev.sensor2Label?.trim() || 'Sensor 2 °C', t2),
+      stat('Corriente A', ia),
+    ];
+    if (dev.tempLowC != null || dev.tempHighC != null) {
+      lines.push(`Umbrales S1: baja ${dev.tempLowC ?? '—'} / alta ${dev.tempHighC ?? '—'} °C`);
+    }
+    return lines.join('\n');
   }
 
   signOut(): void {

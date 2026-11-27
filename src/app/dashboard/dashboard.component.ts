@@ -14,6 +14,7 @@ import { Pro400StoreService } from '../core/pro400-store.service';
 import { DataloggerStoreService } from '../core/datalogger-store.service';
 import {
   DATALOGGER_SENSOR_SLOTS,
+  dataloggerChannelName,
   type DataloggerSensorSlotId,
 } from '../datalogger/datalogger-params.defaults';
 import { DeviceStoreService, DeviceTempCalibrationInput } from '../core/device-store.service';
@@ -39,6 +40,7 @@ import { pr500BarToPsi } from '../pr500/pr500-params.defaults';
 import type { InicioFleetRow } from '../inicio/inicio-page.component';
 import type { ShellRoute } from '../shell/shell-route.model';
 import { WebPushService, WebPushUiState } from '../core/web-push.service';
+import { SupabaseHealthService } from '../core/supabase-health.service';
 import { ToastService } from '../core/toast.service';
 import { ChatUnreadService } from '../core/chat-unread.service';
 import { effectiveCurrentAWithNominal } from '../core/reading.utils';
@@ -138,6 +140,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   webPushUiState: WebPushUiState = 'loading';
   webPushBusy = false;
+  pushDiagLabel = '';
+  pushDiagLines: string[] = [];
+  pushDiagFeedback = '';
+  supabaseHealthWarnings: string[] = [];
+  onboardingOpen = false;
+  private readonly onboardingStorageKey = 'ar_onboarding_dismissed_v1';
   webPushFeedback = '';
   webPushFeedbackIsError = false;
   sensorLabelsSaving = false;
@@ -152,6 +160,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Invitar usuarios al equipo (dueño / admin). */
   shareInviteEmail = '';
   shareInviteRole: 'viewer' | 'editor' = 'viewer';
+  shareInvitePreset: 'consulta' | 'operador' | 'tecnico' = 'consulta';
   shareInviteBusy = false;
   shareInviteFeedback = '';
   shareInviteFeedbackIsError = false;
@@ -491,6 +500,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     readonly pro400Store: Pro400StoreService,
     readonly dataloggerStore: DataloggerStoreService,
     private readonly webPush: WebPushService,
+    private readonly supabaseHealth: SupabaseHealthService,
     private readonly equipmentSheet: EquipmentSheetService,
     private readonly combistatoCommand: CombistatoCommandService,
     private readonly toast: ToastService,
@@ -512,6 +522,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.loadChartStylePreset();
     this.loadAlarmSoundPreset();
     void this.refreshWebPushUi();
+    void this.refreshPushDiagnostics();
+    void this.refreshSupabaseHealth();
     void this.chatUnread.refresh();
     this.chatUnreadSub = this.chatUnread.total$.subscribe((n) => {
       this.chatUnreadTotal = n;
@@ -796,6 +808,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (path === '/configuracion') {
       this.shellRoute = 'settings';
       void this.refreshWebPushUi();
+      void this.refreshPushDiagnostics();
+      void this.refreshSupabaseHealth();
       if (this.isAdminView) void this.loadAdminEmails();
       return;
     }
@@ -815,6 +829,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
     if (path === '/inicio') {
       this.shellRoute = 'inicio';
+      window.setTimeout(() => this.maybeOpenOnboarding(), 400);
       return;
     }
     if (path === '/ayuda') {
@@ -2563,6 +2578,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return `${uid.slice(0, 4)}…${uid.slice(-4)}`;
   }
 
+  onDeviceSharePresetChange(): void {
+    switch (this.shareInvitePreset) {
+      case 'consulta':
+        this.shareInviteRole = 'viewer';
+        break;
+      case 'operador':
+      case 'tecnico':
+        this.shareInviteRole = 'editor';
+        break;
+    }
+  }
+
   async submitDeviceShareInvite(): Promise<void> {
     const id = this.selectedDeviceId;
     if (!id || !this.selectedDeviceCanManageMembers) return;
@@ -3107,6 +3134,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.webPushFeedback = r.message;
     this.webPushFeedbackIsError = !r.ok;
     await this.refreshWebPushUi();
+    await this.refreshPushDiagnostics();
   }
 
   async disableWebPush(): Promise<void> {
@@ -3117,6 +3145,57 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.webPushFeedback = r.message;
     this.webPushFeedbackIsError = !r.ok;
     await this.refreshWebPushUi();
+    await this.refreshPushDiagnostics();
+  }
+
+  async refreshPushDiagnostics(): Promise<void> {
+    if (!environment.deviceCloudSync) {
+      this.pushDiagLabel = 'Nube desactivada en este build.';
+      this.pushDiagLines = [];
+      return;
+    }
+    const session = await this.auth.getSession();
+    const uid = session?.user?.id ?? '';
+    const ui = await this.webPush.getUiState();
+    const perm =
+      typeof Notification !== 'undefined' ? Notification.permission : 'n/a';
+    this.pushDiagLabel = `Estado: ${ui} · Permiso navegador: ${perm}`;
+    this.pushDiagLines = uid ? await this.webPush.getDiagnostics(uid) : [];
+  }
+
+  async refreshSupabaseHealth(): Promise<void> {
+    const report = await this.supabaseHealth.check();
+    this.supabaseHealthWarnings = report.warnings;
+  }
+
+  testLocalPushNotification(): void {
+    this.pushDiagFeedback = this.webPush.tryLocalNotification();
+  }
+
+  async testClosedAppPush(): Promise<void> {
+    this.pushDiagFeedback = 'Enviando push de prueba…';
+    const r = await this.webPush.sendTestPush();
+    this.pushDiagFeedback = r.message;
+  }
+
+  dismissOnboarding(): void {
+    this.onboardingOpen = false;
+    try {
+      localStorage.setItem(this.onboardingStorageKey, '1');
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private maybeOpenOnboarding(): void {
+    if (this.shellRoute !== 'inicio') return;
+    if (this.hasAnyEquipment) return;
+    try {
+      if (localStorage.getItem(this.onboardingStorageKey) === '1') return;
+    } catch {
+      return;
+    }
+    this.onboardingOpen = true;
   }
 
   logout(): void {
@@ -3250,7 +3329,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const { valueText, unit, subline } = valueForSlot(slot.id);
       return {
         key: slot.id,
-        label: slot.label,
+        label: dataloggerChannelName(d.sensorLabels, slot.id),
         valueText,
         unit,
         subline,
@@ -3322,7 +3401,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Desde Inicio / Dispositivos: abre Configuración con ese combistato para editar AR01–AR48. */
   goCombistatoSettings(c: DashboardCombistato, ev?: Event): void {
     ev?.stopPropagation();
-    this.openSettingsCombistatoParams(c.id);
+    this.openSettingsCombistatoParams(c.id, 'params');
+  }
+
+  goCombistatoShareSettings(c: DashboardCombistato, ev?: Event): void {
+    ev?.stopPropagation();
+    this.openSettingsCombistatoParams(c.id, 'share');
   }
 
   /** Desde Dispositivos: umbrales, sensores y compartir del panel genérico. */
@@ -3384,7 +3468,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.scrollSettingsParamsIntoView();
   }
 
-  openSettingsCombistatoParams(combistatoId: string): void {
+  openSettingsCombistatoParams(combistatoId: string, scrollTarget: 'share' | 'params' | 'top' = 'top'): void {
     this.skipQueryParamDeviceSync = true;
     this.settingsConfigKind = 'combistato';
     this.selectCombistato(combistatoId);
@@ -3405,7 +3489,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .finally(() => {
         this.skipQueryParamDeviceSync = false;
       });
-    this.scrollCombistatoSettingsIntoView();
+    if (scrollTarget === 'share') {
+      this.scrollCombistatoShareIntoView();
+    } else if (scrollTarget === 'params') {
+      this.scrollCombistatoParamsIntoView();
+    } else {
+      this.scrollSettingsParamsIntoView();
+    }
     void this.refreshCombistatoMembers();
   }
 
@@ -3489,14 +3579,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }, 120);
   }
 
-  /** Dueño: Compartir PRO300 arriba; invitado o sin gestión: parámetros AR. */
-  private scrollCombistatoSettingsIntoView(): void {
-    const targetId = this.selectedCombistatoCanManageMembers
-      ? 'section-settings-combistato-share'
-      : 'section-settings-combistato';
+  /** Dueño: Compartir PRO300. */
+  private scrollCombistatoShareIntoView(): void {
     window.setTimeout(() => {
       document
-        .getElementById(targetId)
+        .getElementById('section-settings-combistato-share')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  }
+
+  /** Parámetros AR01–AR48. */
+  private scrollCombistatoParamsIntoView(): void {
+    window.setTimeout(() => {
+      document
+        .getElementById('section-settings-combistato')
         ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 120);
   }

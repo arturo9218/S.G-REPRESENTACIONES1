@@ -81,11 +81,12 @@ export class AuthService {
     return this.client.auth.signInWithPassword({ email: email.trim(), password });
   }
 
-  async signUp(email: string, password: string) {
+  async signUp(email: string, password: string, accountRole: 'cliente' | 'tecnico' = 'cliente') {
     return this.client.auth.signUp({
       email: email.trim(),
       password,
       options: {
+        data: { account_role: accountRole },
         emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/login` : undefined,
       },
     });

@@ -5,6 +5,7 @@
 
 import { Injectable, NgZone } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth.service';
 import { ingestFunctionUrl, isSupabaseConfigured } from './supabase-config';
@@ -167,6 +168,8 @@ export class DeviceStoreService {
   private readonly readingsSubject = new BehaviorSubject<TemperatureReading[]>([]);
   private readonly adminSubject = new BehaviorSubject<boolean>(false);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
+  private realtimeChannel: RealtimeChannel | null = null;
+  private realtimeDeviceIds: string[] = [];
 
   readonly devices$ = this.subject.asObservable();
   readonly readings$ = this.readingsSubject.asObservable();
@@ -562,6 +565,7 @@ export class DeviceStoreService {
       clearInterval(this.pollHandle);
       this.pollHandle = null;
     }
+    this.clearDeviceRealtime();
     if (this.isCloudSyncEnabled()) {
       void this.hydrateFromCloud();
       const pollMs =
@@ -1407,7 +1411,127 @@ export class DeviceStoreService {
 
     const locals = this.snapshot.filter((d) => !this.isUuid(d.id));
     this.persistDevices([...locals, ...cloudDevices]);
+    const panelIds = cloudDevices
+      .filter((d) => d.equipmentKind !== 'pro400')
+      .map((d) => d.id)
+      .filter((id) => this.isUuid(id));
+    this.ensureDeviceRealtime(panelIds);
     await this.refreshReadingsFromCloud();
+  }
+
+  private clearDeviceRealtime(): void {
+    if (this.realtimeChannel != null) {
+      void this.auth.client.removeChannel(this.realtimeChannel);
+      this.realtimeChannel = null;
+    }
+    this.realtimeDeviceIds = [];
+  }
+
+  /** Realtime INSERT en device_readings (paneles genéricos). */
+  private ensureDeviceRealtime(deviceIds: string[]): void {
+    if (!this.isCloudSyncEnabled() || this.userScopeKey === 'anon' || !deviceIds.length) {
+      this.clearDeviceRealtime();
+      return;
+    }
+    const sorted = [...deviceIds].sort();
+    if (
+      this.realtimeChannel != null &&
+      sorted.length === this.realtimeDeviceIds.length &&
+      sorted.every((id, i) => id === this.realtimeDeviceIds[i])
+    ) {
+      return;
+    }
+    this.clearDeviceRealtime();
+    this.realtimeDeviceIds = sorted;
+    const idSet = new Set(sorted);
+    this.realtimeChannel = this.auth.client
+      .channel(`device-readings:${this.userScopeKey}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'device_readings' },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          const did = row['device_id'];
+          if (typeof did !== 'string' || !idSet.has(did)) return;
+          this.applyDeviceReadingRow(did, row);
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.warn('Supabase Realtime device_readings: canal en error (se usa poll de respaldo).');
+        }
+      });
+  }
+
+  private readingFromDeviceRow(r: Record<string, unknown>, deviceId: string): TemperatureReading {
+    const t1Raw =
+      typeof r['temp1_raw_c'] === 'number' && !Number.isNaN(r['temp1_raw_c'] as number)
+        ? (r['temp1_raw_c'] as number)
+        : null;
+    const t2Raw =
+      typeof r['temp2_raw_c'] === 'number' && !Number.isNaN(r['temp2_raw_c'] as number)
+        ? (r['temp2_raw_c'] as number)
+        : null;
+    const t3Raw =
+      typeof r['temp3_raw_c'] === 'number' && !Number.isNaN(r['temp3_raw_c'] as number)
+        ? (r['temp3_raw_c'] as number)
+        : null;
+    return {
+      deviceId,
+      at: typeof r['created_at'] === 'string' ? r['created_at'] : new Date().toISOString(),
+      temperatureC: r['temp1_c'] as number,
+      temp1RawC: t1Raw,
+      temp2RawC: t2Raw,
+      temp3RawC: t3Raw,
+      temp2C:
+        typeof r['temp2_c'] === 'number' && !Number.isNaN(r['temp2_c'] as number)
+          ? (r['temp2_c'] as number)
+          : null,
+      temp3C:
+        typeof r['temp3_c'] === 'number' && !Number.isNaN(r['temp3_c'] as number)
+          ? (r['temp3_c'] as number)
+          : null,
+      currentA: readingsJsonNumber(r['current_a']),
+      powerW: readingsJsonNumber(r['power_w']),
+      currentARaw: readingsJsonNumber(r['current_a_raw']),
+      powerWRaw: readingsJsonNumber(r['power_w_raw']),
+      press1Bar:
+        typeof r['press1_bar'] === 'number' && !Number.isNaN(r['press1_bar'] as number)
+          ? (r['press1_bar'] as number)
+          : null,
+      press2Bar:
+        typeof r['press2_bar'] === 'number' && !Number.isNaN(r['press2_bar'] as number)
+          ? (r['press2_bar'] as number)
+          : null,
+      compOn: typeof r['comp_on'] === 'boolean' ? r['comp_on'] : null,
+      defrostOn: typeof r['defrost_on'] === 'boolean' ? r['defrost_on'] : null,
+      fanOn: typeof r['fan_on'] === 'boolean' ? r['fan_on'] : null,
+      phase: parseDevicePhase(r['phase']),
+      phaseElapsedS:
+        typeof r['phase_elapsed_s'] === 'number' && Number.isFinite(r['phase_elapsed_s'] as number)
+          ? (r['phase_elapsed_s'] as number)
+          : null,
+      phaseTotalS:
+        typeof r['phase_total_s'] === 'number' && Number.isFinite(r['phase_total_s'] as number)
+          ? (r['phase_total_s'] as number)
+          : null,
+    };
+  }
+
+  private applyDeviceReadingRow(deviceId: string, row: Record<string, unknown>): void {
+    const incoming = this.readingFromDeviceRow(row, deviceId);
+    const localReadings = this.readingsSnapshot.filter((r) => !this.isUuid(r.deviceId));
+    const cloudReadings = this.readingsSnapshot.filter(
+      (r) => this.isUuid(r.deviceId) && r.deviceId !== deviceId
+    );
+    cloudReadings.push(incoming);
+    cloudReadings.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    const merged = [...localReadings, ...cloudReadings];
+    const applied = this.applyOffsetsToReadings(merged, this.snapshot);
+    this.ngZone.run(() => {
+      this.persistReadings(applied);
+      this.updateDeviceSnapshotsFromReadings(applied);
+    });
   }
 
   /**

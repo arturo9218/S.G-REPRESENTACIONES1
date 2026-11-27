@@ -398,6 +398,62 @@
             <ng-container *ngTemplateOutlet="settingsConnectionGuide"></ng-container>
           </ng-container>
 
+          <article
+            class="card sensor-labels-feedback sensor-labels-feedback--warn"
+            *ngIf="environment.deviceCloudSync && supabaseHealthWarnings.length"
+            role="alert"
+          >
+            <h2 class="card__title card__title--sm">Migraciones Supabase pendientes</h2>
+            <ul class="device-members-list">
+              <li *ngFor="let w of supabaseHealthWarnings">{{ w }}</li>
+            </ul>
+            <p class="card__hint card__hint--tight">
+              Ejecutá los SQL en Supabase → SQL Editor → Run, luego recargá la app.
+            </p>
+          </article>
+
+          <article
+            id="section-settings-push-diag"
+            class="card"
+            *ngIf="environment.deviceCloudSync"
+          >
+            <h2 class="card__title card__title--sm">Diagnóstico de notificaciones push</h2>
+            <p class="card__hint card__hint--tight">
+              Estado centralizado para alarmas y mensajes. Activá avisos en <strong>cada navegador</strong> (PC y celular por separado).
+            </p>
+            <p class="card__hint card__hint--tight" *ngIf="pushDiagLabel">{{ pushDiagLabel }}</p>
+            <ul class="device-members-list" *ngIf="pushDiagLines.length">
+              <li *ngFor="let line of pushDiagLines">{{ line }}</li>
+            </ul>
+            <div class="notify-panel__actions">
+              <button
+                type="button"
+                class="btn btn--primary notify-panel__save"
+                *ngIf="webPushUiState === 'none'"
+                [disabled]="webPushBusy"
+                (click)="enableWebPush()"
+              >
+                {{ webPushBusy ? 'Activando…' : 'Activar en este navegador' }}
+              </button>
+              <button
+                type="button"
+                class="btn btn--ghost notify-panel__save"
+                *ngIf="webPushUiState === 'active'"
+                [disabled]="webPushBusy"
+                (click)="disableWebPush()"
+              >
+                Desactivar en este navegador
+              </button>
+              <button type="button" class="btn btn--ghost notify-panel__save" (click)="testLocalPushNotification()">
+                Probar aviso local
+              </button>
+              <button type="button" class="btn btn--ghost notify-panel__save" (click)="testClosedAppPush()">
+                Probar con app cerrada
+              </button>
+            </div>
+            <p class="card__hint card__hint--tight" *ngIf="pushDiagFeedback">{{ pushDiagFeedback }}</p>
+          </article>
+
           <article class="card settings-page__device-pick settings-page__hub">
             <h2 class="card__title card__title--sm">Elegí qué configurar</h2>
             <p class="card__hint card__hint--tight">
@@ -1929,11 +1985,7 @@
           <article class="card" *ngIf="selectedDevice && environment.deviceCloudSync && selectedDeviceCanManageMembers">
             <h2 class="card__title card__title--sm">Compartir equipo</h2>
             <p class="card__hint card__hint--tight">
-              Invitá por email a un usuario ya registrado en la app.
-              <strong>Visor</strong>: solo consulta.
-              <strong>Editor</strong>: puede umbrales, ficha técnica y marcadores del gráfico (no puede borrar el equipo ni cambiar el ID módulo).
-              Requiere SQL <code>029_device_members_chart_markers.sql</code> y, si aparece recursión en policies,
-              <code>031_device_members_rls_break_recursion.sql</code> en Supabase.
+              Invitá por email a un usuario ya registrado. Elegí una plantilla (equivalente a visor/editor en la base).
             </p>
             <div class="notify-panel">
               <label class="notify-panel__field notify-panel__field--full">
@@ -1947,12 +1999,22 @@
                 />
               </label>
               <label class="notify-panel__field notify-panel__field--full">
-                <span>Rol</span>
-                <select class="notify-panel__select" [(ngModel)]="shareInviteRole" name="share-invite-role">
-                  <option value="viewer">Solo lectura (visor)</option>
-                  <option value="editor">Editor</option>
+                <span>Plantilla</span>
+                <select
+                  class="notify-panel__select"
+                  [(ngModel)]="shareInvitePreset"
+                  name="share-invite-preset"
+                  (ngModelChange)="onDeviceSharePresetChange()"
+                >
+                  <option value="consulta">Consulta (solo lectura)</option>
+                  <option value="operador">Operador (editor: umbrales, ficha, gráficos)</option>
+                  <option value="tecnico">Técnico (editor completo)</option>
                 </select>
               </label>
+              <p class="card__hint card__hint--tight">
+                Rol guardado:
+                <strong>{{ shareInviteRole === 'editor' ? 'Editor' : 'Visor' }}</strong>
+              </p>
               <p
                 class="sensor-labels-feedback"
                 *ngIf="shareInviteFeedback"
@@ -2328,6 +2390,32 @@
         </div>
       </div>
     </ng-template>
+
+    <div class="modal-backdrop onboarding-backdrop" *ngIf="onboardingOpen" (click)="dismissOnboarding()">
+      <div class="modal onboarding-modal" (click)="$event.stopPropagation()" role="dialog" aria-labelledby="onboarding-title">
+        <div class="modal__head">
+          <h2 id="onboarding-title" class="modal__title">Bienvenido a AR Monitoreo</h2>
+          <button type="button" class="modal__close" (click)="dismissOnboarding()" aria-label="Cerrar">×</button>
+        </div>
+        <p class="modal__intro">
+          Empezá agregando tu primer equipo desde <strong>Inicio</strong>. Después activá las notificaciones en
+          <strong>Configuración → Diagnóstico push</strong> para recibir alarmas con la app cerrada.
+        </p>
+        <ol class="onboarding-steps">
+          <li>Inicio → <strong>Agregar equipo</strong> (Panel, PRO300, PRO400, PR500 o Datalogger)</li>
+          <li>Copiá <strong>moduleId</strong> y token al firmware o portal WiFi del equipo</li>
+          <li>Configuración → activá push en este navegador</li>
+        </ol>
+        <div class="modal__actions">
+          <button type="button" class="btn btn--primary" (click)="scrollToSection('inicio'); dismissOnboarding()">
+            Ir a Inicio
+          </button>
+          <button type="button" class="btn btn--ghost" (click)="scrollToSection('settings'); dismissOnboarding()">
+            Configuración / Push
+          </button>
+        </div>
+      </div>
+    </div>
 </app-shell-layout>
 <div
   class="modal-backdrop"

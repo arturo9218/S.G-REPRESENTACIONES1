@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [principal, main, master]
+  pull_request:
+    branches: [principal, main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Build production bundle
+        env:
+          VAPID_PUBLIC_KEY: BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFtX3Uf4lFy2E
+        run: npm run build

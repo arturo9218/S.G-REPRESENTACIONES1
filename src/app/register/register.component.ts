@@ -31,6 +31,7 @@ export class RegisterComponent {
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(6)]],
       confirmPassword: ['', [Validators.required]],
+      accountRole: ['cliente' as 'cliente' | 'tecnico', [Validators.required]],
     },
     { validators: passwordsMatch }
   );
@@ -60,11 +61,11 @@ export class RegisterComponent {
       return;
     }
 
-    const { email, password } = this.form.getRawValue();
+    const { email, password, accountRole } = this.form.getRawValue();
     this.submitting = true;
 
     void this.auth
-      .signUp(email!, password!)
+      .signUp(email!, password!, accountRole ?? 'cliente')
       .then(({ data, error }) => {
         this.submitting = false;
         if (error) {

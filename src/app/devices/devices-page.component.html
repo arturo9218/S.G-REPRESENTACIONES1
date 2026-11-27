@@ -567,6 +567,15 @@
                   >
                     AR01–AR48
                   </button>
+                  <button
+                    *ngIf="h.combistatoStore.isCombistatoOwner(c)"
+                    type="button"
+                    class="device-card__btn"
+                    [attr.aria-label]="'Compartir PRO300 ' + c.name"
+                    (click)="h.goCombistatoShareSettings(c, $event)"
+                  >
+                    Compartir
+                  </button>
                   <a
                     *ngIf="h.combistatoStore.canChartsCombistato(c)"
                     class="device-card__btn device-card__btn--link"
