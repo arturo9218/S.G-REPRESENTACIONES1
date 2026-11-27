@@ -42,6 +42,14 @@ static const char *DEFAULT_API_KEY = "";
 static const uint8_t PIN_CONSUMO_A0 = A0;
 static const uint8_t PIN_TEMP_GPIO2 = 2;
 static const int PIN_FORCE_CONFIG = 14;
+/**
+ * Pinza SCT en A0.
+ * 1 = la mide y la manda (current_a / power_w).
+ * 0 = anulada: no lee A0 y manda null. Cambiá este número y volvé a subir el sketch.
+ */
+#ifndef HABILITAR_PINZA
+#define HABILITAR_PINZA 1
+#endif
 static const unsigned long SERIAL_CONFIG_WINDOW_MS = 2500;
 
 /** Cola en LittleFS cuando no hay WiFi (líneas JSON compactas). */
@@ -739,8 +747,15 @@ static void appendPendingReading(float t1, float t2, bool hasT2, float amps, flo
   } else {
     doc["t2"] = static_cast<const char *>(nullptr);
   }
+#if HABILITAR_PINZA
   doc["a"] = amps;
   doc["p"] = p;
+#else
+  (void)amps;
+  (void)p;
+  doc["a"] = static_cast<const char *>(nullptr);
+  doc["p"] = static_cast<const char *>(nullptr);
+#endif
   doc["m"] = millis();
   String line;
   serializeJson(doc, line);
@@ -850,8 +865,13 @@ static void flushPendingBacklog() {
       g_jsonDoc["temp2_c"] = jd["t2"].as<float>();
     }
     g_jsonDoc["temp3_c"] = static_cast<const char *>(nullptr);
-    g_jsonDoc["current_a"] = jd["a"] | 0.0f;
-    g_jsonDoc["power_w"] = jd["p"] | 0.0f;
+#if HABILITAR_PINZA
+    g_jsonDoc["current_a"] = jd["a"].isNull() ? 0.0f : jd["a"].as<float>();
+    g_jsonDoc["power_w"] = jd["p"].isNull() ? 0.0f : jd["p"].as<float>();
+#else
+    g_jsonDoc["current_a"] = static_cast<const char *>(nullptr);
+    g_jsonDoc["power_w"] = static_cast<const char *>(nullptr);
+#endif
 
     String body;
     serializeJson(g_jsonDoc, body);
@@ -869,9 +889,19 @@ static void flushPendingBacklog() {
 void sendTelemetry() {
   float t1 = NAN, t2 = NAN;
   readTemps12(&t1, &t2);
+#if HABILITAR_PINZA
   float ampsRaw = readSctAmpsRms();
   float amps = filterSctAmpsForSend(ampsRaw);
   float p = MAINS_V_RMS * amps;
+#else
+  float amps = 0.0f;
+  float p = 0.0f;
+  static bool sctOffLogged = false;
+  if (!sctOffLogged) {
+    Serial.println(F("[SCT] Pinza anulada (HABILITAR_PINZA 0): no se envia corriente"));
+    sctOffLogged = true;
+  }
+#endif
   /* ingest-reading: umbral de corriente usa JSON "current_a" (A RMS). power_w es V*I para el panel. */
 
   if (isnan(t1)) {
@@ -907,8 +937,13 @@ void sendTelemetry() {
     g_jsonDoc["temp2_c"] = t2;
   }
   g_jsonDoc["temp3_c"] = static_cast<const char *>(nullptr);
+#if HABILITAR_PINZA
   g_jsonDoc["current_a"] = amps;
   g_jsonDoc["power_w"] = p;
+#else
+  g_jsonDoc["current_a"] = static_cast<const char *>(nullptr);
+  g_jsonDoc["power_w"] = static_cast<const char *>(nullptr);
+#endif
 
   String body;
   serializeJson(g_jsonDoc, body);

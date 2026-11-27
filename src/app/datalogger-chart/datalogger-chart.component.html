@@ -3,9 +3,12 @@
     <div class="pr5-head__text">
       <p class="pr5-kicker">Historial · Datalogger</p>
       <h1 class="pr5-title">{{ dataloggerName }}</h1>
-      <p class="pr5-sub">
-        6 temperaturas, 3 consumos (W) y 2 presiones. Activá o desactivá series en el panel lateral.
+      <p class="pr5-sub" *ngIf="readings.length; else dlgRangeHint">
+        Ventana hasta <strong>{{ windowEndLabel }}</strong>. Última lectura: <strong>{{ lastReadingLabel }}</strong>.
       </p>
+      <ng-template #dlgRangeHint>
+        <p class="pr5-sub">El eje llega hasta ahora. La línea termina en la última lectura recibida.</p>
+      </ng-template>
     </div>
     <div class="pr5-head-actions">
       <button type="button" class="btn btn--ghost" (click)="backToApp()">Volver al panel</button>
@@ -46,13 +49,13 @@
       </div>
       <div class="pr5-side__toggles">
         <label *ngFor="let on of showTemps; let i = index">
-          <input type="checkbox" [(ngModel)]="showTemps[i]" (ngModelChange)="persistSeriesPrefs()" /> T{{ i + 1 }}
+          <input type="checkbox" [(ngModel)]="showTemps[i]" (ngModelChange)="persistSeriesPrefs()" /> {{ tempName(i) }}
         </label>
         <label *ngFor="let on of showPowers; let i = index">
-          <input type="checkbox" [(ngModel)]="showPowers[i]" (ngModelChange)="persistSeriesPrefs()" /> C{{ i + 1 }} (W)
+          <input type="checkbox" [(ngModel)]="showPowers[i]" (ngModelChange)="persistSeriesPrefs()" /> {{ currentName(i) }} (W)
         </label>
         <label *ngFor="let on of showPress; let i = index">
-          <input type="checkbox" [(ngModel)]="showPress[i]" (ngModelChange)="persistSeriesPrefs()" /> P{{ i + 1 }}
+          <input type="checkbox" [(ngModel)]="showPress[i]" (ngModelChange)="persistSeriesPrefs()" /> {{ pressName(i) }}
         </label>
         <label class="pr5-side__toggles--full">
           <input type="checkbox" [(ngModel)]="showHistogram" (ngModelChange)="persistSeriesPrefs()" /> Histograma T
@@ -153,13 +156,13 @@
 
       <div class="pr5-legend" *ngIf="readings.length">
         <ng-container *ngFor="let on of showTemps; let i = index">
-          <span class="pr5-legend__item pr5-legend__item--succ" *ngIf="on">T{{ i + 1 }}</span>
+          <span class="pr5-legend__item pr5-legend__item--succ" *ngIf="on">{{ tempName(i) }}</span>
         </ng-container>
         <ng-container *ngFor="let on of showPowers; let i = index">
-          <span class="pr5-legend__pill" *ngIf="on">C{{ i + 1 }}</span>
+          <span class="pr5-legend__pill" *ngIf="on">{{ currentName(i) }}</span>
         </ng-container>
         <ng-container *ngFor="let on of showPress; let i = index">
-          <span class="pr5-legend__pill pr5-legend__pill--alarm" *ngIf="on">P{{ i + 1 }}</span>
+          <span class="pr5-legend__pill pr5-legend__pill--alarm" *ngIf="on">{{ pressName(i) }}</span>
         </ng-container>
       </div>
 
@@ -215,6 +218,24 @@
               [attr.height]="plot.y1 - plot.y0"
               rx="0.4"
             />
+            <line
+              *ngIf="nowMarkerX != null"
+              class="dlg-now"
+              [attr.x1]="nowMarkerX"
+              [attr.x2]="nowMarkerX"
+              [attr.y1]="plot.y0"
+              [attr.y2]="plot.y1"
+              vector-effect="non-scaling-stroke"
+            />
+            <text
+              *ngIf="nowMarkerX != null"
+              class="dlg-now-label"
+              [attr.x]="nowMarkerX > 82 ? nowMarkerX - 0.8 : nowMarkerX + 0.7"
+              [attr.y]="plot.y0 + 2.6"
+              [attr.text-anchor]="nowMarkerX > 82 ? 'end' : 'start'"
+            >
+              Ahora
+            </text>
 
             <line
               *ngFor="let t of yAxisTicks"
@@ -266,26 +287,33 @@
               [attr.y2]="plot.y1"
               vector-effect="non-scaling-stroke"
             />
-            <circle *ngIf="cursorActive && showTemps[0]" class="pr5-cursor-dot" [attr.cx]="cursorX" [attr.cy]="cursorY" r="0.9" />
             <g *ngIf="cursorActive">
+              <circle
+                *ngFor="let d of cursorDots"
+                class="pr5-cursor-dot"
+                [attr.cx]="cursorX"
+                [attr.cy]="d.y"
+                r="0.85"
+              />
               <rect
                 class="pr5-cursor-box"
-                [attr.x]="cursorX > 68 ? cursorX - 23 : cursorX + 2.2"
-                [attr.y]="plot.y0 + 2.2"
-                width="22"
+                [attr.x]="cursorBoxX()"
+                [attr.y]="plot.y0 + 1.4"
+                [attr.width]="cursorBoxWidth()"
                 [attr.height]="cursorTooltipHeight()"
                 rx="0.9"
               />
               <text
+                *ngFor="let line of cursorLines; let i = index"
                 class="pr5-cursor-text pr5-cursor-text--temp"
-                [attr.x]="cursorX > 68 ? cursorX - 23 : cursorX + 2.2"
-                [attr.y]="plot.y0 + 3.7"
+                [attr.x]="cursorBoxX() + 0.7"
+                [attr.y]="cursorLineY(i)"
               >
-                {{ cursorLabelTemp }}
+                {{ line }}
               </text>
               <text
                 class="pr5-cursor-text pr5-cursor-text--time"
-                [attr.x]="cursorX > 68 ? cursorX - 23 : cursorX + 2.2"
+                [attr.x]="cursorBoxX() + 0.7"
                 [attr.y]="cursorTimeTextY()"
               >
                 {{ cursorLabelTime }}

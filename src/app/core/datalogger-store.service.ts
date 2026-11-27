@@ -2,10 +2,13 @@ import { Injectable, NgZone } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { environment } from '../../environments/environment';
 import {
+  dataloggerParamsBlob,
   dataloggerToJsonBlob,
   mergeDataloggerParams,
   dataloggerEnabledSensorSlotIds,
+  parseDataloggerLabels,
   type DataloggerFormModel,
+  type DataloggerSensorLabels,
 } from '../datalogger/datalogger-params.defaults';
 import { correctDataloggerReadingRow } from '../datalogger/datalogger-calibration.utils';
 import { AuthService } from './auth.service';
@@ -335,6 +338,7 @@ export class DataloggerStoreService {
         ownerUserId: r.owner_user_id,
         deviceToken: tokens[r.id] ?? ((r.device_token_hash ?? '').trim() || undefined),
         enabledSensorSlots: dataloggerEnabledSensorSlotIds(params),
+        sensorLabels: parseDataloggerLabels(r.params ?? null),
         lastTemp1C: snap?.temp1_c ?? null,
         lastTemp2C: snap?.temp2_c ?? null,
         lastTemp3C: snap?.temp3_c ?? null,
@@ -455,27 +459,38 @@ export class DataloggerStoreService {
     return { ok: true };
   }
 
-  async fetchDataloggerParams(id: string): Promise<{ params: DataloggerFormModel; error?: string }> {
+  async fetchDataloggerParams(
+    id: string
+  ): Promise<{ params: DataloggerFormModel; labels: DataloggerSensorLabels; error?: string }> {
     if (!this.cloudEnabled() || !isUuid(id)) {
-      return { params: mergeDataloggerParams(null) };
+      return { params: mergeDataloggerParams(null), labels: {} };
     }
     const { data, error } = await this.auth.client
       .from('datalogger_controllers')
       .select('params')
       .eq('id', id)
       .maybeSingle();
-    if (error) return { params: mergeDataloggerParams(null), error: error.message };
-    return { params: mergeDataloggerParams(data?.params ?? null) };
+    if (error) {
+      return { params: mergeDataloggerParams(null), labels: {}, error: error.message };
+    }
+    return {
+      params: mergeDataloggerParams(data?.params ?? null),
+      labels: parseDataloggerLabels(data?.params ?? null),
+    };
   }
 
-  async upsertDataloggerParams(id: string, params: DataloggerFormModel): Promise<{ error?: string }> {
+  async upsertDataloggerParams(
+    id: string,
+    params: DataloggerFormModel,
+    labels: DataloggerSensorLabels = {}
+  ): Promise<{ error?: string }> {
     if (!this.cloudEnabled() || !isUuid(id)) {
       return { error: 'Solo con sesión y tabla datalogger_controllers.' };
     }
     const { error } = await this.auth.client
       .from('datalogger_controllers')
       .update({
-        params: dataloggerToJsonBlob(mergeDataloggerParams(params)),
+        params: dataloggerParamsBlob(mergeDataloggerParams(params), labels),
         updated_at: new Date().toISOString(),
       })
       .eq('id', id);

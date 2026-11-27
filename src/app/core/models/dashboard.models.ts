@@ -227,6 +227,8 @@ export interface DashboardDatalogger {
   lastPress2Bar?: number | null;
   /** Canales con AR24–AR34 = 1 (solo esos aparecen en tarjeta y resúmenes). */
   enabledSensorSlots?: DataloggerSensorSlotId[];
+  /** Nombres puestos en Configuración. Vacío = T1, C1, P1… */
+  sensorLabels?: Partial<Record<DataloggerSensorSlotId, string>>;
 }
 
 /** Marca vertical en el análisis de gráfico (Supabase: device_chart_markers). */

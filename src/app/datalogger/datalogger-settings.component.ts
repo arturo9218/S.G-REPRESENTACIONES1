@@ -1,6 +1,9 @@
 import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
 import {
+  DATALOGGER_SENSOR_SLOTS,
   DataloggerFormModel,
+  DataloggerSensorLabels,
+  DataloggerSensorSlotId,
   mergeDataloggerParams,
   normalizeDataloggerF13,
   normalizeDataloggerOnOff,
@@ -21,12 +24,14 @@ export class DataloggerSettingsComponent implements OnChanges {
   @Input() canEdit = true;
 
   readonly sections = DATALOGGER_SECTIONS;
+  readonly sensorSlots = DATALOGGER_SENSOR_SLOTS;
   readonly sctScaleOptions = [...SCT_SCALE_AMPS_PER_VOLT];
   readonly onOffOptions: { value: 0 | 1; label: string }[] = [
     { value: 0, label: 'Apagado (0)' },
     { value: 1, label: 'Encendido (1)' },
   ];
   model: DataloggerFormModel | null = null;
+  labels: DataloggerSensorLabels = {};
   loading = false;
   saving = false;
   feedback = '';
@@ -42,6 +47,7 @@ export class DataloggerSettingsComponent implements OnChanges {
     const id = this.dataloggerId;
     if (!id) {
       this.model = null;
+      this.labels = {};
       this.drafts = {};
       return;
     }
@@ -49,6 +55,7 @@ export class DataloggerSettingsComponent implements OnChanges {
     this.feedback = '';
     const r = await this.dataloggerStore.fetchDataloggerParams(id);
     this.model = r.params;
+    this.labels = { ...r.labels };
     this.syncDrafts();
     this.loading = false;
     if (r.error) {
@@ -119,8 +126,20 @@ export class DataloggerSettingsComponent implements OnChanges {
     }
   }
 
+  onLabelChange(id: DataloggerSensorSlotId, value: string): void {
+    const t = value.slice(0, 40);
+    if (!t.trim()) {
+      const next = { ...this.labels };
+      delete next[id];
+      this.labels = next;
+      return;
+    }
+    this.labels = { ...this.labels, [id]: t };
+  }
+
   resetDefaults(): void {
     this.model = mergeDataloggerParams(null);
+    this.labels = {};
     this.syncDrafts();
     this.feedback = 'Valores por defecto (sin guardar aún).';
   }
@@ -133,7 +152,7 @@ export class DataloggerSettingsComponent implements OnChanges {
     const params = mergeDataloggerParams(this.model);
     this.model = params;
     this.syncDrafts();
-    const r = await this.dataloggerStore.upsertDataloggerParams(id, params);
+    const r = await this.dataloggerStore.upsertDataloggerParams(id, params, this.labels);
     this.saving = false;
     this.feedback = r.error
       ? `No se pudo guardar: ${r.error}`

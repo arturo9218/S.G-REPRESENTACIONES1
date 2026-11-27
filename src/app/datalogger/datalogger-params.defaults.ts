@@ -172,6 +172,55 @@ export function dataloggerEnabledSensorSlotIds(params: DataloggerFormModel): Dat
   return DATALOGGER_SENSOR_SLOTS.filter((s) => params[s.enableKey] >= 0.5).map((s) => s.id);
 }
 
+/** Nombres que pone el usuario. Vacío = se muestra T1, C1, P1, etc. */
+export type DataloggerSensorLabels = Partial<Record<DataloggerSensorSlotId, string>>;
+
+const SENSOR_LABEL_MAX = 40;
+
+export function parseDataloggerLabels(raw: unknown): DataloggerSensorLabels {
+  const out: DataloggerSensorLabels = {};
+  const root = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
+  const bag = root?.['labels'];
+  const src = bag && typeof bag === 'object' && !Array.isArray(bag) ? (bag as Record<string, unknown>) : null;
+  if (!src) return out;
+  for (const slot of DATALOGGER_SENSOR_SLOTS) {
+    const v = src[slot.id];
+    if (typeof v !== 'string') continue;
+    const t = v.trim().slice(0, SENSOR_LABEL_MAX);
+    if (t) out[slot.id] = t;
+  }
+  return out;
+}
+
+export function dataloggerChannelName(
+  labels: DataloggerSensorLabels | null | undefined,
+  id: DataloggerSensorSlotId
+): string {
+  const custom = labels?.[id]?.trim();
+  if (custom) return custom;
+  return DATALOGGER_SENSOR_SLOTS.find((s) => s.id === id)?.label ?? id.toUpperCase();
+}
+
+export function dataloggerLabelsForJson(labels: DataloggerSensorLabels): Record<string, string> {
+  const o: Record<string, string> = {};
+  for (const slot of DATALOGGER_SENSOR_SLOTS) {
+    const t = labels[slot.id]?.trim().slice(0, SENSOR_LABEL_MAX) ?? '';
+    if (t) o[slot.id] = t;
+  }
+  return o;
+}
+
+/** Params numéricos más `labels`. El firmware solo baja F01–F48; los nombres quedan en la app. */
+export function dataloggerParamsBlob(
+  m: DataloggerFormModel,
+  labels: DataloggerSensorLabels
+): Record<string, unknown> {
+  const o: Record<string, unknown> = { ...dataloggerToJsonBlob(m) };
+  const clean = dataloggerLabelsForJson(labels);
+  if (Object.keys(clean).length) o['labels'] = clean;
+  return o;
+}
+
 export function dataloggerEnabledSensorSlots(params: DataloggerFormModel): DataloggerSensorSlotDef[] {
   return DATALOGGER_SENSOR_SLOTS.filter((s) => params[s.enableKey] >= 0.5);
 }

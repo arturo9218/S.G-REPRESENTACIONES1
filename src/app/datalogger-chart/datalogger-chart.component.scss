@@ -6,6 +6,18 @@
   vector-effect: non-scaling-stroke;
 }
 
+.dlg-now {
+  stroke: rgba(248, 250, 252, 0.72);
+  stroke-width: 0.35;
+  stroke-dasharray: 1.1 0.7;
+}
+
+.dlg-now-label {
+  fill: #e2e8f0;
+  font-size: 2.15px;
+  font-weight: 600;
+}
+
 .dlg-hist-bar {
   fill: rgba(56, 189, 248, 0.55);
 }

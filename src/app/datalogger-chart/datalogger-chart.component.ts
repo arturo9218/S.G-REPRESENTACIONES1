@@ -14,7 +14,14 @@ import { AuthService } from '../core/auth.service';
 import { ChartStylePreset } from '../core/models/dashboard.models';
 import { environment } from '../../environments/environment';
 import { isSupabaseConfigured } from '../core/supabase-config';
-import { mergeDataloggerParams, type DataloggerFormModel } from '../datalogger/datalogger-params.defaults';
+import {
+  dataloggerChannelName,
+  mergeDataloggerParams,
+  parseDataloggerLabels,
+  type DataloggerFormModel,
+  type DataloggerSensorLabels,
+  type DataloggerSensorSlotId,
+} from '../datalogger/datalogger-params.defaults';
 import { correctDataloggerReadingRow } from '../datalogger/datalogger-calibration.utils';
 import { buildChartTrendSegments, type ChartTrendSegment } from '../core/chart-trend';
 import {
@@ -120,6 +127,7 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
 
   dataloggerId: string | null = null;
   dataloggerName = 'Datalogger';
+  sensorLabels: DataloggerSensorLabels = {};
   loading = false;
   error = '';
 
@@ -188,6 +196,8 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
   cursorY = 0;
   cursorLabelTime = '';
   cursorLabelTemp = '';
+  cursorLines: string[] = [];
+  cursorDots: { y: number }[] = [];
   private zoomStartMs = 0;
   private zoomSpanMs = 1;
   private zoomedPoints: DataloggerReadingRow[] = [];
@@ -214,6 +224,12 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
 
   private sub?: Subscription;
   private realtimeChannel: RealtimeChannel | null = null;
+  /** Si el “hasta” es ahora, el eje sigue la hora actual y no se queda en la última muestra. */
+  private followNow = true;
+  private liveTimer: ReturnType<typeof setInterval> | null = null;
+  nowMarkerX: number | null = null;
+  lastReadingLabel = '—';
+  windowEndLabel = '—';
   private readonly onFullscreenChange = (): void => {
     this.zone.run(() => {
       this.isFullscreenUi = isCurrentFullscreen(this.fullscreenRoot?.nativeElement ?? null);
@@ -238,15 +254,21 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       this.loadChartStylePreset();
       this.loadChartPanels();
       if (this.dataloggerId) {
+        this.followNow = true;
         void this.loadAll();
       } else {
         this.error = 'Falta dataloggerId en la URL (ej. ?dataloggerId=…).';
       }
     });
+    this.liveTimer = setInterval(() => void this.refreshLiveEdge(), 45000);
   }
 
   ngOnDestroy(): void {
     this.sub?.unsubscribe();
+    if (this.liveTimer != null) {
+      clearInterval(this.liveTimer);
+      this.liveTimer = null;
+    }
     this.teardownRealtime();
     document.removeEventListener('fullscreenchange', this.onFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', this.onFullscreenChange as EventListener);
@@ -335,6 +357,53 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     this.rebuildChartGeometry();
   }
 
+  private selectedWindowMs(): { t0: number; t1: number } | null {
+    const fromD = this.parseLocalInput(this.filterFrom);
+    const toD = this.parseLocalInput(this.filterTo);
+    if (!fromD || !toD) return null;
+    let t1 = toD.getTime();
+    if (this.followNow) t1 = Math.max(t1, Date.now());
+    if (t1 <= fromD.getTime()) return null;
+    return { t0: fromD.getTime(), t1 };
+  }
+
+  /** Mantiene el borde derecho en la hora actual y trae lecturas nuevas. */
+  private async refreshLiveEdge(): Promise<void> {
+    if (!this.followNow || this.loading || !this.dataloggerId) return;
+    this.filterTo = this.toLocalInput(new Date());
+    const last = this.readings[this.readings.length - 1];
+    if (!last?.created_at) {
+      this.rebuildChartGeometry();
+      return;
+    }
+    const { data, error } = await this.auth.client
+      .from('datalogger_readings')
+      .select(READINGS_SELECT)
+      .eq('datalogger_id', this.dataloggerId)
+      .gt('created_at', last.created_at)
+      .lte('created_at', new Date().toISOString())
+      .order('created_at', { ascending: true })
+      .limit(500);
+    if (error || !data?.length) {
+      this.zone.run(() => this.rebuildChartGeometry());
+      return;
+    }
+    this.zone.run(() => {
+      const known = new Set(this.readings.map((r) => r.id));
+      const extra = (data as DataloggerReadingRow[])
+        .map((row) => this.correctReadingRow(row))
+        .filter((r) => !known.has(r.id));
+      if (extra.length) {
+        this.readings = [...this.readings, ...extra];
+        if (this.readings.length > MAX_FETCH) {
+          this.readings = this.readings.slice(this.readings.length - MAX_FETCH);
+        }
+        this.downsample();
+      }
+      this.rebuildChartGeometry();
+    });
+  }
+
   private initDefaultRange(): void {
     const to = new Date();
     const from = new Date(to.getTime() - 48 * 3600 * 1000);
@@ -380,6 +449,7 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       const metaRow = meta as { name?: string; params?: unknown } | null;
       this.dataloggerName = metaRow?.name?.trim() || 'Datalogger';
       this.dataloggerParams = mergeDataloggerParams(metaRow?.params ?? null);
+      this.sensorLabels = parseDataloggerLabels(metaRow?.params ?? null);
 
       const fromD = this.parseLocalInput(this.filterFrom);
       const toD = this.parseLocalInput(this.filterTo);
@@ -396,7 +466,7 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
         .eq('datalogger_id', this.dataloggerId)
         .gte('created_at', fromIso)
         .lte('created_at', toIso)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false })
         .limit(MAX_FETCH);
 
       if (eRows) {
@@ -410,9 +480,9 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
         this.displayPoints = [];
         return;
       }
-      this.readings = ((rows ?? []) as DataloggerReadingRow[]).map((r) =>
-        this.correctReadingRow(r)
-      );
+      this.readings = ((rows ?? []) as DataloggerReadingRow[])
+        .map((r) => this.correctReadingRow(r))
+        .reverse();
       this.downsample();
       if (this.chartZoomHi <= this.chartZoomLo || this.displayPoints.length < 3) {
         this.chartZoomLo = 0;
@@ -464,7 +534,10 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     const fromD = this.parseLocalInput(this.filterFrom);
     const toD = this.parseLocalInput(this.filterTo);
     const at = new Date(createdAt).getTime();
-    if (fromD && toD && (at < fromD.getTime() || at > toD.getTime())) return;
+    if (fromD && at < fromD.getTime()) return;
+    const endCap = this.followNow ? Date.now() + 120_000 : toD?.getTime() ?? at;
+    if (at > endCap) return;
+    if (this.followNow) this.filterTo = this.toLocalInput(new Date());
 
     if (this.readings.some((r) => r.id === id)) return;
 
@@ -514,11 +587,14 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
   }
 
   applyFilters(): void {
+    const toD = this.parseLocalInput(this.filterTo);
+    this.followNow = !!toD && Math.abs(Date.now() - toD.getTime()) < 3 * 60_000;
     this.resetChartZoom();
     void this.loadAll();
   }
 
   applyPresetRange(hours: 24 | 48 | 168): void {
+    this.followNow = true;
     const to = new Date();
     const from = new Date(to.getTime() - hours * 3600 * 1000);
     this.filterTo = this.toLocalInput(to);
@@ -642,12 +718,22 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
         rows: this.readings as unknown as Record<string, unknown>[],
         columns: [
           { header: 'Fecha', cell: (r) => pdfCellDate(r['created_at']) },
-          { header: 'T1 °C', cell: (r) => pdfCellNum(r['temp1_c'], 2) },
-          { header: 'T2 °C', cell: (r) => pdfCellNum(r['temp2_c'], 2) },
-          { header: 'I1 A', cell: (r) => pdfCellNum(r['current1_a'], 2) },
-          { header: 'P1 W', cell: (r) => pdfCellNum(r['power1_w'], 1) },
-          { header: 'Pr1 bar', cell: (r) => pdfCellNum(r['press1_bar'], 2) },
-          { header: 'Pr2 bar', cell: (r) => pdfCellNum(r['press2_bar'], 2) },
+          ...[1, 2, 3, 4, 5, 6].map((n) => ({
+            header: `${this.tempName(n - 1)} °C`,
+            cell: (r: Record<string, unknown>) => pdfCellNum(r[`temp${n}_c`], 2),
+          })),
+          ...[1, 2, 3].map((n) => ({
+            header: `${this.currentName(n - 1)} A`,
+            cell: (r: Record<string, unknown>) => pdfCellNum(r[`current${n}_a`], 2),
+          })),
+          ...[1, 2, 3].map((n) => ({
+            header: `${this.currentName(n - 1)} W`,
+            cell: (r: Record<string, unknown>) => pdfCellNum(r[`power${n}_w`], 1),
+          })),
+          ...[1, 2].map((n) => ({
+            header: `${this.pressName(n - 1)} bar`,
+            cell: (r: Record<string, unknown>) => pdfCellNum(r[`press${n}_bar`], 2),
+          })),
         ],
         fileSlug: this.dataloggerName || 'datalogger',
         captureEl: this.chartPdfCapture?.nativeElement,
@@ -671,6 +757,7 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       this.pressPaths = ['', ''];
       this.timeLabels = [];
       this.timeRangeLabel = '';
+      this.nowMarkerX = null;
       this.yAxisTicks = [];
       this.yGridLines = [];
       this.xGridLines = [];
@@ -682,9 +769,33 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const t0 = new Date(pts[0].created_at).getTime();
-    const t1 = new Date(pts[pts.length - 1].created_at).getTime();
+    const dataT0 = new Date(pts[0].created_at).getTime();
+    const dataT1 = new Date(pts[pts.length - 1].created_at).getTime();
+    const windowMs = this.selectedWindowMs();
+    const zoomed = chartZoomHostIsActive(this);
+    let t0 = dataT0;
+    let t1 = dataT1;
+    if (!zoomed && windowMs) {
+      t0 = windowMs.t0;
+      t1 = windowMs.t1;
+    }
     const span = Math.max(t1 - t0, 60_000);
+    this.lastReadingLabel = new Date(dataT1).toLocaleString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    this.windowEndLabel = new Date(t1).toLocaleString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const now = Date.now();
+    this.nowMarkerX = now >= t0 && now <= t1
+      ? this.plot.x0 + ((now - t0) / span) * (this.plot.x1 - this.plot.x0)
+      : null;
     this.zoomStartMs = t0;
     this.zoomSpanMs = span;
 
@@ -881,12 +992,39 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     return Math.max(0.6, ratio * 34);
   }
 
+  tempName(index: number): string {
+    return dataloggerChannelName(this.sensorLabels, `t${index + 1}` as DataloggerSensorSlotId);
+  }
+
+  currentName(index: number): string {
+    return dataloggerChannelName(this.sensorLabels, `c${index + 1}` as DataloggerSensorSlotId);
+  }
+
+  pressName(index: number): string {
+    return dataloggerChannelName(this.sensorLabels, `p${index + 1}` as DataloggerSensorSlotId);
+  }
+
   cursorTooltipHeight(): number {
-    return 5.8;
+    const lines = Math.max(this.cursorLines.length, 1);
+    return 2.4 + lines * 1.7 + 1.6;
+  }
+
+  cursorBoxWidth(): number {
+    const longest = this.cursorLines.reduce((n, line) => Math.max(n, line.length), 12);
+    return Math.min(36, Math.max(20, longest * 1.15));
+  }
+
+  cursorBoxX(): number {
+    const w = this.cursorBoxWidth();
+    return this.cursorX > 100 - w - 4 ? this.cursorX - w - 1.4 : this.cursorX + 2.2;
+  }
+
+  cursorLineY(index: number): number {
+    return this.plot.y0 + 3.6 + index * 1.7;
   }
 
   cursorTimeTextY(): number {
-    return this.plot.y0 + 9.5;
+    return this.plot.y0 + 3.6 + Math.max(this.cursorLines.length, 1) * 1.7 + 0.2;
   }
 
   areaCloseSuffix(): string {
@@ -1017,9 +1155,31 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     const tr = this.tempMax - this.tempMin || 1;
     const yAt = (v: number) =>
       this.plot.y1 - ((v - this.tempMin) / tr) * (this.plot.y1 - this.plot.y0);
-    this.cursorY = best.temp1_c != null && Number.isFinite(best.temp1_c) ? yAt(best.temp1_c) : this.plot.y1;
-    this.cursorLabelTemp =
-      best.temp1_c != null && Number.isFinite(best.temp1_c) ? `${best.temp1_c.toFixed(2)} °C (T1)` : '—';
+    const lines: string[] = [];
+    const dots: { y: number }[] = [];
+    for (let i = 0; i < TEMP_FIELDS.length; i++) {
+      if (!this.showTemps[i]) continue;
+      const v = best[TEMP_FIELDS[i]] as number | null | undefined;
+      if (v == null || !Number.isFinite(v)) continue;
+      lines.push(`${this.tempName(i)}  ${v.toFixed(2)} °C`);
+      dots.push({ y: yAt(v) });
+    }
+    for (let i = 0; i < POWER_FIELDS.length; i++) {
+      if (!this.showPowers[i]) continue;
+      const v = best[POWER_FIELDS[i]] as number | null | undefined;
+      if (v == null || !Number.isFinite(v)) continue;
+      lines.push(`${this.currentName(i)}  ${v.toFixed(0)} W`);
+    }
+    for (let i = 0; i < PRESS_FIELDS.length; i++) {
+      if (!this.showPress[i]) continue;
+      const v = best[PRESS_FIELDS[i]] as number | null | undefined;
+      if (v == null || !Number.isFinite(v)) continue;
+      lines.push(`${this.pressName(i)}  ${v.toFixed(2)} bar`);
+    }
+    this.cursorLines = lines.length ? lines : ['Sin dato en este punto'];
+    this.cursorDots = dots;
+    this.cursorY = dots[0]?.y ?? this.plot.y1;
+    this.cursorLabelTemp = this.cursorLines[0];
     this.cursorLabelTime = new Date(best.created_at).toLocaleString('es-AR', {
       day: '2-digit',
       month: '2-digit',

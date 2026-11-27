@@ -25,6 +25,29 @@
   </p>
 
   <fieldset class="notify-panel-fieldset" *ngIf="model as m" [disabled]="!canEdit || loading || saving">
+    <details class="combistato-details" open>
+      <summary class="combistato-details__summary">Nombres de sensores</summary>
+      <p class="combistato-section-intro">
+        El gráfico, la tarjeta y el PDF usan este nombre. Si lo dejás vacío, se muestra T1, C1 o P1.
+      </p>
+      <div class="notify-panel notify-panel__grid combistato-details__grid">
+        <label class="notify-panel__field notify-panel__field--param" *ngFor="let s of sensorSlots">
+          <span class="notify-panel__field-label">
+            <span class="param-code">{{ s.label }}</span>
+            <span class="param-label-text">Nombre en pantalla</span>
+          </span>
+          <input
+            type="text"
+            maxlength="40"
+            autocomplete="off"
+            [ngModel]="labels[s.id] || ''"
+            (ngModelChange)="onLabelChange(s.id, $event)"
+            [name]="'dlg-label-' + s.id"
+            [placeholder]="s.label"
+          />
+        </label>
+      </div>
+    </details>
     <ng-container *ngFor="let sec of sections">
       <details class="combistato-details" [open]="sec.id === 'channels-temp'">
         <summary class="combistato-details__summary">{{ sec.title }}</summary>
