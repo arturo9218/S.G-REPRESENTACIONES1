@@ -300,7 +300,7 @@
                 [ngClass]="d.cls"
                 [attr.cx]="cursorX"
                 [attr.cy]="d.y"
-                r="0.95"
+                [attr.r]="cursorDotR()"
               />
               <rect
                 class="pr5-cursor-box"

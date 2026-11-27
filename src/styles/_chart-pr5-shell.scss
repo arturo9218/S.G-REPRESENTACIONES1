@@ -1119,6 +1119,20 @@ $motor-none: #64748b;
   font-weight: 700;
 }
 
+@media (max-width: 640px) {
+  .pr5-cursor-text {
+    font-size: 3.15px;
+  }
+
+  .pr5-cursor-text--time {
+    font-size: 2.5px;
+  }
+
+  .pr5-cursor-text--temp {
+    font-size: 3.15px;
+  }
+}
+
 .pr5-states {
   flex-shrink: 0;
   margin-top: 0.65rem;

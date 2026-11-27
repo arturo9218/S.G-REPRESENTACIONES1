@@ -205,7 +205,10 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
   private dragStartClientX = 0;
   private dragStartLo = 0;
   private dragStartHi = 1;
-  private touchMode: 'none' | 'pan' | 'pinch' = 'none';
+  private touchMode: 'none' | 'pan' | 'pinch' | 'inspect' = 'none';
+  private touchStartX = 0;
+  private touchStartY = 0;
+  private lastTouchAt = 0;
   private touchStartDist = 0;
   private touchStartSpan = 1;
   private touchStartCenterNorm = 0.5;
@@ -1004,14 +1007,29 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     return dataloggerChannelName(this.sensorLabels, `p${index + 1}` as DataloggerSensorSlotId);
   }
 
+  private cursorOnPhone(): boolean {
+    return typeof window !== 'undefined' && window.innerWidth <= 640;
+  }
+
+  private cursorLineStep(): number {
+    return this.cursorOnPhone() ? 3.4 : 2.15;
+  }
+
+  cursorDotR(): number {
+    return this.cursorOnPhone() ? 1.7 : 0.95;
+  }
+
   cursorTooltipHeight(): number {
     const lines = Math.max(this.cursorLines.length, 1);
-    return 2.6 + lines * 2.15 + 1.8;
+    const step = this.cursorLineStep();
+    return (this.cursorOnPhone() ? 3.2 : 2.6) + lines * step + (this.cursorOnPhone() ? 2.4 : 1.8);
   }
 
   cursorBoxWidth(): number {
     const longest = this.cursorLines.reduce((n, line) => Math.max(n, line.text.length), 12);
-    return Math.min(40, Math.max(22, longest * 1.05));
+    const perChar = this.cursorOnPhone() ? 1.85 : 1.05;
+    const minW = this.cursorOnPhone() ? 28 : 22;
+    return Math.min(this.cursorOnPhone() ? 52 : 40, Math.max(minW, longest * perChar));
   }
 
   cursorBoxX(): number {
@@ -1020,11 +1038,12 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
   }
 
   cursorLineY(index: number): number {
-    return this.plot.y0 + 4 + index * 2.15;
+    return this.plot.y0 + (this.cursorOnPhone() ? 4.6 : 4) + index * this.cursorLineStep();
   }
 
   cursorTimeTextY(): number {
-    return this.plot.y0 + 4 + Math.max(this.cursorLines.length, 1) * 2.15 + 0.35;
+    const lines = Math.max(this.cursorLines.length, 1);
+    return this.plot.y0 + (this.cursorOnPhone() ? 4.6 : 4) + lines * this.cursorLineStep() + 0.35;
   }
 
   trackByIndex(index: number): number {
@@ -1100,6 +1119,7 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
     const chartEl = this.chartStage?.nativeElement;
     if (!chartEl) return;
     const r = chartEl.getBoundingClientRect();
+    this.lastTouchAt = Date.now();
     if (ev.touches.length >= 2) {
       const t0 = ev.touches[0];
       const t1 = ev.touches[1];
@@ -1112,13 +1132,15 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       ev.preventDefault();
       return;
     }
-    if (ev.touches.length === 1 && this.chartZoomIsActive) {
-      this.touchMode = 'pan';
-      this.dragStartClientX = ev.touches[0].clientX;
-      this.dragStartLo = this.chartZoomLo;
-      this.dragStartHi = this.chartZoomHi;
-      ev.preventDefault();
-    }
+    const t = ev.touches[0];
+    this.touchMode = 'inspect';
+    this.touchStartX = t.clientX;
+    this.touchStartY = t.clientY;
+    this.dragStartClientX = t.clientX;
+    this.dragStartLo = this.chartZoomLo;
+    this.dragStartHi = this.chartZoomHi;
+    this.showCursorAt(t.clientX);
+    ev.preventDefault();
   }
 
   onTempTouchMove(ev: TouchEvent): void {
@@ -1139,19 +1161,41 @@ export class DataloggerChartComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (this.touchMode === 'pan' && ev.touches.length === 1) {
-      const dxNorm = (ev.touches[0].clientX - this.dragStartClientX) / r.width;
+    if (ev.touches.length !== 1) return;
+    const t = ev.touches[0];
+    this.lastTouchAt = Date.now();
+    const dx = t.clientX - this.touchStartX;
+    const dy = t.clientY - this.touchStartY;
+    if (this.touchMode === 'inspect' && this.chartZoomIsActive && Math.abs(dx) > 16 && Math.abs(dx) > Math.abs(dy)) {
+      this.touchMode = 'pan';
+    }
+    if (this.touchMode === 'pan') {
+      const dxNorm = (t.clientX - this.dragStartClientX) / r.width;
       chartZoomHostPanFromDrag(this, dxNorm, this.dragStartLo, this.dragStartHi);
       ev.preventDefault();
+      return;
     }
+    this.showCursorAt(t.clientX);
+    ev.preventDefault();
   }
 
   onTempTouchEnd(): void {
     this.touchMode = 'none';
+    this.lastTouchAt = Date.now();
   }
 
   onTempMouseLeave(): void {
+    if (Date.now() - this.lastTouchAt < 1200) return;
     this.cursorActive = false;
+  }
+
+  private showCursorAt(clientX: number): void {
+    const stage = this.chartStage?.nativeElement;
+    if (!stage || !this.zoomedPoints.length) return;
+    const x = chartViewBoxXFromClientX(clientX, stage);
+    if (x == null) return;
+    this.cursorActive = true;
+    this.updateCursorForX(x);
   }
 
   onTempMouseMove(ev: MouseEvent): void {
